@@ -33,3 +33,12 @@ add_executable(test_lexer
 )
 target_include_directories(test_lexer PRIVATE src ${CMAKE_CURRENT_BINARY_DIR}/src tests/unit)
 add_test(NAME test_lexer COMMAND test_lexer)
+
+add_executable(test_parser
+    tests/unit/test_parser.c
+    src/ast.c
+    ${BISON_parser_OUTPUTS}
+    ${FLEX_lexer_OUTPUTS}
+)
+target_include_directories(test_parser PRIVATE src ${CMAKE_CURRENT_BINARY_DIR}/src tests/unit)
+add_test(NAME test_parser COMMAND test_parser)
