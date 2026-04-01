@@ -17,6 +17,7 @@ set(EDGECC_SOURCES
     src/ast.c
     src/semantic.c
     src/ir.c
+    src/codegen.c
     ${BISON_parser_OUTPUTS}
     ${FLEX_lexer_OUTPUTS}
 )
@@ -65,3 +66,15 @@ add_executable(test_ir
 )
 target_include_directories(test_ir PRIVATE src ${CMAKE_CURRENT_BINARY_DIR}/src tests/unit)
 add_test(NAME test_ir COMMAND test_ir)
+
+add_executable(test_codegen
+    tests/unit/test_codegen.c
+    src/ast.c
+    src/semantic.c
+    src/ir.c
+    src/codegen.c
+    ${BISON_parser_OUTPUTS}
+    ${FLEX_lexer_OUTPUTS}
+)
+target_include_directories(test_codegen PRIVATE src ${CMAKE_CURRENT_BINARY_DIR}/src tests/unit)
+add_test(NAME test_codegen COMMAND test_codegen)
