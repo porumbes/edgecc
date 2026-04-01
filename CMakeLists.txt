@@ -8,7 +8,7 @@ find_package(FLEX REQUIRED)
 find_package(BISON REQUIRED)
 
 # Will add Flex/Bison targets in later tasks. For now, just build main.
-add_executable(edgecc src/main.c)
+add_executable(edgecc src/main.c src/ast.c)
 target_include_directories(edgecc PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/src src)
 
 enable_testing()
