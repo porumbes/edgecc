@@ -7,8 +7,29 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 find_package(FLEX REQUIRED)
 find_package(BISON REQUIRED)
 
-# Will add Flex/Bison targets in later tasks. For now, just build main.
-add_executable(edgecc src/main.c src/ast.c)
-target_include_directories(edgecc PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/src src)
+BISON_TARGET(parser src/parser.y ${CMAKE_CURRENT_BINARY_DIR}/src/parser.tab.c
+    DEFINES_FILE ${CMAKE_CURRENT_BINARY_DIR}/src/parser.tab.h)
+FLEX_TARGET(lexer src/lexer.l ${CMAKE_CURRENT_BINARY_DIR}/src/lexer.yy.c)
+ADD_FLEX_BISON_DEPENDENCY(lexer parser)
 
+set(EDGECC_SOURCES
+    src/main.c
+    src/ast.c
+    ${BISON_parser_OUTPUTS}
+    ${FLEX_lexer_OUTPUTS}
+)
+
+add_executable(edgecc ${EDGECC_SOURCES})
+target_include_directories(edgecc PRIVATE src ${CMAKE_CURRENT_BINARY_DIR}/src)
+
+# Tests
 enable_testing()
+
+add_executable(test_lexer
+    tests/unit/test_lexer.c
+    src/ast.c
+    ${BISON_parser_OUTPUTS}
+    ${FLEX_lexer_OUTPUTS}
+)
+target_include_directories(test_lexer PRIVATE src ${CMAKE_CURRENT_BINARY_DIR}/src tests/unit)
+add_test(NAME test_lexer COMMAND test_lexer)
