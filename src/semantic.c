@@ -1,0 +1,337 @@
+#include "semantic.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdarg.h>
+
+/* ---- Error helpers ---- */
+
+static void add_error(SemanticResult *res, const char *fmt, ...) {
+    if (res->error_count >= res->error_capacity) {
+        int new_cap = res->error_capacity == 0 ? 8 : res->error_capacity * 2;
+        res->errors = realloc(res->errors, sizeof(char *) * new_cap);
+        res->error_capacity = new_cap;
+    }
+    va_list args;
+    va_start(args, fmt);
+    /* determine required length */
+    va_list args2;
+    va_copy(args2, args);
+    int len = vsnprintf(NULL, 0, fmt, args2);
+    va_end(args2);
+    char *buf = malloc(len + 1);
+    vsnprintf(buf, len + 1, fmt, args);
+    va_end(args);
+    res->errors[res->error_count++] = buf;
+}
+
+/* ---- Symbol table helpers ---- */
+
+static int find_dim(SymbolTable *st, const char *name) {
+    for (int i = 0; i < st->num_dims; i++) {
+        if (strcmp(st->dims[i].name, name) == 0)
+            return st->dims[i].size;
+    }
+    return -1;
+}
+
+static TensorEntry *find_tensor(SymbolTable *st, const char *name) {
+    for (int i = 0; i < st->num_tensors; i++) {
+        if (strcmp(st->tensors[i].name, name) == 0)
+            return &st->tensors[i];
+    }
+    return NULL;
+}
+
+/* ---- Analysis passes ---- */
+
+static void analyze_dim_decl(SemanticResult *res, AstNode *node) {
+    DimDeclData *d = &node->data.dim_decl;
+    SymbolTable *st = res->symtab;
+
+    /* check for duplicate */
+    if (find_dim(st, d->name) != -1) {
+        add_error(res, "duplicate dim declaration: '%s'", d->name);
+        return;
+    }
+    if (st->num_dims >= MAX_DIMS) {
+        add_error(res, "too many dims (max %d)", MAX_DIMS);
+        return;
+    }
+    st->dims[st->num_dims].name = d->name;
+    st->dims[st->num_dims].size = d->size;
+    st->num_dims++;
+}
+
+static void analyze_tensor_decl(SemanticResult *res, AstNode *node) {
+    TensorDeclData *d = &node->data.tensor_decl;
+    SymbolTable *st = res->symtab;
+
+    /* check for duplicate */
+    if (find_tensor(st, d->name) != NULL) {
+        add_error(res, "duplicate tensor declaration: '%s'", d->name);
+        return;
+    }
+    if (st->num_tensors >= MAX_TENSORS) {
+        add_error(res, "too many tensors (max %d)", MAX_TENSORS);
+        return;
+    }
+    if (d->num_ranks > 8) {
+        add_error(res, "tensor '%s' has too many ranks (max 8)", d->name);
+        return;
+    }
+
+    TensorEntry *te = &st->tensors[st->num_tensors];
+    te->name = d->name;
+    te->ranks = d->ranks;
+    te->num_ranks = d->num_ranks;
+    te->datatype = d->datatype;
+    te->empty_val = d->empty_val;
+
+    int ok = 1;
+    for (int i = 0; i < d->num_ranks; i++) {
+        int sz = find_dim(st, d->ranks[i].dim_name);
+        if (sz == -1) {
+            add_error(res, "tensor '%s' references undeclared dim '%s'",
+                      d->name, d->ranks[i].dim_name);
+            ok = 0;
+            te->dim_sizes[i] = 0;
+        } else {
+            te->dim_sizes[i] = sz;
+        }
+    }
+    (void)ok;
+    st->num_tensors++;
+}
+
+/* Recursively validate that literal data matches expected dims.
+   depth = current nesting depth (0 = outermost)
+   num_ranks = total number of ranks for the tensor
+   dim_sizes = array of sizes for each rank
+   Returns 1 on success, 0 on failure (error already added). */
+static int check_init_shape(SemanticResult *res, LiteralData *data,
+                             int depth, int num_ranks, int *dim_sizes,
+                             const char *tensor_name) {
+    if (depth == num_ranks) {
+        /* expect a scalar here */
+        if (data->is_list) {
+            add_error(res, "init for tensor '%s': too many nesting levels",
+                      tensor_name);
+            return 0;
+        }
+        return 1;
+    }
+
+    /* expect a list of size dim_sizes[depth] */
+    if (!data->is_list) {
+        add_error(res,
+                  "init for tensor '%s': expected list at depth %d, got scalar",
+                  tensor_name, depth);
+        return 0;
+    }
+
+    int expected = dim_sizes[depth];
+    int actual = data->data.list.count;
+    if (actual != expected) {
+        add_error(res,
+                  "init for tensor '%s': at depth %d expected %d elements, got %d",
+                  tensor_name, depth, expected, actual);
+        return 0;
+    }
+
+    int ok = 1;
+    for (int i = 0; i < actual; i++) {
+        if (!check_init_shape(res, data->data.list.items[i],
+                              depth + 1, num_ranks, dim_sizes, tensor_name)) {
+            ok = 0;
+        }
+    }
+    return ok;
+}
+
+static void analyze_init(SemanticResult *res, AstNode *node) {
+    InitData *d = &node->data.init;
+    SymbolTable *st = res->symtab;
+
+    TensorEntry *te = find_tensor(st, d->tensor_name);
+    if (te == NULL) {
+        add_error(res, "init references undeclared tensor '%s'", d->tensor_name);
+        return;
+    }
+
+    check_init_shape(res, d->data, 0, te->num_ranks, te->dim_sizes,
+                     d->tensor_name);
+}
+
+/* ---- Index tracking for einsum ---- */
+
+typedef struct {
+    char *name;
+    int size; /* resolved size, -1 = unresolved, -2 = conflict */
+} IndexInfo;
+
+static int find_index(IndexInfo *arr, int count, const char *name) {
+    for (int i = 0; i < count; i++) {
+        if (strcmp(arr[i].name, name) == 0) return i;
+    }
+    return -1;
+}
+
+static void analyze_einsum(SemanticResult *res, AstNode *node) {
+    EinsumData *d = &node->data.einsum;
+    SymbolTable *st = res->symtab;
+
+    /* validate all tensors exist */
+    TensorEntry *out_te = find_tensor(st, d->output.tensor_name);
+    TensorEntry *in1_te = find_tensor(st, d->input1.tensor_name);
+    TensorEntry *in2_te = find_tensor(st, d->input2.tensor_name);
+
+    if (out_te == NULL)
+        add_error(res, "einsum: undeclared output tensor '%s'",
+                  d->output.tensor_name);
+    if (in1_te == NULL)
+        add_error(res, "einsum: undeclared input tensor '%s'",
+                  d->input1.tensor_name);
+    if (in2_te == NULL)
+        add_error(res, "einsum: undeclared input tensor '%s'",
+                  d->input2.tensor_name);
+
+    if (out_te == NULL || in1_te == NULL || in2_te == NULL) return;
+
+    /* validate rank counts match num_vars */
+    if (d->output.num_vars != out_te->num_ranks) {
+        add_error(res,
+                  "einsum: output tensor '%s' has %d ranks but %d index vars given",
+                  d->output.tensor_name, out_te->num_ranks, d->output.num_vars);
+    }
+    if (d->input1.num_vars != in1_te->num_ranks) {
+        add_error(res,
+                  "einsum: input tensor '%s' has %d ranks but %d index vars given",
+                  d->input1.tensor_name, in1_te->num_ranks, d->input1.num_vars);
+    }
+    if (d->input2.num_vars != in2_te->num_ranks) {
+        add_error(res,
+                  "einsum: input tensor '%s' has %d ranks but %d index vars given",
+                  d->input2.tensor_name, in2_te->num_ranks, d->input2.num_vars);
+    }
+
+    /* collect all indices and resolve sizes */
+    IndexInfo indices[MAX_INDICES * 3];
+    int num_indices = 0;
+
+    /* helper: register an index with a size */
+    /* inlined as a local macro for clarity */
+#define REGISTER_INDEX(varname, sz) do {                                    \
+    int _idx = find_index(indices, num_indices, (varname));                 \
+    if (_idx == -1) {                                                       \
+        if (num_indices >= (int)(sizeof(indices)/sizeof(indices[0]))) {     \
+            add_error(res, "einsum: too many index variables");             \
+            break;                                                           \
+        }                                                                   \
+        indices[num_indices].name = (varname);                              \
+        indices[num_indices].size = (sz);                                   \
+        num_indices++;                                                       \
+    } else {                                                                \
+        int existing = indices[_idx].size;                                  \
+        if (existing != -2 && existing != (sz)) {                           \
+            add_error(res,                                                   \
+                      "einsum: index '%s' bound to size %d and size %d",    \
+                      (varname), existing, (sz));                            \
+            indices[_idx].size = -2; /* mark conflict */                    \
+        }                                                                   \
+    }                                                                       \
+} while(0)
+
+    for (int i = 0; i < d->output.num_vars && i < out_te->num_ranks; i++)
+        REGISTER_INDEX(d->output.rank_vars[i], out_te->dim_sizes[i]);
+    for (int i = 0; i < d->input1.num_vars && i < in1_te->num_ranks; i++)
+        REGISTER_INDEX(d->input1.rank_vars[i], in1_te->dim_sizes[i]);
+    for (int i = 0; i < d->input2.num_vars && i < in2_te->num_ranks; i++)
+        REGISTER_INDEX(d->input2.rank_vars[i], in2_te->dim_sizes[i]);
+
+#undef REGISTER_INDEX
+
+    /* classify indices into free (in output) or reduction (not in output) */
+    st->num_free_indices = 0;
+    st->num_reduction_indices = 0;
+
+    for (int i = 0; i < num_indices; i++) {
+        char *iname = indices[i].name;
+        int isize = indices[i].size < 0 ? 0 : indices[i].size;
+
+        /* check if in output */
+        int in_output = 0;
+        for (int j = 0; j < d->output.num_vars; j++) {
+            if (strcmp(d->output.rank_vars[j], iname) == 0) {
+                in_output = 1;
+                break;
+            }
+        }
+
+        if (in_output) {
+            if (st->num_free_indices < MAX_INDICES) {
+                st->free_indices[st->num_free_indices].name = iname;
+                st->free_indices[st->num_free_indices].size = isize;
+                st->free_indices[st->num_free_indices].is_free = 1;
+                st->num_free_indices++;
+            }
+        } else {
+            if (st->num_reduction_indices < MAX_INDICES) {
+                st->reduction_indices[st->num_reduction_indices].name = iname;
+                st->reduction_indices[st->num_reduction_indices].size = isize;
+                st->reduction_indices[st->num_reduction_indices].is_free = 0;
+                st->num_reduction_indices++;
+            }
+        }
+    }
+}
+
+/* ---- Public API ---- */
+
+SemanticResult semantic_analyze(AstNode *program) {
+    SemanticResult res;
+    memset(&res, 0, sizeof(res));
+
+    res.symtab = calloc(1, sizeof(SymbolTable));
+
+    if (program == NULL || program->type != NODE_PROGRAM) {
+        add_error(&res, "invalid program node");
+        return res;
+    }
+
+    ProgramData *pd = &program->data.program;
+    for (int i = 0; i < pd->count; i++) {
+        AstNode *stmt = pd->statements[i];
+        switch (stmt->type) {
+            case NODE_DIM_DECL:
+                analyze_dim_decl(&res, stmt);
+                break;
+            case NODE_TENSOR_DECL:
+                analyze_tensor_decl(&res, stmt);
+                break;
+            case NODE_INIT:
+                analyze_init(&res, stmt);
+                break;
+            case NODE_EINSUM:
+                analyze_einsum(&res, stmt);
+                break;
+            default:
+                add_error(&res, "unknown statement type %d", stmt->type);
+                break;
+        }
+    }
+
+    return res;
+}
+
+void semantic_result_free(SemanticResult *res) {
+    for (int i = 0; i < res->error_count; i++) {
+        free(res->errors[i]);
+    }
+    free(res->errors);
+    free(res->symtab);
+    res->errors = NULL;
+    res->symtab = NULL;
+    res->error_count = 0;
+    res->error_capacity = 0;
+}

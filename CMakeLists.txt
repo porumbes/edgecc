@@ -15,6 +15,7 @@ ADD_FLEX_BISON_DEPENDENCY(lexer parser)
 set(EDGECC_SOURCES
     src/main.c
     src/ast.c
+    src/semantic.c
     ${BISON_parser_OUTPUTS}
     ${FLEX_lexer_OUTPUTS}
 )
@@ -42,3 +43,13 @@ add_executable(test_parser
 )
 target_include_directories(test_parser PRIVATE src ${CMAKE_CURRENT_BINARY_DIR}/src tests/unit)
 add_test(NAME test_parser COMMAND test_parser)
+
+add_executable(test_semantic
+    tests/unit/test_semantic.c
+    src/ast.c
+    src/semantic.c
+    ${BISON_parser_OUTPUTS}
+    ${FLEX_lexer_OUTPUTS}
+)
+target_include_directories(test_semantic PRIVATE src ${CMAKE_CURRENT_BINARY_DIR}/src tests/unit)
+add_test(NAME test_semantic COMMAND test_semantic)
