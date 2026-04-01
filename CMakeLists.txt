@@ -78,3 +78,17 @@ add_executable(test_codegen
 )
 target_include_directories(test_codegen PRIVATE src ${CMAKE_CURRENT_BINARY_DIR}/src tests/unit)
 add_test(NAME test_codegen COMMAND test_codegen)
+
+add_test(
+    NAME e2e_tests
+    COMMAND ${CMAKE_COMMAND} -E env python3
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/run_e2e.py
+        $<TARGET_FILE:edgecc>
+)
+
+add_test(
+    NAME negative_tests
+    COMMAND ${CMAKE_COMMAND} -E env python3
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/negative/run_negative.py
+        $<TARGET_FILE:edgecc>
+)

@@ -175,6 +175,7 @@ datatype:
 literal_value:
     TOK_INT_LIT   { $$ = (double)$1; }
     | TOK_FLOAT_LIT { $$ = $1; }
+    | TOK_BOOL_LIT  { $$ = (double)$1; }
     ;
 
 init_stmt:
