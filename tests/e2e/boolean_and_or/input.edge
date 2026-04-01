@@ -1,0 +1,13 @@
+// Boolean semiring: map=and, reduce=or
+dim M = 2;
+dim K = 3;
+dim N = 2;
+
+tensor Z[R=M, C=N] : boolean, empty = false;
+tensor A[R=K, C=M] : boolean, empty = false;
+tensor B[R=K, C=N] : boolean, empty = false;
+
+init A = [[true, false], [true, true], [false, true]];
+init B = [[true, false], [false, true], [true, true]];
+
+Z[m,n] = A[k,m] . B[k,n] :: map(and) reduce(or);

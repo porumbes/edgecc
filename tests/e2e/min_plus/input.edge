@@ -1,0 +1,13 @@
+// Min-plus semiring (tropical): map=add, reduce=min
+dim M = 3;
+dim K = 3;
+dim N = 3;
+
+tensor Z[R=M, C=N] : float, empty = 999.0;
+tensor A[R=K, C=M] : float, empty = 999.0;
+tensor B[R=K, C=N] : float, empty = 999.0;
+
+init A = [[0, 1, 3], [1, 0, 1], [3, 1, 0]];
+init B = [[0, 1, 3], [1, 0, 1], [3, 1, 0]];
+
+Z[m,n] = A[k,m] . B[k,n] :: map(add) reduce(min);

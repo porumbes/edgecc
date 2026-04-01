@@ -1,0 +1,10 @@
+dim M = 2;
+dim K = 3;
+dim N = 4;
+dim P = 5;
+
+tensor Z[R=M, C=N] : float, empty = 0.0;
+tensor A[R=K, C=M] : float, empty = 0.0;
+tensor B[R=K, C=P] : float, empty = 0.0;
+
+Z[m,n] = A[k,m] . B[k,n] :: map(mul) reduce(add);
