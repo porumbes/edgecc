@@ -7,6 +7,9 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 find_package(FLEX REQUIRED)
 find_package(BISON REQUIRED)
 
+# Ensure build/src/ exists for Bison/Flex output files
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/src)
+
 BISON_TARGET(parser src/parser.y ${CMAKE_CURRENT_BINARY_DIR}/src/parser.tab.c
     DEFINES_FILE ${CMAKE_CURRENT_BINARY_DIR}/src/parser.tab.h)
 FLEX_TARGET(lexer src/lexer.l ${CMAKE_CURRENT_BINARY_DIR}/src/lexer.yy.c)
