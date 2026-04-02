@@ -18,10 +18,13 @@ int main(int argc, char *argv[]) {
 
     const char *input_file = argv[1];
     const char *output_file = "output.py";
+    int dump_ir = 0;
 
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
             output_file = argv[++i];
+        } else if (strcmp(argv[i], "--dump-ir") == 0) {
+            dump_ir = 1;
         }
     }
 
@@ -55,6 +58,11 @@ int main(int argc, char *argv[]) {
     }
 
     IRProgram *ir = ir_lower(parse_result, sem.symtab);
+
+    if (dump_ir) {
+        ir_dump(ir, stdout);
+    }
+
     char *code = codegen_python(ir);
 
     FILE *out = fopen(output_file, "w");

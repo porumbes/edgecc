@@ -1,6 +1,7 @@
 #ifndef IR_H
 #define IR_H
 
+#include <stdio.h>
 #include "ast.h"
 #include "semantic.h"
 
@@ -87,6 +88,7 @@ typedef struct {
 } IRProgram;
 
 IRProgram *ir_lower(AstNode *program, SymbolTable *symtab);
+void ir_dump(IRProgram *ir, FILE *out);
 void ir_free(IRProgram *ir);
 
 #endif /* IR_H */

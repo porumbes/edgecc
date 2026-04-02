@@ -221,3 +221,63 @@ void ir_free(IRProgram *ir) {
     free(ir->instrs);
     free(ir);
 }
+
+static void dump_coords(FILE *out, char **coords, int n) {
+    fprintf(out, "[");
+    for (int i = 0; i < n; i++) {
+        if (i > 0) fprintf(out, ", ");
+        fprintf(out, "%s", coords[i]);
+    }
+    fprintf(out, "]");
+}
+
+void ir_dump(IRProgram *ir, FILE *out) {
+    for (int i = 0; i < ir->count; i++) {
+        IRInstr *instr = &ir->instrs[i];
+        switch (instr->type) {
+            case IR_DIM_DEF:
+                fprintf(out, "DIM_DEF(%s, %d)\n",
+                        instr->data.dim_def.name, instr->data.dim_def.size);
+                break;
+            case IR_TENSOR_ALLOC:
+                fprintf(out, "TENSOR_ALLOC(%s, dims=[", instr->data.tensor_alloc.name);
+                for (int j = 0; j < instr->data.tensor_alloc.ndims; j++) {
+                    if (j > 0) fprintf(out, ",");
+                    fprintf(out, "%d", instr->data.tensor_alloc.dim_sizes[j]);
+                }
+                fprintf(out, "], empty=%g)\n", instr->data.tensor_alloc.empty_val);
+                break;
+            case IR_TENSOR_INIT:
+                fprintf(out, "TENSOR_INIT(%s, ...)\n", instr->data.tensor_init.name);
+                break;
+            case IR_LOOP_BEGIN:
+                fprintf(out, "LOOP_BEGIN(%s, %d)\n",
+                        instr->data.loop_begin.index_var, instr->data.loop_begin.range);
+                break;
+            case IR_LOOP_END:
+                fprintf(out, "LOOP_END\n");
+                break;
+            case IR_LOAD:
+                fprintf(out, "LOAD(r%d, %s, ", instr->data.load.reg,
+                        instr->data.load.tensor_name);
+                dump_coords(out, instr->data.load.coords, instr->data.load.ncoords);
+                fprintf(out, ")\n");
+                break;
+            case IR_MAP:
+                fprintf(out, "MAP(r%d, %s, r%d, r%d)\n",
+                        instr->data.map.dst_reg, operator_to_str(instr->data.map.op),
+                        instr->data.map.src_reg1, instr->data.map.src_reg2);
+                break;
+            case IR_REDUCE:
+                fprintf(out, "REDUCE(r%d, %s, r%d, r%d)\n",
+                        instr->data.reduce.dst_reg, operator_to_str(instr->data.reduce.op),
+                        instr->data.reduce.src_reg, instr->data.reduce.acc_reg);
+                break;
+            case IR_STORE:
+                fprintf(out, "STORE(%s, ", instr->data.store.tensor_name);
+                dump_coords(out, instr->data.store.coords, instr->data.store.ncoords);
+                fprintf(out, ", r%d)\n", instr->data.store.src_reg);
+                break;
+        }
+    }
+}
