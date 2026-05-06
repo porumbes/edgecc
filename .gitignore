@@ -3,3 +3,4 @@ build/
 *.pyc
 __pycache__/
 output.py
+examples/*.py

@@ -1,0 +1,19 @@
+// reduced outer product 
+// is equivalent to the product of the sums of the two vectors
+//  -- think about this for tranformations later: O(N+M) vs O(NM)
+dim K = 3;
+dim M = 4;
+dim O = 1;
+
+tensor A[R=K] : float, empty = 0.0;
+tensor B[R=M] : float, empty = 0.0;
+
+// SDP, figure out scalar!
+tensor Z[D=O] : float, empty = 0.0;
+
+init A = [1, 2, 3];
+init B = [1, 2, 3, 4];
+init Z = [0];
+
+
+Z[n] = A[k] . B[m] :: map(mul) reduce(add);
