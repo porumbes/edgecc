@@ -82,7 +82,9 @@ def run_test(test_dir, edgecc_bin):
         inputs = dict(cfg["inputs"])
         feedback_to = cfg["feedback"]["to"]
         feedback_combine = cfg["feedback"].get("combine", "replace")
-        watched = cfg["termination"]["on"]
+        # The watch tensor field is named "watch" rather than "on" because
+        # YAML 1.1 (PyYAML's default) parses bare `on` as boolean True.
+        watched = cfg["termination"]["watch"]
         max_iter = int(cfg["max_iterations"])
 
         stabilized = False
