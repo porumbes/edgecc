@@ -1,0 +1,13 @@
+// take_left_only: emits only when A is non-empty AND B is empty.
+// With A=[1,2,3] and B=[10,0,30] only n=1 satisfies the predicate.
+// add(A[n], empty_B) at n=1 gives 2 + 0 = 2.
+dim N = 3;
+
+tensor Z[R=N] : float, empty = 0.0;
+tensor A[R=N] : float, empty = 0.0;
+tensor B[R=N] : float, empty = 0.0;
+
+init A = [1.0, 2.0, 3.0];
+init B = [10.0, 0.0, 30.0];
+
+Z[n] = A[n] . B[n] :: map(add, take_left_only) reduce(add);

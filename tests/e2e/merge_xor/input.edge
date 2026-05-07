@@ -1,0 +1,15 @@
+// xor: emits when exactly one operand is non-empty.
+// A=[1,0,3], B=[10,20,0]:
+//   n=0: both non-empty → no emit
+//   n=1: A empty, B non-empty → add(0, 20) = 20
+//   n=2: A non-empty, B empty → add(3, 0) = 3
+dim N = 3;
+
+tensor Z[R=N] : float, empty = 0.0;
+tensor A[R=N] : float, empty = 0.0;
+tensor B[R=N] : float, empty = 0.0;
+
+init A = [1.0, 0.0, 3.0];
+init B = [10.0, 20.0, 0.0];
+
+Z[n] = A[n] . B[n] :: map(add, xor) reduce(add);

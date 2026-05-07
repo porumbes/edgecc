@@ -1,0 +1,15 @@
+// take_right: emits whenever B is non-empty (regardless of A).
+// A=[1,0,3], B=[10,20,0]:
+//   n=0: B non-empty → add(1, 10) = 11
+//   n=1: B non-empty, A empty → add(empty_A=0, 20) = 20
+//   n=2: B empty → no emit, Z[2] = 0
+dim N = 3;
+
+tensor Z[R=N] : float, empty = 0.0;
+tensor A[R=N] : float, empty = 0.0;
+tensor B[R=N] : float, empty = 0.0;
+
+init A = [1.0, 0.0, 3.0];
+init B = [10.0, 20.0, 0.0];
+
+Z[n] = A[n] . B[n] :: map(add, take_right) reduce(add);

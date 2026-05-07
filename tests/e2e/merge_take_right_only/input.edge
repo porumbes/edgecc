@@ -1,0 +1,12 @@
+// take_right_only: emits only when B is non-empty AND A is empty.
+// A=[1,0,3], B=[10,20,0]: only n=1 matches → add(0, 20) = 20.
+dim N = 3;
+
+tensor Z[R=N] : float, empty = 0.0;
+tensor A[R=N] : float, empty = 0.0;
+tensor B[R=N] : float, empty = 0.0;
+
+init A = [1.0, 0.0, 3.0];
+init B = [10.0, 20.0, 0.0];
+
+Z[n] = A[n] . B[n] :: map(add, take_right_only) reduce(add);
