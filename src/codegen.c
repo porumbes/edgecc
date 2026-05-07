@@ -1,4 +1,5 @@
 #include "codegen.h"
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -66,7 +67,9 @@ static const char *find_dim_name(IRProgram *ir, int pos, int range) {
     return (count == 1) ? found : NULL;
 }
 
-/* Forward declaration so emit_literal can format float scalars (incl. inf). */
+/* Emit literal data recursively as a Python expression.
+   Forward declaration of format_double_literal lives below near emit_alloc;
+   emit_literal sees it via the forward decl in that block. */
 static char *format_double_literal(double v);
 
 /* Emit literal data recursively as a Python expression */
@@ -107,8 +110,8 @@ static void emit_tensor_access(CodeBuf *cb, const char *name, char **coords, int
     }
 }
 
-/* Forward declarations for helpers used in emit_alloc and codegen_python */
-static char *format_double_literal(double v);
+/* Forward declaration: emit_general_skeleton is defined below codegen_python.
+   format_double_literal is forward-declared earlier (above emit_literal). */
 static void emit_general_skeleton(CodeBuf *cb,
                                    IRInstr *load1, IRInstr *load2,
                                    IRInstr *map_i, IRInstr *red_i,
