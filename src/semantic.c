@@ -198,6 +198,21 @@ static void analyze_einsum(SemanticResult *res, AstNode *node) {
         add_error(res, "einsum: undeclared input tensor '%s'",
                   d->input2.tensor_name);
 
+    /* warn about nopass (degenerate operator that always produces empty output).
+       Emitted before the undeclared-tensor early return because the warning has no
+       dependency on tensor resolution — it inspects only the merge fields on the
+       AST. */
+    if (d->map_merge_op == MERGE_NOPASS) {
+        fprintf(stderr,
+            "warning: 'nopass' merge on map always produces empty output; "
+            "the action has no effect\n");
+    }
+    if (d->reduce_merge_op == MERGE_NOPASS) {
+        fprintf(stderr,
+            "warning: 'nopass' merge on reduce always produces empty output; "
+            "the action has no effect\n");
+    }
+
     if (out_te == NULL || in1_te == NULL || in2_te == NULL) return;
 
     /* validate rank counts match num_vars */
@@ -287,17 +302,6 @@ static void analyze_einsum(SemanticResult *res, AstNode *node) {
         }
     }
 
-    /* warn about nopass (degenerate operator that always produces empty output) */
-    if (d->map_merge_op == MERGE_NOPASS) {
-        fprintf(stderr,
-            "warning: 'nopass' merge on map always produces empty output; "
-            "the action has no effect\n");
-    }
-    if (d->reduce_merge_op == MERGE_NOPASS) {
-        fprintf(stderr,
-            "warning: 'nopass' merge on reduce always produces empty output; "
-            "the action has no effect\n");
-    }
 }
 
 /* ---- Public API ---- */
