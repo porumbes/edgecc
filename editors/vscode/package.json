@@ -29,8 +29,10 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "package": "vsce package",
-    "test": "node ./out/test/runTest.js",
     "test:grammar": "vscode-tmgrammar-test \"test/grammar/**/*.test.edge\"",
+    "test:unit": "mocha out/test/completions.test.js",
+    "test:integration": "node ./out/test/runTest.js",
+    "test": "npm run test:grammar && npm run test:unit && npm run test:integration",
     "pretest": "npm run compile"
   },
   "devDependencies": {

@@ -1,0 +1,23 @@
+// SYNTAX TEST "source.edge" "all 9 merge operators recognized as merge scope"
+// Each line uses a standalone map(...) or reduce(...) so columns stay small
+// and the merge keyword position is easy to verify.
+map(add, passthrough)
+//       ^^^^^^^^^^^ support.function.merge.edge
+map(add, nopass)
+//       ^^^^^^ support.function.merge.edge
+map(add, intersect)
+//       ^^^^^^^^^ support.function.merge.edge
+map(add, take_left)
+//       ^^^^^^^^^ support.function.merge.edge
+map(add, take_left_only)
+//       ^^^^^^^^^^^^^^ support.function.merge.edge
+map(add, take_right)
+//       ^^^^^^^^^^ support.function.merge.edge
+map(add, take_right_only)
+//       ^^^^^^^^^^^^^^^ support.function.merge.edge
+map(add, xor)
+//       ^^^ support.function.merge.edge
+map(add, union)
+//       ^^^^^ support.function.merge.edge
+reduce(add, passthrough)
+//          ^^^^^^^^^^^ support.function.merge.edge
