@@ -95,3 +95,11 @@ add_test(
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/negative/run_negative.py
         $<TARGET_FILE:edgecc>
 )
+
+add_test(
+    NAME e2e_iterative
+    COMMAND ${CMAKE_COMMAND} -E env python3
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/iterative/run_iterative.py
+        --build-dir ${CMAKE_CURRENT_BINARY_DIR}
+        --tests-dir ${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/iterative
+)
