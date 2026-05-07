@@ -103,7 +103,7 @@ static void litlist_add(LitList *ll, LiteralData *lit) {
 %type <ptr> rank_pair_list ident_list nested_literal lit_list tensor_ref
 %type <datatype> datatype
 %type <float_val> literal_value
-%type <mergeop> map_merge_arg reduce_merge_arg
+%type <mergeop> merge_arg
 
 %%
 
@@ -227,8 +227,8 @@ lit_list:
 
 einsum_stmt:
     tensor_ref '=' tensor_ref '.' tensor_ref TOK_DOUBLE_COLON
-        TOK_MAP '(' TOK_IDENT map_merge_arg ')'
-        TOK_REDUCE '(' TOK_IDENT reduce_merge_arg ')' ';'
+        TOK_MAP '(' TOK_IDENT merge_arg ')'
+        TOK_REDUCE '(' TOK_IDENT merge_arg ')' ';'
     {
         TensorRef *out = (TensorRef *)$1;
         TensorRef *in1 = (TensorRef *)$3;
@@ -248,27 +248,10 @@ einsum_stmt:
     }
     ;
 
-map_merge_arg:
-    /* empty */                { $$ = MERGE_PASSTHROUGH; }
-    | ',' TOK_IDENT
-    {
-        MergeOp m = merge_op_from_str($2);
-        if ((int)m == -1) {
-            char buf[256];
-            snprintf(buf, sizeof(buf),
-                     "unknown merge operator '%s' (expected one of: "
-                     "passthrough, nopass, intersect, take_left, "
-                     "take_left_only, take_right, take_right_only, xor, union)",
-                     $2);
-            yyerror(buf);
-            YYERROR;
-        }
-        free($2);
-        $$ = m;
-    }
-    ;
-
-reduce_merge_arg:
+/* Optional merge-operator arg shared by map(...) and reduce(...).
+   Empty production yields MERGE_PASSTHROUGH; explicit form is ', IDENT'
+   where IDENT must resolve to one of the 9 known merge keywords. */
+merge_arg:
     /* empty */                { $$ = MERGE_PASSTHROUGH; }
     | ',' TOK_IDENT
     {
