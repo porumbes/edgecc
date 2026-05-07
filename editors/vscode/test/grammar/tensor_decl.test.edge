@@ -1,0 +1,16 @@
+// SYNTAX TEST "source.edge" "tensor declaration"
+tensor Z[R=M] : float, empty = 0.0;
+// <- storage.type.declaration.edge
+//     ^ variable.other.edge
+//      ^ punctuation.bracket.edge
+//       ^ variable.other.edge
+//        ^ keyword.operator.assignment.edge
+//         ^ variable.other.edge
+//          ^ punctuation.bracket.edge
+//            ^ punctuation.colon.edge
+//              ^ storage.type.edge
+//                   ^ punctuation.separator.edge
+//                     ^ storage.type.declaration.edge
+//                           ^ keyword.operator.assignment.edge
+//                             ^ constant.numeric.float.edge
+//                                ^ punctuation.separator.edge
