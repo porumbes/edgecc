@@ -115,6 +115,18 @@ Note: the field is `watch:` (not `on:`) because YAML 1.1 (PyYAML's default) pars
 
 Iterative tests are wired into ctest as the `e2e_iterative` target. Missing PyYAML causes only iterative tests to be skipped; everything else runs.
 
+## VS Code extension
+
+Lives in `editors/vscode/`. Provides syntax highlighting and static-list autocompletion for `.edge` files.
+
+Build: `cd editors/vscode && npm install && npm run package`
+Install: `code --install-extension edgecc-0.1.0.vsix`
+Test: `cd editors/vscode && npm test` (full suite) or `npm run test:grammar` (grammar only, fast)
+Develop: open `editors/vscode/` in VS Code and press F5 (Extension Development Host).
+Requires Node.js 18+.
+
+Coverage is Tier 1 only — static dropdowns for compute / merge / type / empty-value slots; no parsing, no diagnostics, no go-to-definition. Tier 2 features (context-aware completions) and Neovim port are deferred to future work.
+
 ## v2 Scope Limitations
 
 Not yet supported: multi-operation expressions with compute labels, generational/iterative ranks expressed in EDGE source (use the iterative test harness or a Python driver instead), anonymous tensors / parenthesized sub-expressions, unary functions, the 7 (No,No)→Yes merge operators (NOR, equivalence, NAND, ¬→, ¬←, ⇐, ⇒), file-based init, sparse tensor storage, optimizations of any kind, user-defined compute operators.
