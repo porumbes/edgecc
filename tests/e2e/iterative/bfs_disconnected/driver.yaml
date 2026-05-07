@@ -1,0 +1,17 @@
+inputs:
+  G: [[0.0, 1.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 0.0, 0.0]]
+  F: [0.0, .inf, .inf, .inf, .inf]
+
+feedback:
+  to: F
+  combine: min
+
+termination:
+  type: stable
+  watch: F
+
+max_iterations: 10
+
+expected:
+  final:
+    F: [0.0, 1.0, 1.0, .inf, .inf]

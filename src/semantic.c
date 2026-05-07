@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <math.h>
+#include <limits.h>
 
 /* ---- Error helpers ---- */
 
@@ -35,7 +37,7 @@ static int find_dim(SymbolTable *st, const char *name) {
     return -1;
 }
 
-static TensorEntry *find_tensor(SymbolTable *st, const char *name) {
+TensorEntry *symtab_find_tensor(SymbolTable *st, const char *name) {
     for (int i = 0; i < st->num_tensors; i++) {
         if (strcmp(st->tensors[i].name, name) == 0)
             return &st->tensors[i];
@@ -68,7 +70,7 @@ static void analyze_tensor_decl(SemanticResult *res, AstNode *node) {
     SymbolTable *st = res->symtab;
 
     /* check for duplicate */
-    if (find_tensor(st, d->name) != NULL) {
+    if (symtab_find_tensor(st, d->name) != NULL) {
         add_error(res, "duplicate tensor declaration: '%s'", d->name);
         return;
     }
@@ -153,7 +155,7 @@ static void analyze_init(SemanticResult *res, AstNode *node) {
     InitData *d = &node->data.init;
     SymbolTable *st = res->symtab;
 
-    TensorEntry *te = find_tensor(st, d->tensor_name);
+    TensorEntry *te = symtab_find_tensor(st, d->tensor_name);
     if (te == NULL) {
         add_error(res, "init references undeclared tensor '%s'", d->tensor_name);
         return;
@@ -182,9 +184,9 @@ static void analyze_einsum(SemanticResult *res, AstNode *node) {
     SymbolTable *st = res->symtab;
 
     /* validate all tensors exist */
-    TensorEntry *out_te = find_tensor(st, d->output.tensor_name);
-    TensorEntry *in1_te = find_tensor(st, d->input1.tensor_name);
-    TensorEntry *in2_te = find_tensor(st, d->input2.tensor_name);
+    TensorEntry *out_te = symtab_find_tensor(st, d->output.tensor_name);
+    TensorEntry *in1_te = symtab_find_tensor(st, d->input1.tensor_name);
+    TensorEntry *in2_te = symtab_find_tensor(st, d->input2.tensor_name);
 
     if (out_te == NULL)
         add_error(res, "einsum: undeclared output tensor '%s'",
@@ -195,6 +197,21 @@ static void analyze_einsum(SemanticResult *res, AstNode *node) {
     if (in2_te == NULL)
         add_error(res, "einsum: undeclared input tensor '%s'",
                   d->input2.tensor_name);
+
+    /* warn about nopass (degenerate operator that always produces empty output).
+       Emitted before the undeclared-tensor early return because the warning has no
+       dependency on tensor resolution — it inspects only the merge fields on the
+       AST. */
+    if (d->map_merge_op == MERGE_NOPASS) {
+        fprintf(stderr,
+            "warning: 'nopass' merge on map always produces empty output; "
+            "the action has no effect\n");
+    }
+    if (d->reduce_merge_op == MERGE_NOPASS) {
+        fprintf(stderr,
+            "warning: 'nopass' merge on reduce always produces empty output; "
+            "the action has no effect\n");
+    }
 
     if (out_te == NULL || in1_te == NULL || in2_te == NULL) return;
 
@@ -284,6 +301,7 @@ static void analyze_einsum(SemanticResult *res, AstNode *node) {
             }
         }
     }
+
 }
 
 /* ---- Public API ---- */
@@ -334,4 +352,22 @@ void semantic_result_free(SemanticResult *res) {
     res->symtab = NULL;
     res->error_count = 0;
     res->error_capacity = 0;
+}
+
+double compute_op_identity(OperatorType op, DataType dt) {
+    switch (op) {
+        case OP_ADD: case OP_SUB:
+            return 0.0;
+        case OP_MUL:
+            return 1.0;
+        case OP_MIN:
+            return (dt == TYPE_INTEGER) ? (double)INT_MAX : INFINITY;
+        case OP_MAX:
+            return (dt == TYPE_INTEGER) ? (double)INT_MIN : -INFINITY;
+        case OP_AND:
+            return 1.0;     /* true */
+        case OP_OR:
+            return 0.0;     /* false */
+    }
+    return 0.0;
 }

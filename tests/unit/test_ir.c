@@ -94,8 +94,66 @@ TEST(test_ir_loop_order) {
     ast_free(ast);
 }
 
+TEST(test_ir_carries_merge_and_identity) {
+    AstNode *ast = parse(
+        "dim S = 3; dim D = 3;\n"
+        "tensor F1[R=D] : float, empty = inf;\n"
+        "tensor G[R=S, C=D] : float, empty = 0.0;\n"
+        "tensor F[R=S]  : float, empty = inf;\n"
+        "F1[d] = G[s,d] . F[s] :: map(add, intersect) reduce(min, union);\n"
+    );
+    SemanticResult sem = semantic_analyze(ast);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    int found_map = 0, found_red = 0;
+    for (int i = 0; i < ir->count; i++) {
+        if (ir->instrs[i].type == IR_MAP) {
+            ASSERT_INT_EQ(MERGE_INTERSECT, ir->instrs[i].data.map.merge_op);
+            ASSERT_TRUE(ir->instrs[i].data.map.empty_a == 0.0);
+            ASSERT_TRUE(ir->instrs[i].data.map.empty_b > 1e308);   /* inf */
+            ASSERT_TRUE(ir->instrs[i].data.map.empty_z > 1e308);   /* inf */
+            found_map = 1;
+        }
+        if (ir->instrs[i].type == IR_REDUCE) {
+            ASSERT_INT_EQ(MERGE_UNION, ir->instrs[i].data.reduce.merge_op);
+            ASSERT_TRUE(ir->instrs[i].data.reduce.identity > 1e308); /* +inf for min */
+            ASSERT_TRUE(ir->instrs[i].data.reduce.empty_z  > 1e308);
+            found_red = 1;
+        }
+    }
+    ASSERT_TRUE(found_map);
+    ASSERT_TRUE(found_red);
+    ir_free(ir);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
+TEST(test_ir_default_merge_is_passthrough) {
+    AstNode *ast = parse(
+        "dim M = 2; dim K = 2; dim N = 2;\n"
+        "tensor Z[R=M, C=N] : float, empty = 0.0;\n"
+        "tensor A[R=K, C=M] : float, empty = 0.0;\n"
+        "tensor B[R=K, C=N] : float, empty = 0.0;\n"
+        "Z[m,n] = A[k,m] . B[k,n] :: map(mul) reduce(add);\n"
+    );
+    SemanticResult sem = semantic_analyze(ast);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    for (int i = 0; i < ir->count; i++) {
+        if (ir->instrs[i].type == IR_MAP) {
+            ASSERT_INT_EQ(MERGE_PASSTHROUGH, ir->instrs[i].data.map.merge_op);
+        }
+        if (ir->instrs[i].type == IR_REDUCE) {
+            ASSERT_INT_EQ(MERGE_PASSTHROUGH, ir->instrs[i].data.reduce.merge_op);
+        }
+    }
+    ir_free(ir);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
 int main(void) {
     RUN_TEST(test_ir_gemm_structure);
     RUN_TEST(test_ir_loop_order);
+    RUN_TEST(test_ir_carries_merge_and_identity);
+    RUN_TEST(test_ir_default_merge_is_passthrough);
     return test_report();
 }

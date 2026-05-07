@@ -51,14 +51,17 @@ AstNode *ast_init_new(char *tensor_name, LiteralData *data) {
 }
 
 AstNode *ast_einsum_new(TensorRef output, TensorRef input1, TensorRef input2,
-                         OperatorType map_op, OperatorType reduce_op) {
+                         OperatorType map_op, MergeOp map_merge_op,
+                         OperatorType reduce_op, MergeOp reduce_merge_op) {
     AstNode *node = calloc(1, sizeof(AstNode));
     node->type = NODE_EINSUM;
     node->data.einsum.output = output;
     node->data.einsum.input1 = input1;
     node->data.einsum.input2 = input2;
     node->data.einsum.map_op = map_op;
+    node->data.einsum.map_merge_op = map_merge_op;
     node->data.einsum.reduce_op = reduce_op;
+    node->data.einsum.reduce_merge_op = reduce_merge_op;
     return node;
 }
 
@@ -190,4 +193,32 @@ OperatorType operator_from_str(const char *name) {
     if (strcmp(name, "and") == 0) return OP_AND;
     if (strcmp(name, "or") == 0)  return OP_OR;
     return -1;
+}
+
+MergeOp merge_op_from_str(const char *name) {
+    if (strcmp(name, "passthrough") == 0)      return MERGE_PASSTHROUGH;
+    if (strcmp(name, "nopass") == 0)           return MERGE_NOPASS;
+    if (strcmp(name, "intersect") == 0)        return MERGE_INTERSECT;
+    if (strcmp(name, "take_left") == 0)        return MERGE_TAKE_LEFT;
+    if (strcmp(name, "take_left_only") == 0)   return MERGE_TAKE_LEFT_ONLY;
+    if (strcmp(name, "take_right") == 0)       return MERGE_TAKE_RIGHT;
+    if (strcmp(name, "take_right_only") == 0)  return MERGE_TAKE_RIGHT_ONLY;
+    if (strcmp(name, "xor") == 0)              return MERGE_XOR;
+    if (strcmp(name, "union") == 0)            return MERGE_UNION;
+    return (MergeOp)-1;
+}
+
+const char *merge_op_to_str(MergeOp op) {
+    switch (op) {
+        case MERGE_PASSTHROUGH:     return "passthrough";
+        case MERGE_NOPASS:          return "nopass";
+        case MERGE_INTERSECT:       return "intersect";
+        case MERGE_TAKE_LEFT:       return "take_left";
+        case MERGE_TAKE_LEFT_ONLY:  return "take_left_only";
+        case MERGE_TAKE_RIGHT:      return "take_right";
+        case MERGE_TAKE_RIGHT_ONLY: return "take_right_only";
+        case MERGE_XOR:             return "xor";
+        case MERGE_UNION:           return "union";
+    }
+    return "unknown";
 }

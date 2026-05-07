@@ -382,7 +382,9 @@ feedback:
 
 termination:
   type: stable                     # only "stable" supported in v2
-  on: <tensor_name>                # tensor to watch (typically the feedback target)
+  watch: <tensor_name>             # tensor to watch (typically the feedback target);
+                                   # named "watch" not "on" because PyYAML's YAML 1.1
+                                   # parses bare "on" as boolean True.
 
 max_iterations: <int>              # hard cap; if reached without stability, the test
                                    # fails with a non-zero exit code
@@ -443,7 +445,7 @@ feedback:
 
 termination:
   type: stable
-  on: F
+  watch: F
 
 max_iterations: 10
 

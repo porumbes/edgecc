@@ -1,0 +1,11 @@
+dim S = 5;
+dim D = 5;
+
+tensor F1[R=D] : float, empty = inf;
+tensor G[R=S, C=D] : float, empty = 0.0;
+tensor F[R=S]  : float, empty = inf;
+
+init G = [[0.0, 1.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 0.0, 0.0]];
+init F = [0.0, inf, inf, inf, inf];
+
+F1[d] = G[s,d] . F[s] :: map(add, intersect) reduce(min, union);

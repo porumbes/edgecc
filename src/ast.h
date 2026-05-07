@@ -35,6 +35,18 @@ typedef enum {
     OP_OR
 } OperatorType;
 
+typedef enum {
+    MERGE_PASSTHROUGH,    /* default; also encodes "absent in source" */
+    MERGE_NOPASS,
+    MERGE_INTERSECT,
+    MERGE_TAKE_LEFT,
+    MERGE_TAKE_LEFT_ONLY,
+    MERGE_TAKE_RIGHT,
+    MERGE_TAKE_RIGHT_ONLY,
+    MERGE_XOR,
+    MERGE_UNION,
+} MergeOp;
+
 /* ---- Supporting structs ---- */
 
 struct RankPair {
@@ -89,7 +101,9 @@ typedef struct {
     TensorRef input1;
     TensorRef input2;
     OperatorType map_op;
+    MergeOp      map_merge_op;       /* defaults to MERGE_PASSTHROUGH */
     OperatorType reduce_op;
+    MergeOp      reduce_merge_op;    /* defaults to MERGE_PASSTHROUGH */
 } EinsumData;
 
 typedef struct {
@@ -118,7 +132,8 @@ AstNode *ast_tensor_decl_new(char *name, RankPair *ranks, int num_ranks,
                               DataType datatype, double empty_val);
 AstNode *ast_init_new(char *tensor_name, LiteralData *data);
 AstNode *ast_einsum_new(TensorRef output, TensorRef input1, TensorRef input2,
-                         OperatorType map_op, OperatorType reduce_op);
+                         OperatorType map_op, MergeOp map_merge_op,
+                         OperatorType reduce_op, MergeOp reduce_merge_op);
 
 TensorRef tensor_ref_new(char *name, char **rank_vars, int num_vars);
 
@@ -136,5 +151,7 @@ void tensor_ref_free_contents(TensorRef *ref);
 const char *datatype_to_str(DataType dt);
 const char *operator_to_str(OperatorType op);
 OperatorType operator_from_str(const char *name);
+MergeOp merge_op_from_str(const char *name);     /* returns -1 on unknown */
+const char *merge_op_to_str(MergeOp op);
 
 #endif /* AST_H */

@@ -95,11 +95,57 @@ TEST(test_parse_full_program) {
     yy_delete_buffer(buf);
 }
 
+TEST(test_parse_einsum_with_merge) {
+    const char *src =
+        "dim D = 3; dim S = 3;\n"
+        "tensor F1[R=D] : float, empty = inf;\n"
+        "tensor G[R=S, C=D] : float, empty = 0.0;\n"
+        "tensor F[R=S]  : float, empty = inf;\n"
+        "F1[d] = G[s,d] . F[s] :: map(add, intersect) reduce(min, union);\n";
+    YY_BUFFER_STATE buf = yy_scan_string(src);
+    ASSERT_INT_EQ(0, yyparse());
+    yy_delete_buffer(buf);
+    AstNode *prog = parse_result;
+    ASSERT_NOT_NULL(prog);
+    /* find the einsum statement (last child) */
+    int n = prog->data.program.count;
+    AstNode *ein = prog->data.program.statements[n - 1];
+    ASSERT_INT_EQ(NODE_EINSUM, ein->type);
+    ASSERT_INT_EQ(OP_ADD, ein->data.einsum.map_op);
+    ASSERT_INT_EQ(MERGE_INTERSECT, ein->data.einsum.map_merge_op);
+    ASSERT_INT_EQ(OP_MIN, ein->data.einsum.reduce_op);
+    ASSERT_INT_EQ(MERGE_UNION, ein->data.einsum.reduce_merge_op);
+    ast_free(prog);
+    parse_result = NULL;
+}
+
+TEST(test_parse_einsum_default_merge) {
+    const char *src =
+        "dim M = 2; dim K = 2; dim N = 2;\n"
+        "tensor Z[R=M, C=N] : float, empty = 0.0;\n"
+        "tensor A[R=K, C=M] : float, empty = 0.0;\n"
+        "tensor B[R=K, C=N] : float, empty = 0.0;\n"
+        "Z[m,n] = A[k,m] . B[k,n] :: map(mul) reduce(add);\n";
+    YY_BUFFER_STATE buf = yy_scan_string(src);
+    ASSERT_INT_EQ(0, yyparse());
+    yy_delete_buffer(buf);
+    AstNode *prog = parse_result;
+    ASSERT_NOT_NULL(prog);
+    int n = prog->data.program.count;
+    AstNode *ein = prog->data.program.statements[n - 1];
+    ASSERT_INT_EQ(MERGE_PASSTHROUGH, ein->data.einsum.map_merge_op);
+    ASSERT_INT_EQ(MERGE_PASSTHROUGH, ein->data.einsum.reduce_merge_op);
+    ast_free(prog);
+    parse_result = NULL;
+}
+
 int main(void) {
     RUN_TEST(test_parse_dim_decl);
     RUN_TEST(test_parse_tensor_decl);
     RUN_TEST(test_parse_init);
     RUN_TEST(test_parse_einsum);
     RUN_TEST(test_parse_full_program);
+    RUN_TEST(test_parse_einsum_with_merge);
+    RUN_TEST(test_parse_einsum_default_merge);
     return test_report();
 }

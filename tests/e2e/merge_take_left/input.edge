@@ -1,0 +1,10 @@
+dim N = 3;
+
+tensor Z[R=N] : integer, empty = 0;
+tensor A[R=N] : integer, empty = 0;
+tensor B[R=N] : integer, empty = 0;
+
+init A = [1, 2, 3];
+init B = [10, 0, 30];
+
+Z[n] = A[n] . B[n] :: map(mul, take_left) reduce(add);
