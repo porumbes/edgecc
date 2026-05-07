@@ -220,5 +220,5 @@ const char *merge_op_to_str(MergeOp op) {
         case MERGE_XOR:             return "xor";
         case MERGE_UNION:           return "union";
     }
-    return "?";
+    return "unknown";
 }
