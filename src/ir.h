@@ -49,15 +49,22 @@ typedef struct {
 typedef struct {
     int dst_reg;
     OperatorType op;
+    MergeOp      merge_op;
     int src_reg1;
     int src_reg2;
+    double empty_a;        /* empty value of left operand */
+    double empty_b;        /* empty value of right operand */
+    double empty_z;        /* empty value of output (for maptmp emission check) */
 } IRMap;
 
 typedef struct {
     int dst_reg;
     OperatorType op;
+    MergeOp      merge_op;
     int src_reg;
     int acc_reg;
+    double identity;       /* compute-op identity for reduction state */
+    double empty_z;        /* empty value of output */
 } IRReduce;
 
 typedef struct {

@@ -49,6 +49,7 @@ typedef struct {
 SemanticResult semantic_analyze(AstNode *program);
 void semantic_result_free(SemanticResult *res);
 
+TensorEntry *symtab_find_tensor(SymbolTable *st, const char *name);
 double compute_op_identity(OperatorType op, DataType dt);
 
 #endif /* SEMANTIC_H */

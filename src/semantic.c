@@ -37,7 +37,7 @@ static int find_dim(SymbolTable *st, const char *name) {
     return -1;
 }
 
-static TensorEntry *find_tensor(SymbolTable *st, const char *name) {
+TensorEntry *symtab_find_tensor(SymbolTable *st, const char *name) {
     for (int i = 0; i < st->num_tensors; i++) {
         if (strcmp(st->tensors[i].name, name) == 0)
             return &st->tensors[i];
@@ -70,7 +70,7 @@ static void analyze_tensor_decl(SemanticResult *res, AstNode *node) {
     SymbolTable *st = res->symtab;
 
     /* check for duplicate */
-    if (find_tensor(st, d->name) != NULL) {
+    if (symtab_find_tensor(st, d->name) != NULL) {
         add_error(res, "duplicate tensor declaration: '%s'", d->name);
         return;
     }
@@ -155,7 +155,7 @@ static void analyze_init(SemanticResult *res, AstNode *node) {
     InitData *d = &node->data.init;
     SymbolTable *st = res->symtab;
 
-    TensorEntry *te = find_tensor(st, d->tensor_name);
+    TensorEntry *te = symtab_find_tensor(st, d->tensor_name);
     if (te == NULL) {
         add_error(res, "init references undeclared tensor '%s'", d->tensor_name);
         return;
@@ -184,9 +184,9 @@ static void analyze_einsum(SemanticResult *res, AstNode *node) {
     SymbolTable *st = res->symtab;
 
     /* validate all tensors exist */
-    TensorEntry *out_te = find_tensor(st, d->output.tensor_name);
-    TensorEntry *in1_te = find_tensor(st, d->input1.tensor_name);
-    TensorEntry *in2_te = find_tensor(st, d->input2.tensor_name);
+    TensorEntry *out_te = symtab_find_tensor(st, d->output.tensor_name);
+    TensorEntry *in1_te = symtab_find_tensor(st, d->input1.tensor_name);
+    TensorEntry *in2_te = symtab_find_tensor(st, d->input2.tensor_name);
 
     if (out_te == NULL)
         add_error(res, "einsum: undeclared output tensor '%s'",

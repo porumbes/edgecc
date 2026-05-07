@@ -124,17 +124,25 @@ static void emit_einsum(IRProgram *ir, AstNode *einsum_node, SymbolTable *symtab
         IRInstr *instr = ir_emit(ir, IR_MAP);
         instr->data.map.dst_reg = 2;
         instr->data.map.op = e->map_op;
+        instr->data.map.merge_op = e->map_merge_op;
         instr->data.map.src_reg1 = 0;
         instr->data.map.src_reg2 = 1;
+        instr->data.map.empty_a = symtab_find_tensor(symtab, e->input1.tensor_name)->empty_val;
+        instr->data.map.empty_b = symtab_find_tensor(symtab, e->input2.tensor_name)->empty_val;
+        instr->data.map.empty_z = symtab_find_tensor(symtab, e->output.tensor_name)->empty_val;
     }
 
     /* REDUCE: reg 3 = reduce_op(reg 2, reg 3) */
     {
+        TensorEntry *zent = symtab_find_tensor(symtab, e->output.tensor_name);
         IRInstr *instr = ir_emit(ir, IR_REDUCE);
         instr->data.reduce.dst_reg = 3;
         instr->data.reduce.op = e->reduce_op;
+        instr->data.reduce.merge_op = e->reduce_merge_op;
         instr->data.reduce.src_reg = 2;
         instr->data.reduce.acc_reg = 3;
+        instr->data.reduce.identity = compute_op_identity(e->reduce_op, zent->datatype);
+        instr->data.reduce.empty_z  = zent->empty_val;
     }
 
     /* STORE: output[coords] = reg 3 */
@@ -264,14 +272,24 @@ void ir_dump(IRProgram *ir, FILE *out) {
                 fprintf(out, ")\n");
                 break;
             case IR_MAP:
-                fprintf(out, "MAP(r%d, %s, r%d, r%d)\n",
-                        instr->data.map.dst_reg, operator_to_str(instr->data.map.op),
-                        instr->data.map.src_reg1, instr->data.map.src_reg2);
+                fprintf(out, "  MAP %s %s (eA=%g, eB=%g, eZ=%g) r%d, r%d -> r%d\n",
+                        operator_to_str(instr->data.map.op),
+                        merge_op_to_str(instr->data.map.merge_op),
+                        instr->data.map.empty_a,
+                        instr->data.map.empty_b,
+                        instr->data.map.empty_z,
+                        instr->data.map.src_reg1,
+                        instr->data.map.src_reg2,
+                        instr->data.map.dst_reg);
                 break;
             case IR_REDUCE:
-                fprintf(out, "REDUCE(r%d, %s, r%d, r%d)\n",
-                        instr->data.reduce.dst_reg, operator_to_str(instr->data.reduce.op),
-                        instr->data.reduce.src_reg, instr->data.reduce.acc_reg);
+                fprintf(out, "  REDUCE %s %s (id=%g, eZ=%g) r%d -> r%d\n",
+                        operator_to_str(instr->data.reduce.op),
+                        merge_op_to_str(instr->data.reduce.merge_op),
+                        instr->data.reduce.identity,
+                        instr->data.reduce.empty_z,
+                        instr->data.reduce.src_reg,
+                        instr->data.reduce.dst_reg);
                 break;
             case IR_STORE:
                 fprintf(out, "STORE(%s, ", instr->data.store.tensor_name);
