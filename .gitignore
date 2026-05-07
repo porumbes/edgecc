@@ -5,3 +5,7 @@ __pycache__/
 output.py
 examples/*.py
 .worktrees/
+editors/vscode/node_modules/
+editors/vscode/out/
+editors/vscode/*.vsix
+editors/vscode/.vscode-test/

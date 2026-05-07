@@ -1,0 +1,47 @@
+{
+  "name": "edgecc",
+  "displayName": "EDGE Language Support",
+  "description": "Syntax highlighting and completions for the EDGE tensor language.",
+  "version": "0.1.0",
+  "publisher": "serban-edgecc",
+  "engines": { "vscode": "^1.80.0" },
+  "categories": ["Programming Languages"],
+  "activationEvents": ["onLanguage:edge"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "edge",
+        "aliases": ["EDGE", "edge"],
+        "extensions": [".edge"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "edge",
+        "scopeName": "source.edge",
+        "path": "./syntaxes/edge.tmLanguage.json"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package",
+    "test": "node ./out/test/runTest.js",
+    "test:grammar": "vscode-tmgrammar-test \"test/grammar/**/*.test.edge\"",
+    "pretest": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.80.0",
+    "@types/node": "^20.0.0",
+    "@types/mocha": "^10.0.0",
+    "@vscode/test-electron": "^2.3.0",
+    "@vscode/vsce": "^2.20.0",
+    "glob": "^10.0.0",
+    "mocha": "^10.2.0",
+    "typescript": "^5.0.0",
+    "vscode-tmgrammar-test": "^0.1.3"
+  }
+}
