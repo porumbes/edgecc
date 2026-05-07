@@ -1,1 +1,1 @@
-parse error
+unexpected ',', expecting TOK_IDENT

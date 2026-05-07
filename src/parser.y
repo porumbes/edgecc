@@ -79,6 +79,8 @@ static void litlist_add(LitList *ll, LiteralData *lit) {
 
 %}
 
+%error-verbose
+
 %union {
     int int_val;
     double float_val;
