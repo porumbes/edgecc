@@ -5,6 +5,7 @@ import {
   TYPES,
   EMPTY_VALUES,
 } from "../src/completions";
+import { detectContext } from "../src/completions";
 
 describe("completion item lists", () => {
   it("COMPUTE_OPS contains all 7 built-in compute operators", () => {
@@ -48,5 +49,50 @@ describe("completion item lists", () => {
         );
       }
     }
+  });
+});
+
+describe("detectContext", () => {
+  it("returns 'compute-op' right after map(", () => {
+    assert.strictEqual(detectContext("Z[m] = A . B :: map("), "compute-op");
+  });
+
+  it("returns 'compute-op' right after reduce(", () => {
+    assert.strictEqual(detectContext("Z[m] = A . B :: map(mul) reduce("), "compute-op");
+  });
+
+  it("returns 'merge-op' after a comma in map(...)", () => {
+    assert.strictEqual(detectContext("Z[m] = A . B :: map(mul, "), "merge-op");
+  });
+
+  it("returns 'merge-op' after a comma in reduce(...)", () => {
+    assert.strictEqual(
+      detectContext("Z[m] = A . B :: map(mul, intersect) reduce(min, "),
+      "merge-op",
+    );
+  });
+
+  it("returns 'type' after `:` in a tensor decl", () => {
+    assert.strictEqual(detectContext("tensor X[R=K] : "), "type");
+    assert.strictEqual(detectContext("tensor X[R=K, C=M] : "), "type");
+  });
+
+  it("returns 'empty-value' after `empty = `", () => {
+    assert.strictEqual(detectContext("tensor X[R=K] : float, empty = "), "empty-value");
+  });
+
+  it("returns null inside a comment", () => {
+    assert.strictEqual(detectContext("// map("), null);
+    assert.strictEqual(detectContext("dim K = 3; // map(mul, "), null);
+  });
+
+  it("returns null inside a tensor rank list (no map/reduce in context)", () => {
+    assert.strictEqual(detectContext("tensor X[R=K, "), null);
+  });
+
+  it("returns null on irrelevant prefixes", () => {
+    assert.strictEqual(detectContext(""), null);
+    assert.strictEqual(detectContext("dim K = "), null);
+    assert.strictEqual(detectContext("init A = ["), null);
   });
 });

@@ -100,3 +100,39 @@ export const EMPTY_VALUES: ItemSpec[] = [
   { label: "true",  kind: CompletionKind.Value, detail: "Boolean true" },
   { label: "false", kind: CompletionKind.Value, detail: "Boolean false" },
 ];
+
+export type Context = "compute-op" | "merge-op" | "type" | "empty-value" | null;
+
+/**
+ * Determine which (if any) static-completion context the cursor is in,
+ * given the prefix of the current line up to the cursor. Pure function:
+ * does not parse the .edge file, only inspects this single line's prefix.
+ *
+ * Returns null if the cursor is inside a // line comment or at no recognized
+ * trigger context.
+ */
+export function detectContext(linePrefix: string): Context {
+  // Strip everything from the first `//` onward (line comments).
+  const commentIdx = linePrefix.indexOf("//");
+  const code = commentIdx >= 0 ? linePrefix.substring(0, commentIdx) : linePrefix;
+
+  // 1st arg of map(...) / reduce(...): compute op slot
+  if (/\b(?:map|reduce)\s*\(\s*$/.test(code)) {
+    return "compute-op";
+  }
+  // 2nd arg of map(...) / reduce(...): merge op slot
+  // The (?:map|reduce)( prefix anchors the search so commas inside other
+  // contexts (e.g., a tensor's rank list) don't accidentally match.
+  if (/\b(?:map|reduce)\s*\([^,()]*,\s*$/.test(code)) {
+    return "merge-op";
+  }
+  // Tensor decl, after the closing `]` and the `:`
+  if (/\btensor\s+\w+\s*\[[^\]]*\]\s*:\s*$/.test(code)) {
+    return "type";
+  }
+  // Empty-value slot
+  if (/\bempty\s*=\s*$/.test(code)) {
+    return "empty-value";
+  }
+  return null;
+}
