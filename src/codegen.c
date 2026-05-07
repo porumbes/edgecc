@@ -66,6 +66,9 @@ static const char *find_dim_name(IRProgram *ir, int pos, int range) {
     return (count == 1) ? found : NULL;
 }
 
+/* Forward declaration so emit_literal can format float scalars (incl. inf). */
+static char *format_double_literal(double v);
+
 /* Emit literal data recursively as a Python expression */
 static void emit_literal(CodeBuf *cb, LiteralData *data) {
     if (!data) return;
@@ -82,50 +85,15 @@ static void emit_literal(CodeBuf *cb, LiteralData *data) {
                 cb_appendf(cb, "%d", data->data.scalar.int_val);
                 break;
             case TYPE_FLOAT: {
-                double v = data->data.scalar.float_val;
-                if (v == (int)v) {
-                    cb_appendf(cb, "%g", v);
-                } else {
-                    cb_appendf(cb, "%g", v);
-                }
+                char *s = format_double_literal(data->data.scalar.float_val);
+                cb_append(cb, s);
+                free(s);
                 break;
             }
             case TYPE_BOOLEAN:
                 cb_append(cb, data->data.scalar.bool_val ? "True" : "False");
                 break;
         }
-    }
-}
-
-/* Get Python infix operator string, or NULL if it's a function-style op */
-static const char *op_infix(OperatorType op) {
-    switch (op) {
-        case OP_ADD: return " + ";
-        case OP_SUB: return " - ";
-        case OP_MUL: return " * ";
-        default: return NULL;
-    }
-}
-
-/* Get Python function-style op name for min/max */
-static const char *op_func(OperatorType op) {
-    switch (op) {
-        case OP_MIN: return "min";
-        case OP_MAX: return "max";
-        default: return NULL;
-    }
-}
-
-/* Check if op is boolean */
-static int op_is_bool(OperatorType op) {
-    return op == OP_AND || op == OP_OR;
-}
-
-static const char *op_bool_str(OperatorType op) {
-    switch (op) {
-        case OP_AND: return " and ";
-        case OP_OR:  return " or ";
-        default: return NULL;
     }
 }
 
@@ -139,23 +107,25 @@ static void emit_tensor_access(CodeBuf *cb, const char *name, char **coords, int
     }
 }
 
+/* Forward declarations for helpers used in emit_alloc and codegen_python */
+static char *format_double_literal(double v);
+static void emit_general_skeleton(CodeBuf *cb,
+                                   IRInstr *load1, IRInstr *load2,
+                                   IRInstr *map_i, IRInstr *red_i,
+                                   IRInstr *store_i);
+
 /* Emit a tensor alloc as nested list comprehension.
    e.g. for dims [2,3] with empty_val 0.0:
    [[0.0] * 3 for _ in range(2)]
    For 1D: [0.0] * N
 */
 static void emit_alloc(CodeBuf *cb, IRTensorAlloc *alloc, IRProgram *ir, int instr_pos) {
-    /* Format the empty value */
-    char valstr[64];
-    double v = alloc->empty_val;
-    if (v == (int)v && v >= -1e9 && v <= 1e9) {
-        snprintf(valstr, sizeof(valstr), "%.1f", v);
-    } else {
-        snprintf(valstr, sizeof(valstr), "%g", v);
-    }
+    /* Format the empty value using format_double_literal */
+    char *valstr = format_double_literal(alloc->empty_val);
 
     if (alloc->ndims == 0) {
         cb_append(cb, valstr);
+        free(valstr);
         return;
     }
 
@@ -214,46 +184,261 @@ static void emit_alloc(CodeBuf *cb, IRTensorAlloc *alloc, IRProgram *ir, int ins
         }
         cb_append(cb, ")]");
     }
+
+    free(valstr);
+}
+
+/* ---- New v2 helpers ---- */
+
+/* Format a double for emission as a Python literal.
+ * +inf → "math.inf", -inf → "-math.inf", integral values
+ * keep one decimal (e.g. "0.0"), other values use %g.
+ * Returns a malloc'd string; caller frees. */
+static char *format_double_literal(double v) {
+    char buf[64];
+    if (v > 1e308) {           /* +inf */
+        snprintf(buf, sizeof(buf), "math.inf");
+    } else if (v < -1e308) {   /* -inf */
+        snprintf(buf, sizeof(buf), "-math.inf");
+    } else if (v == (int)v && v >= -1e9 && v <= 1e9) {
+        snprintf(buf, sizeof(buf), "%.1f", v);
+    } else {
+        snprintf(buf, sizeof(buf), "%g", v);
+    }
+    return strdup(buf);
+}
+
+/* Emit the merge guard expression for a given merge op into cb.
+ * `lhs_name` is the left existence variable name (e.g. "a_exists" or "b_s").
+ * `rhs_name` is the right existence variable name (e.g. "b_exists" or "b_m"). */
+static void emit_merge_guard(CodeBuf *cb, MergeOp m,
+                              const char *lhs_name, const char *rhs_name) {
+    switch (m) {
+        case MERGE_PASSTHROUGH:
+            cb_append(cb, "True");
+            return;
+        case MERGE_NOPASS:
+            cb_append(cb, "False");
+            return;
+        case MERGE_INTERSECT:
+            cb_appendf(cb, "%s and %s", lhs_name, rhs_name);
+            return;
+        case MERGE_TAKE_LEFT:
+            cb_append(cb, lhs_name);
+            return;
+        case MERGE_TAKE_LEFT_ONLY:
+            cb_appendf(cb, "%s and not %s", lhs_name, rhs_name);
+            return;
+        case MERGE_TAKE_RIGHT:
+            cb_append(cb, rhs_name);
+            return;
+        case MERGE_TAKE_RIGHT_ONLY:
+            cb_appendf(cb, "%s and not %s", rhs_name, lhs_name);
+            return;
+        case MERGE_XOR:
+            cb_appendf(cb, "%s != %s", lhs_name, rhs_name);
+            return;
+        case MERGE_UNION:
+            cb_appendf(cb, "%s or %s", lhs_name, rhs_name);
+            return;
+    }
+}
+
+typedef struct {
+    char *names[8];
+    int count;
+} TensorNameList;
+
+/* Collect distinct input tensor names (those appearing in IR_LOAD, in load order).
+ * Output tensor name is the operand of IR_STORE. Caller-owned. */
+static void collect_io(IRProgram *ir, TensorNameList *inputs, char **output) {
+    inputs->count = 0;
+    *output = NULL;
+    for (int i = 0; i < ir->count; i++) {
+        IRInstr *instr = &ir->instrs[i];
+        if (instr->type == IR_LOAD) {
+            const char *n = instr->data.load.tensor_name;
+            int seen = 0;
+            for (int j = 0; j < inputs->count; j++) {
+                if (strcmp(inputs->names[j], n) == 0) { seen = 1; break; }
+            }
+            if (!seen && inputs->count < 8) {
+                inputs->names[inputs->count++] = strdup(n);
+            }
+        } else if (instr->type == IR_STORE) {
+            if (*output) free(*output);
+            *output = strdup(instr->data.store.tensor_name);
+        }
+    }
+}
+
+static void free_tensor_name_list(TensorNameList *l) {
+    for (int i = 0; i < l->count; i++) free(l->names[i]);
+    l->count = 0;
+}
+
+/* Format an operator application as a Python expression into `out`.
+ * Caller-owned buffer; capped at `cap`. Returns out for convenience. */
+static const char *compute_op_pyexpr(OperatorType op,
+                                     const char *lhs, const char *rhs,
+                                     char *out, size_t cap) {
+    switch (op) {
+        case OP_ADD: snprintf(out, cap, "%s + %s", lhs, rhs); break;
+        case OP_SUB: snprintf(out, cap, "%s - %s", lhs, rhs); break;
+        case OP_MUL: snprintf(out, cap, "%s * %s", lhs, rhs); break;
+        case OP_MIN: snprintf(out, cap, "min(%s, %s)", lhs, rhs); break;
+        case OP_MAX: snprintf(out, cap, "max(%s, %s)", lhs, rhs); break;
+        case OP_AND: snprintf(out, cap, "%s and %s", lhs, rhs); break;
+        case OP_OR:  snprintf(out, cap, "%s or %s",  lhs, rhs); break;
+    }
+    return out;
+}
+
+/* Emit the general skeleton for one innermost iteration body. */
+static void emit_general_skeleton(CodeBuf *cb,
+                                   IRInstr *load1, IRInstr *load2,
+                                   IRInstr *map_i, IRInstr *red_i,
+                                   IRInstr *store_i) {
+    char *eA = format_double_literal(map_i->data.map.empty_a);
+    char *eB = format_double_literal(map_i->data.map.empty_b);
+    char *eZ = format_double_literal(map_i->data.map.empty_z);
+
+    /* LOAD operands */
+    cb_indent(cb); cb_append(cb, "a_val = ");
+    emit_tensor_access(cb, load1->data.load.tensor_name,
+                       load1->data.load.coords, load1->data.load.ncoords);
+    cb_append(cb, "\n");
+    cb_indent(cb); cb_append(cb, "b_val = ");
+    emit_tensor_access(cb, load2->data.load.tensor_name,
+                       load2->data.load.coords, load2->data.load.ncoords);
+    cb_append(cb, "\n");
+
+    /* MAP existence */
+    cb_indent(cb); cb_appendf(cb, "a_exists = a_val != %s\n", eA);
+    cb_indent(cb); cb_appendf(cb, "b_exists = b_val != %s\n", eB);
+
+    cb_indent(cb); cb_append(cb, "if ");
+    emit_merge_guard(cb, map_i->data.map.merge_op, "a_exists", "b_exists");
+    cb_append(cb, ":\n");
+    cb->indent++;
+    cb_indent(cb); cb_appendf(cb, "a_op = a_val if a_exists else %s\n", eA);
+    cb_indent(cb); cb_appendf(cb, "b_op = b_val if b_exists else %s\n", eB);
+
+    char compute_buf[256];
+    cb_indent(cb); cb_append(cb, "map_val = ");
+    cb_append(cb, compute_op_pyexpr(map_i->data.map.op, "a_op", "b_op",
+                                     compute_buf, sizeof(compute_buf)));
+    cb_append(cb, "\n");
+    cb_indent(cb); cb_appendf(cb, "map_emitted = map_val != %s\n", eZ);
+    cb->indent--;
+    cb_indent(cb); cb_append(cb, "else:\n");
+    cb->indent++;
+    cb_indent(cb); cb_append(cb, "map_emitted = False\n");
+    cb_indent(cb); cb_appendf(cb, "map_val = %s\n", eZ);
+    cb->indent--;
+
+    /* REDUCE existence */
+    cb_indent(cb); cb_append(cb, "state = ");
+    emit_tensor_access(cb, store_i->data.store.tensor_name,
+                       store_i->data.store.coords, store_i->data.store.ncoords);
+    cb_append(cb, "\n");
+    cb_indent(cb); cb_appendf(cb, "b_s = state != %s\n", eZ);
+    cb_indent(cb); cb_append(cb, "b_m = map_emitted\n");
+
+    cb_indent(cb); cb_append(cb, "if ");
+    emit_merge_guard(cb, red_i->data.reduce.merge_op, "b_s", "b_m");
+    cb_append(cb, ":\n");
+    cb->indent++;
+    cb_indent(cb); cb_appendf(cb, "val_for_red = map_val if map_emitted else %s\n", eZ);
+    cb_indent(cb); cb_append(cb, "new_state = ");
+    cb_append(cb, compute_op_pyexpr(red_i->data.reduce.op, "state", "val_for_red",
+                                     compute_buf, sizeof(compute_buf)));
+    cb_append(cb, "\n");
+    cb_indent(cb);
+    emit_tensor_access(cb, store_i->data.store.tensor_name,
+                       store_i->data.store.coords, store_i->data.store.ncoords);
+    cb_appendf(cb, " = new_state if new_state != %s else %s\n", eZ, eZ);
+    cb->indent--;
+    cb_indent(cb); cb_append(cb, "else:\n");
+    cb->indent++;
+    cb_indent(cb);
+    emit_tensor_access(cb, store_i->data.store.tensor_name,
+                       store_i->data.store.coords, store_i->data.store.ncoords);
+    cb_appendf(cb, " = %s\n", eZ);
+    cb->indent--;
+
+    free(eA); free(eB); free(eZ);
 }
 
 /* ---- Main codegen ---- */
 
 char *codegen_python(IRProgram *ir) {
     if (!ir) return NULL;
-
     CodeBuf cb;
     cb_init(&cb);
 
-    cb_append(&cb, "# Generated by edgecc\n\n");
+    cb_append(&cb, "# Generated by edgecc\n");
+    cb_append(&cb, "import math\n\n");
 
-    const char *last_store_tensor = NULL;
+    /* Module-level dim constants */
+    for (int i = 0; i < ir->count; i++) {
+        if (ir->instrs[i].type == IR_DIM_DEF) {
+            cb_appendf(&cb, "%s = %d\n",
+                ir->instrs[i].data.dim_def.name,
+                ir->instrs[i].data.dim_def.size);
+        }
+    }
+    cb_append(&cb, "\n");
 
+    /* Discover inputs and output */
+    TensorNameList inputs;
+    char *output = NULL;
+    collect_io(ir, &inputs, &output);
+
+    /* __edgecc_meta__ */
+    cb_append(&cb, "__edgecc_meta__ = {\n");
+    cb_append(&cb, "    \"inputs\": [");
+    for (int i = 0; i < inputs.count; i++) {
+        if (i > 0) cb_append(&cb, ", ");
+        cb_appendf(&cb, "\"%s\"", inputs.names[i]);
+    }
+    cb_append(&cb, "],\n");
+    cb_appendf(&cb, "    \"output\": \"%s\",\n", output ? output : "");
+    cb_append(&cb, "}\n\n");
+
+    /* def run(inputs) */
+    cb_append(&cb, "def run(");
+    for (int i = 0; i < inputs.count; i++) {
+        if (i > 0) cb_append(&cb, ", ");
+        cb_append(&cb, inputs.names[i]);
+    }
+    cb_append(&cb, "):\n");
+    cb.indent = 1;
+
+    int produced_loops = 0;
     for (int i = 0; i < ir->count; i++) {
         IRInstr *instr = &ir->instrs[i];
-
         switch (instr->type) {
             case IR_DIM_DEF:
-                cb_appendf(&cb, "%s = %d\n",
-                    instr->data.dim_def.name,
-                    instr->data.dim_def.size);
+                /* already emitted at module scope */
                 break;
-
             case IR_TENSOR_ALLOC:
-                cb_appendf(&cb, "%s = ", instr->data.tensor_alloc.name);
-                emit_alloc(&cb, &instr->data.tensor_alloc, ir, i);
-                cb_append(&cb, "\n");
-                break;
-
-            case IR_TENSOR_INIT:
-                cb_appendf(&cb, "%s = ", instr->data.tensor_init.name);
-                emit_literal(&cb, instr->data.tensor_init.data);
-                cb_append(&cb, "\n");
-                break;
-
-            case IR_LOOP_BEGIN: {
-                /* Emit blank line before the outermost loop */
-                if (cb.indent == 0) {
+                /* Only emit allocation for the OUTPUT tensor inside run().
+                   Inputs come in as parameters. */
+                if (output && strcmp(instr->data.tensor_alloc.name, output) == 0) {
+                    cb_indent(&cb);
+                    cb_appendf(&cb, "%s = ", instr->data.tensor_alloc.name);
+                    emit_alloc(&cb, &instr->data.tensor_alloc, ir, i);
                     cb_append(&cb, "\n");
+                }
+                break;
+            case IR_TENSOR_INIT:
+                /* Init statements lift into __main__; skip inside run(). */
+                break;
+            case IR_LOOP_BEGIN: {
+                if (!produced_loops) {
+                    cb_append(&cb, "\n");
+                    produced_loops = 1;
                 }
                 cb_indent(&cb);
                 const char *var = instr->data.loop_begin.index_var;
@@ -267,135 +452,81 @@ char *codegen_python(IRProgram *ir) {
                 cb.indent++;
                 break;
             }
-
             case IR_LOOP_END:
                 cb.indent--;
                 break;
-
-            case IR_LOAD:
-            case IR_MAP:
-            case IR_REDUCE:
-                /* These are combined into STORE */
+            case IR_LOAD: case IR_MAP: case IR_REDUCE:
+                /* Combined into STORE emission below. */
                 break;
-
-            case IR_STORE: {
-                last_store_tensor = instr->data.store.tensor_name;
-
-                /* Look back for LOAD, LOAD, MAP, REDUCE */
-                if (i < 4) break;
-                IRInstr *load1 = &ir->instrs[i - 4];
-                IRInstr *load2 = &ir->instrs[i - 3];
-                IRInstr *map   = &ir->instrs[i - 2];
-                IRInstr *red   = &ir->instrs[i - 1];
-
-                if (load1->type != IR_LOAD || load2->type != IR_LOAD ||
-                    map->type != IR_MAP || red->type != IR_REDUCE) break;
-
-                cb_indent(&cb);
-
-                /* output[coords] = reduce_op(output[coords], map_op(input1[coords], input2[coords])) */
-                OperatorType map_op = map->data.map.op;
-                OperatorType red_op = red->data.reduce.op;
-
-                /* LHS: Z[m][n] = */
-                emit_tensor_access(&cb,
-                    instr->data.store.tensor_name,
-                    instr->data.store.coords,
-                    instr->data.store.ncoords);
-                cb_append(&cb, " = ");
-
-                /* Build the map expression string */
-                /* map_expr = "input1[coords] op input2[coords]" */
-
-                /* Build reduce expression:
-                   infix reduce:  output[coords] + map_expr
-                   func reduce:   min(output[coords], map_expr)
-                   bool reduce:   output[coords] or (map_expr)
-                */
-
-                const char *red_infix = op_infix(red_op);
-                const char *red_func = op_func(red_op);
-                int red_bool = op_is_bool(red_op);
-
-                if (red_func) {
-                    /* min(output[coords], map_expr) */
-                    cb_appendf(&cb, "%s(", red_func);
-                    emit_tensor_access(&cb,
-                        instr->data.store.tensor_name,
-                        instr->data.store.coords,
-                        instr->data.store.ncoords);
-                    cb_append(&cb, ", ");
-                } else if (red_bool) {
-                    /* output[coords] or ( */
-                    emit_tensor_access(&cb,
-                        instr->data.store.tensor_name,
-                        instr->data.store.coords,
-                        instr->data.store.ncoords);
-                    cb_append(&cb, op_bool_str(red_op));
-                    cb_append(&cb, "(");
-                } else {
-                    /* output[coords] + */
-                    emit_tensor_access(&cb,
-                        instr->data.store.tensor_name,
-                        instr->data.store.coords,
-                        instr->data.store.ncoords);
-                    cb_append(&cb, red_infix);
+            case IR_STORE:
+                if (i >= 4) {
+                    IRInstr *load1 = &ir->instrs[i - 4];
+                    IRInstr *load2 = &ir->instrs[i - 3];
+                    IRInstr *map_i = &ir->instrs[i - 2];
+                    IRInstr *red_i = &ir->instrs[i - 1];
+                    if (load1->type == IR_LOAD && load2->type == IR_LOAD &&
+                        map_i->type == IR_MAP && red_i->type == IR_REDUCE) {
+                        emit_general_skeleton(&cb,
+                            load1, load2, map_i, red_i, instr);
+                    }
                 }
-
-                /* Now emit the map expression */
-                const char *map_infix = op_infix(map_op);
-                const char *map_func_name = op_func(map_op);
-                int map_bool = op_is_bool(map_op);
-
-                if (map_func_name) {
-                    cb_appendf(&cb, "%s(", map_func_name);
-                    emit_tensor_access(&cb,
-                        load1->data.load.tensor_name,
-                        load1->data.load.coords,
-                        load1->data.load.ncoords);
-                    cb_append(&cb, ", ");
-                    emit_tensor_access(&cb,
-                        load2->data.load.tensor_name,
-                        load2->data.load.coords,
-                        load2->data.load.ncoords);
-                    cb_append(&cb, ")");
-                } else if (map_bool) {
-                    emit_tensor_access(&cb,
-                        load1->data.load.tensor_name,
-                        load1->data.load.coords,
-                        load1->data.load.ncoords);
-                    cb_append(&cb, op_bool_str(map_op));
-                    emit_tensor_access(&cb,
-                        load2->data.load.tensor_name,
-                        load2->data.load.coords,
-                        load2->data.load.ncoords);
-                } else {
-                    emit_tensor_access(&cb,
-                        load1->data.load.tensor_name,
-                        load1->data.load.coords,
-                        load1->data.load.ncoords);
-                    cb_append(&cb, map_infix);
-                    emit_tensor_access(&cb,
-                        load2->data.load.tensor_name,
-                        load2->data.load.coords,
-                        load2->data.load.ncoords);
-                }
-
-                /* Close parens for func/bool reduce */
-                if (red_func || red_bool) {
-                    cb_append(&cb, ")");
-                }
-
-                cb_append(&cb, "\n");
                 break;
-            }
         }
     }
 
-    /* Emit trailing blank line and print */
-    if (last_store_tensor) {
-        cb_appendf(&cb, "\nprint(%s)\n", last_store_tensor);
+    if (output) {
+        cb_indent(&cb);
+        cb_appendf(&cb, "return %s\n", output);
+    }
+    cb.indent = 0;
+    cb_append(&cb, "\n");
+
+    /* __main__ block: re-emit allocs+inits+call */
+    cb_append(&cb, "if __name__ == \"__main__\":\n");
+    cb.indent = 1;
+    /* Emit allocs for INPUT tensors only (the output gets recomputed by run) */
+    for (int i = 0; i < ir->count; i++) {
+        IRInstr *instr = &ir->instrs[i];
+        if (instr->type != IR_TENSOR_ALLOC) continue;
+        int is_input = 0;
+        for (int j = 0; j < inputs.count; j++) {
+            if (strcmp(instr->data.tensor_alloc.name, inputs.names[j]) == 0) { is_input = 1; break; }
+        }
+        if (!is_input) continue;
+        cb_indent(&cb);
+        cb_appendf(&cb, "%s = ", instr->data.tensor_alloc.name);
+        emit_alloc(&cb, &instr->data.tensor_alloc, ir, i);
+        cb_append(&cb, "\n");
+    }
+    /* Emit init statements (inputs only — output is initialized inside run) */
+    for (int i = 0; i < ir->count; i++) {
+        IRInstr *instr = &ir->instrs[i];
+        if (instr->type != IR_TENSOR_INIT) continue;
+        int is_input = 0;
+        for (int j = 0; j < inputs.count; j++) {
+            if (strcmp(instr->data.tensor_init.name, inputs.names[j]) == 0) { is_input = 1; break; }
+        }
+        if (!is_input) continue;
+        cb_indent(&cb);
+        cb_appendf(&cb, "%s = ", instr->data.tensor_init.name);
+        emit_literal(&cb, instr->data.tensor_init.data);
+        cb_append(&cb, "\n");
     }
 
+    /* Call run and print */
+    if (output) {
+        cb_indent(&cb);
+        cb_appendf(&cb, "%s = run(", output);
+        for (int i = 0; i < inputs.count; i++) {
+            if (i > 0) cb_append(&cb, ", ");
+            cb_append(&cb, inputs.names[i]);
+        }
+        cb_append(&cb, ")\n");
+        cb_indent(&cb);
+        cb_appendf(&cb, "print(%s)\n", output);
+    }
+
+    free(output);
+    free_tensor_name_list(&inputs);
     return cb.buf;
 }
