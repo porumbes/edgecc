@@ -1,0 +1,14 @@
+// SYNTAX TEST "source.edge" "einsum: basic form (no merge)"
+Z[m,n] = A[k,m] . B[k,n] :: map(mul) reduce(add);
+// <- variable.other.edge
+//     ^ keyword.operator.assignment.edge
+//              ^ keyword.operator.dot.edge
+//                       ^^ keyword.operator.action-sep.edge
+//                          ^^^ keyword.control.action.edge
+//                             ^ punctuation.bracket.edge
+//                              ^^^ support.function.compute.edge
+//                                 ^ punctuation.bracket.edge
+//                                   ^^^^^^ keyword.control.action.edge
+//                                         ^ punctuation.bracket.edge
+//                                          ^^^ support.function.compute.edge
+//                                             ^ punctuation.bracket.edge
