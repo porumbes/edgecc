@@ -1,0 +1,14 @@
+// SYNTAX TEST "source.edge" "einsum: with merge operators"
+F1[d] = G[s,d] . F[s] :: map(add, intersect) reduce(min, union);
+//                       ^^^ keyword.control.action.edge
+//                          ^ punctuation.bracket.edge
+//                           ^^^ support.function.compute.edge
+//                              ^ punctuation.separator.edge
+//                                ^^^^^^^^^ support.function.merge.edge
+//                                         ^ punctuation.bracket.edge
+//                                           ^^^^^^ keyword.control.action.edge
+//                                                 ^ punctuation.bracket.edge
+//                                                  ^^^ support.function.compute.edge
+//                                                     ^ punctuation.separator.edge
+//                                                       ^^^^^ support.function.merge.edge
+//                                                            ^ punctuation.bracket.edge
