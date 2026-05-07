@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <math.h>
+#include <limits.h>
 
 /* ---- Error helpers ---- */
 
@@ -284,6 +286,18 @@ static void analyze_einsum(SemanticResult *res, AstNode *node) {
             }
         }
     }
+
+    /* warn about nopass (degenerate operator that always produces empty output) */
+    if (d->map_merge_op == MERGE_NOPASS) {
+        fprintf(stderr,
+            "warning: 'nopass' merge on map always produces empty output; "
+            "the action has no effect\n");
+    }
+    if (d->reduce_merge_op == MERGE_NOPASS) {
+        fprintf(stderr,
+            "warning: 'nopass' merge on reduce always produces empty output; "
+            "the action has no effect\n");
+    }
 }
 
 /* ---- Public API ---- */
@@ -334,4 +348,22 @@ void semantic_result_free(SemanticResult *res) {
     res->symtab = NULL;
     res->error_count = 0;
     res->error_capacity = 0;
+}
+
+double compute_op_identity(OperatorType op, DataType dt) {
+    switch (op) {
+        case OP_ADD: case OP_SUB:
+            return 0.0;
+        case OP_MUL:
+            return 1.0;
+        case OP_MIN:
+            return (dt == TYPE_INTEGER) ? (double)INT_MAX : INFINITY;
+        case OP_MAX:
+            return (dt == TYPE_INTEGER) ? (double)INT_MIN : -INFINITY;
+        case OP_AND:
+            return 1.0;     /* true */
+        case OP_OR:
+            return 0.0;     /* false */
+    }
+    return 0.0;
 }

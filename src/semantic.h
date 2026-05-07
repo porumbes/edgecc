@@ -49,4 +49,6 @@ typedef struct {
 SemanticResult semantic_analyze(AstNode *program);
 void semantic_result_free(SemanticResult *res);
 
+double compute_op_identity(OperatorType op, DataType dt);
+
 #endif /* SEMANTIC_H */

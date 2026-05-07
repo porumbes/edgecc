@@ -1,6 +1,7 @@
 #include "test_helpers.h"
 #include "ast.h"
 #include "semantic.h"
+#include <limits.h>
 
 typedef struct yy_buffer_state *YY_BUFFER_STATE;
 extern YY_BUFFER_STATE yy_scan_string(const char *str);
@@ -78,11 +79,40 @@ TEST(test_init_shape_mismatch) {
     ast_free(ast);
 }
 
+TEST(test_identity_add_float) {
+    ASSERT_TRUE(compute_op_identity(OP_ADD, TYPE_FLOAT) == 0.0);
+}
+TEST(test_identity_mul_float) {
+    ASSERT_TRUE(compute_op_identity(OP_MUL, TYPE_FLOAT) == 1.0);
+}
+TEST(test_identity_min_float) {
+    ASSERT_TRUE(compute_op_identity(OP_MIN, TYPE_FLOAT) > 1e308); /* +inf */
+}
+TEST(test_identity_max_float) {
+    ASSERT_TRUE(compute_op_identity(OP_MAX, TYPE_FLOAT) < -1e308); /* -inf */
+}
+TEST(test_identity_min_int) {
+    ASSERT_TRUE(compute_op_identity(OP_MIN, TYPE_INTEGER) == (double)INT_MAX);
+}
+TEST(test_identity_and_bool) {
+    ASSERT_TRUE(compute_op_identity(OP_AND, TYPE_BOOLEAN) == 1.0);
+}
+TEST(test_identity_or_bool) {
+    ASSERT_TRUE(compute_op_identity(OP_OR, TYPE_BOOLEAN) == 0.0);
+}
+
 int main(void) {
     RUN_TEST(test_valid_gemm);
     RUN_TEST(test_undeclared_dim);
     RUN_TEST(test_undeclared_tensor_in_init);
     RUN_TEST(test_dimension_mismatch);
     RUN_TEST(test_init_shape_mismatch);
+    RUN_TEST(test_identity_add_float);
+    RUN_TEST(test_identity_mul_float);
+    RUN_TEST(test_identity_min_float);
+    RUN_TEST(test_identity_max_float);
+    RUN_TEST(test_identity_min_int);
+    RUN_TEST(test_identity_and_bool);
+    RUN_TEST(test_identity_or_bool);
     return test_report();
 }
