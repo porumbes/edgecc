@@ -20,6 +20,7 @@ typedef struct {
     DataType datatype;
     double empty_val;
     int dim_sizes[8];
+    int gen_axis;   /* index of generational rank, or -1 */
 } TensorEntry;
 
 typedef struct {
@@ -37,6 +38,12 @@ typedef struct {
     int num_free_indices;
     IndexEntry reduction_indices[MAX_INDICES];
     int num_reduction_indices;
+    /* Generational (iterative) program metadata. is_iterative == 0 for
+       ordinary single-pass programs. */
+    int is_iterative;
+    char *gen_tensor;    /* name of the generational tensor (borrowed) */
+    char *gen_rank_var;  /* the index var bound to the gen rank, e.g. "i" (borrowed) */
+    char *stop_watch;    /* tensor named in `stop: stable(...)` (borrowed) */
 } SymbolTable;
 
 typedef struct {
