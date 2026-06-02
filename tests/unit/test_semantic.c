@@ -277,6 +277,21 @@ TEST(test_cascade_intermediate_read_before_write) {
     ast_free(ast);
 }
 
+TEST(test_cascade_cross_gen_not_read) {
+    AstNode *ast = parse(
+        "dim N = 4;\n"
+        "tensor W[R=N, C=N]   : float, empty = inf;\n"
+        "tensor D[gen I, R=N] : float, empty = inf;\n"
+        "init D = [0.0, inf, inf, inf];\n"
+        "D[i+1, d] = W[s,d] . W[s,d] :: map(add, intersect) reduce(min, union);\n"
+        "stop: stable(D);\n"
+    );
+    SemanticResult res = semantic_analyze(ast);
+    ASSERT_TRUE(res.error_count > 0);
+    semantic_result_free(&res);
+    ast_free(ast);
+}
+
 int main(void) {
     RUN_TEST(test_valid_gemm);
     RUN_TEST(test_undeclared_dim);
@@ -300,5 +315,6 @@ int main(void) {
     RUN_TEST(test_cascade_two_cross_gen_tensors);
     RUN_TEST(test_cascade_intermediate_with_init);
     RUN_TEST(test_cascade_intermediate_read_before_write);
+    RUN_TEST(test_cascade_cross_gen_not_read);
     return test_report();
 }

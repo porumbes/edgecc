@@ -533,6 +533,27 @@ SemanticResult semantic_analyze(AstNode *program) {
         }
     }
 
+    /* The cross-generational tensor must also be read at generation i somewhere
+       in the cascade (otherwise it has no generation-0 input wired into run()). */
+    if (st->is_iterative && st->gen_tensor != NULL) {
+        int read_at_i = 0;
+        for (int i = 0; i < pd->count; i++) {
+            AstNode *s = pd->statements[i];
+            if (s->type != NODE_EINSUM) continue;
+            EinsumData *e = &s->data.einsum;
+            if (strcmp(e->input1.tensor_name, st->gen_tensor) == 0 ||
+                strcmp(e->input2.tensor_name, st->gen_tensor) == 0) {
+                read_at_i = 1;
+                break;
+            }
+        }
+        if (!read_at_i) {
+            add_error(&res,
+                "cross-generational tensor '%s' must be read at generation i "
+                "somewhere in the cascade", st->gen_tensor);
+        }
+    }
+
     return res;
 }
 
