@@ -65,11 +65,20 @@ AstNode *ast_einsum_new(TensorRef output, TensorRef input1, TensorRef input2,
     return node;
 }
 
+AstNode *ast_stop_new(char *watch_tensor) {
+    AstNode *node = calloc(1, sizeof(AstNode));
+    node->type = NODE_STOP;
+    node->data.stop.watch_tensor = watch_tensor;
+    return node;
+}
+
 TensorRef tensor_ref_new(char *name, char **rank_vars, int num_vars) {
     TensorRef ref;
     ref.tensor_name = name;
     ref.rank_vars = rank_vars;
     ref.num_vars = num_vars;
+    ref.gen_axis = -1;
+    ref.gen_offset = 0;
     return ref;
 }
 
@@ -155,6 +164,9 @@ void ast_free(AstNode *node) {
             tensor_ref_free_contents(&node->data.einsum.output);
             tensor_ref_free_contents(&node->data.einsum.input1);
             tensor_ref_free_contents(&node->data.einsum.input2);
+            break;
+        case NODE_STOP:
+            free(node->data.stop.watch_tensor);
             break;
     }
     free(node);
