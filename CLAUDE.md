@@ -83,6 +83,30 @@ tensor never stabilizes. Limitations: one generational tensor / one
 generational rank, offsets `i` and `i+1` only, `stable` stop only, single
 Einsum, no `<<` accumulation. See `docs/superpowers/specs/2026-06-01-edgecc-generational-ranks-a-design.md`.
 
+**Cascades (multiple Einsums per generation).** A generation may run a *sequence*
+of Einsums in source order, sharing one generational rank. Exactly one
+**cross-generational** tensor is written at `i+1` (it carries the `init`, is
+double-buffered, and is returned); any number of **intra-generation
+intermediates** are written and read at `i` (no `init`, recomputed fresh each
+generation). Bellman-Ford shortest paths:
+
+```
+dim N = 4;
+tensor W[R=N, C=N]   : float, empty = inf;
+tensor T[gen I, R=N] : float, empty = inf;   // intermediate (relaxed candidates)
+tensor D[gen I, R=N] : float, empty = inf;   // cross-generational (distances)
+init W = [[inf,1.0,4.0,inf],[inf,inf,2.0,6.0],[inf,inf,inf,3.0],[inf,inf,inf,inf]];
+init D = [0.0, inf, inf, inf];
+T[i, d]   = W[s,d] . D[i, s] :: map(add, intersect) reduce(min, union);   // relax
+D[i+1, d] = D[i, d] . T[i, d] :: map(min, union) reduce(min, union);      // combine
+stop: stable(D);
+```
+
+The cross-generation combine is just another Einsum (`map(min, union)`), so no
+special accumulation operator is needed. An Einsum with no reduction rank (the
+combine) still writes `reduce(...)`; with zero reduction indices it passes the
+map value through. See `docs/superpowers/specs/2026-06-01-edgecc-generational-cascades-b-design.md`.
+
 Rank variables in expressions bind to declared rank names by position. Built-in compute operators: `add`, `sub`, `mul`, `min`, `max`, `and`, `or`. Built-in merge operators (optional second arg, default `passthrough`): `passthrough`, `nopass`, `intersect`, `take_left`, `take_left_only`, `take_right`, `take_right_only`, `xor`, `union`. Omitting the merge argument preserves v1 source-program semantics.
 
 ## Generated Python ABI
@@ -152,4 +176,4 @@ Coverage is Tier 1 only — static dropdowns for compute / merge / type / empty-
 
 ## v2 Scope Limitations
 
-Not yet supported: multi-operation expressions with compute labels, multi-Einsum generational cascades (the `<<` update/accumulation populate, and chained Einsums sharing a generational rank — single-Einsum generational ranks are supported; see "Generational (iterative) ranks"), anonymous tensors / parenthesized sub-expressions, unary functions, the 7 (No,No)→Yes merge operators (NOR, equivalence, NAND, ¬→, ¬←, ⇐, ⇒), file-based init, sparse tensor storage, optimizations of any kind, user-defined compute operators.
+Not yet supported: multi-operation expressions with compute labels, the `<<` update compute operator, multiple cross-generational tensors / full 3-step BFS (needs unary `¬` and a take-left compute op), `ANY` compute, occupancy (`‖F‖≡0`) termination, and nested cascades / multiple generational ranks — single-Einsum generational ranks and single-cross-generational-tensor cascades (e.g. Bellman-Ford) are supported; see "Generational (iterative) ranks", anonymous tensors / parenthesized sub-expressions, unary functions, the 7 (No,No)→Yes merge operators (NOR, equivalence, NAND, ¬→, ¬←, ⇐, ⇒), file-based init, sparse tensor storage, optimizations of any kind, user-defined compute operators.
