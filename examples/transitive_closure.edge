@@ -1,0 +1,25 @@
+// All-pairs transitive closure (generational rank over a 2-D tensor).
+//
+// Like reachability, but the generational tensor `T` is a full matrix: it has
+// the generational rank `I` plus two spatial ranks (R, C). The compiler strips
+// the generational coordinate and allocates a fresh N x N slice each
+// generation, reducing over the middle index `b`:
+//
+//     T[i+1, a, c] = OR_b ( G[a, b] AND T[i, b, c] )
+//
+// G is reflexive (1.0 on the diagonal); T starts as the identity matrix. T
+// grows monotonically (boolean matrix powers) and converges to the reachability
+// matrix: T[a][c] == 1.0 iff c is reachable from a. Edges: 0->1, 1->2.
+//
+// Run:  ./build/edgecc examples/transitive_closure.edge -o out.py && python3 out.py
+// Output: [[1.0, 1.0, 1.0, 0.0], [0.0, 1.0, 1.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
+dim N = 4;
+
+tensor G[R=N, C=N]        : float, empty = 0.0;
+tensor T[gen I, R=N, C=N] : float, empty = 0.0;
+
+init G = [[1.0, 1.0, 0.0, 0.0], [0.0, 1.0, 1.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+init T = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];  // identity (generation 0)
+
+T[i+1, a, c] = G[a,b] . T[i, b, c] :: map(mul, intersect) reduce(max, union);
+stop: stable(T);

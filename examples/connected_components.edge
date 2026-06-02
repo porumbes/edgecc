@@ -1,0 +1,28 @@
+// Connected components by max-label propagation (single-Einsum generational rank).
+//
+// Each vertex starts with a unique label (its id + 1). Every generation, a
+// vertex adopts the maximum label among its neighbours (and itself, since G is
+// reflexive):
+//
+//     L[i+1, d] = max_s ( G[s, d] AND L[i, s] )
+//
+// map(mul, intersect) passes a neighbour's label through the 1.0 edge weight;
+// reduce(max, union) keeps the largest. Labels only ever increase and are
+// bounded, so L converges: every vertex ends holding the maximum label in its
+// connected component — vertices sharing a label are in the same component.
+//
+// G is a symmetric reflexive adjacency matrix with two components: {0,1,2} and
+// {3,4}. Component {0,1,2} settles on label 3; component {3,4} on label 5.
+//
+// Run:  ./build/edgecc examples/connected_components.edge -o out.py && python3 out.py
+// Output: [3.0, 3.0, 3.0, 5.0, 5.0]
+dim N = 5;
+
+tensor G[R=N, C=N]   : float, empty = 0.0;
+tensor L[gen I, R=N] : float, empty = 0.0;
+
+init G = [[1.0, 1.0, 0.0, 0.0, 0.0], [1.0, 1.0, 1.0, 0.0, 0.0], [0.0, 1.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0, 1.0], [0.0, 0.0, 0.0, 1.0, 1.0]];
+init L = [1.0, 2.0, 3.0, 4.0, 5.0];   // unique labels (generation 0)
+
+L[i+1, d] = G[s,d] . L[i, s] :: map(mul, intersect) reduce(max, union);
+stop: stable(L);

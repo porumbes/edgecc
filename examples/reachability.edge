@@ -1,0 +1,24 @@
+// Reachability from a seed vertex (single-Einsum generational / iterative rank).
+//
+// `F` carries a generational rank `I` (declared `gen I`, unbounded — no dim).
+// Each generation reads F[i, s] and writes F[i+1, d]; the loop repeats until
+// the watched tensor is stable (a fixed point). The compiler emits the loop
+// internally — run() returns the final F.
+//
+// G is the adjacency matrix made *reflexive* (1.0 on the diagonal). Reflexivity
+// re-derives the previous frontier each generation, so F grows monotonically
+// and converges to the set reachable from the seed. Edges: 0->1, 1->2
+// (node 3 is unreachable from node 0).
+//
+// Run:  ./build/edgecc examples/reachability.edge -o out.py && python3 out.py
+// Output: [1.0, 1.0, 1.0, 0.0]
+dim N = 4;
+
+tensor G[R=N, C=N]   : float, empty = 0.0;
+tensor F[gen I, R=N] : float, empty = 0.0;
+
+init G = [[1.0, 1.0, 0.0, 0.0], [0.0, 1.0, 1.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+init F = [1.0, 0.0, 0.0, 0.0];   // seed = vertex 0 (generation 0)
+
+F[i+1, d] = G[s,d] . F[i, s] :: map(mul, intersect) reduce(max, union);
+stop: stable(F);
