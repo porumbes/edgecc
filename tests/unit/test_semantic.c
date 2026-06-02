@@ -101,6 +101,99 @@ TEST(test_identity_or_bool) {
     ASSERT_TRUE(compute_op_identity(OP_OR, TYPE_BOOLEAN) == 0.0);
 }
 
+TEST(test_generational_valid) {
+    AstNode *ast = parse(
+        "dim N = 4;\n"
+        "tensor G[R=N, C=N]   : float, empty = 0.0;\n"
+        "tensor F[gen I, R=N] : float, empty = 0.0;\n"
+        "init F = [1.0, 0.0, 0.0, 0.0];\n"
+        "F[i+1, d] = G[s,d] . F[i, s] :: map(mul, intersect) reduce(max, union);\n"
+        "stop: stable(F);\n"
+    );
+    SemanticResult res = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, res.error_count);
+    ASSERT_INT_EQ(1, res.symtab->is_iterative);
+    ASSERT_STR_EQ("F", res.symtab->gen_tensor);
+    ASSERT_STR_EQ("i", res.symtab->gen_rank_var);
+    ASSERT_STR_EQ("F", res.symtab->stop_watch);
+    ASSERT_INT_EQ(1, res.symtab->num_free_indices);       /* d */
+    ASSERT_INT_EQ(1, res.symtab->num_reduction_indices);  /* s */
+    ASSERT_STR_EQ("d", res.symtab->free_indices[0].name);
+    ASSERT_STR_EQ("s", res.symtab->reduction_indices[0].name);
+    semantic_result_free(&res);
+    ast_free(ast);
+}
+
+TEST(test_generational_stop_wrong_tensor) {
+    AstNode *ast = parse(
+        "dim N = 4;\n"
+        "tensor G[R=N, C=N]   : float, empty = 0.0;\n"
+        "tensor F[gen I, R=N] : float, empty = 0.0;\n"
+        "F[i+1, d] = G[s,d] . F[i, s] :: map(mul, intersect) reduce(max, union);\n"
+        "stop: stable(G);\n"
+    );
+    SemanticResult res = semantic_analyze(ast);
+    ASSERT_TRUE(res.error_count > 0);
+    semantic_result_free(&res);
+    ast_free(ast);
+}
+
+TEST(test_generational_missing_stop) {
+    AstNode *ast = parse(
+        "dim N = 4;\n"
+        "tensor G[R=N, C=N]   : float, empty = 0.0;\n"
+        "tensor F[gen I, R=N] : float, empty = 0.0;\n"
+        "F[i+1, d] = G[s,d] . F[i, s] :: map(mul, intersect) reduce(max, union);\n"
+    );
+    SemanticResult res = semantic_analyze(ast);
+    ASSERT_TRUE(res.error_count > 0);
+    semantic_result_free(&res);
+    ast_free(ast);
+}
+
+TEST(test_generational_bad_offset) {
+    AstNode *ast = parse(
+        "dim N = 4;\n"
+        "tensor G[R=N, C=N]   : float, empty = 0.0;\n"
+        "tensor F[gen I, R=N] : float, empty = 0.0;\n"
+        "F[i+2, d] = G[s,d] . F[i, s] :: map(mul, intersect) reduce(max, union);\n"
+        "stop: stable(F);\n"
+    );
+    SemanticResult res = semantic_analyze(ast);
+    ASSERT_TRUE(res.error_count > 0);
+    semantic_result_free(&res);
+    ast_free(ast);
+}
+
+TEST(test_generational_init_spatial_shape) {
+    AstNode *ast = parse(
+        "dim N = 4;\n"
+        "tensor G[R=N, C=N]   : float, empty = 0.0;\n"
+        "tensor F[gen I, R=N] : float, empty = 0.0;\n"
+        "init F = [1.0, 0.0, 0.0, 0.0];\n"
+        "F[i+1, d] = G[s,d] . F[i, s] :: map(mul, intersect) reduce(max, union);\n"
+        "stop: stable(F);\n"
+    );
+    SemanticResult res = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, res.error_count);
+    semantic_result_free(&res);
+    ast_free(ast);
+}
+
+TEST(test_generational_two_gen_tensors) {
+    AstNode *ast = parse(
+        "dim N = 4;\n"
+        "tensor F[gen I, R=N] : float, empty = 0.0;\n"
+        "tensor H[gen J, R=N] : float, empty = 0.0;\n"
+        "F[i+1, d] = H[j, d] . F[i, d] :: map(mul, intersect) reduce(max, union);\n"
+        "stop: stable(F);\n"
+    );
+    SemanticResult res = semantic_analyze(ast);
+    ASSERT_TRUE(res.error_count > 0);
+    semantic_result_free(&res);
+    ast_free(ast);
+}
+
 int main(void) {
     RUN_TEST(test_valid_gemm);
     RUN_TEST(test_undeclared_dim);
@@ -114,5 +207,11 @@ int main(void) {
     RUN_TEST(test_identity_min_int);
     RUN_TEST(test_identity_and_bool);
     RUN_TEST(test_identity_or_bool);
+    RUN_TEST(test_generational_valid);
+    RUN_TEST(test_generational_stop_wrong_tensor);
+    RUN_TEST(test_generational_missing_stop);
+    RUN_TEST(test_generational_bad_offset);
+    RUN_TEST(test_generational_init_spatial_shape);
+    RUN_TEST(test_generational_two_gen_tensors);
     return test_report();
 }

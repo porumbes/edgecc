@@ -49,6 +49,7 @@ TEST(test_ir_gemm_structure) {
             case IR_MAP:           maps++; break;
             case IR_REDUCE:        reduces++; break;
             case IR_STORE:         stores++; break;
+            default: break;
         }
     }
     ASSERT_INT_EQ(3, dim_defs);
@@ -150,10 +151,65 @@ TEST(test_ir_default_merge_is_passthrough) {
     ast_free(ast);
 }
 
+TEST(test_ir_generational_structure) {
+    AstNode *ast = parse(
+        "dim N = 4;\n"
+        "tensor G[R=N, C=N]   : float, empty = 0.0;\n"
+        "tensor F[gen I, R=N] : float, empty = 0.0;\n"
+        "init F = [1.0, 0.0, 0.0, 0.0];\n"
+        "F[i+1, d] = G[s,d] . F[i, s] :: map(mul, intersect) reduce(max, union);\n"
+        "stop: stable(F);\n"
+    );
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    ASSERT_NOT_NULL(ir);
+
+    int gen_begin = 0, gen_end = 0, gen_reads = 0, gen_writes = 0;
+    int loop_begins = 0;
+    for (int i = 0; i < ir->count; i++) {
+        switch (ir->instrs[i].type) {
+            case IR_GEN_LOOP_BEGIN:
+                gen_begin++;
+                ASSERT_STR_EQ("F", ir->instrs[i].data.gen_loop.tensor_name);
+                ASSERT_INT_EQ(1, ir->instrs[i].data.gen_loop.spatial_ndims);
+                ASSERT_INT_EQ(4, ir->instrs[i].data.gen_loop.spatial_dims[0]);
+                break;
+            case IR_GEN_LOOP_END: gen_end++; break;
+            case IR_LOOP_BEGIN:   loop_begins++; break;
+            case IR_LOAD:
+                if (ir->instrs[i].data.load.gen_read) {
+                    gen_reads++;
+                    ASSERT_INT_EQ(1, ir->instrs[i].data.load.ncoords);
+                    ASSERT_STR_EQ("s", ir->instrs[i].data.load.coords[0]);
+                }
+                break;
+            case IR_STORE:
+                if (ir->instrs[i].data.store.gen_write) {
+                    gen_writes++;
+                    ASSERT_INT_EQ(1, ir->instrs[i].data.store.ncoords);
+                    ASSERT_STR_EQ("d", ir->instrs[i].data.store.coords[0]);
+                }
+                break;
+            default: break;
+        }
+    }
+    ASSERT_INT_EQ(1, gen_begin);
+    ASSERT_INT_EQ(1, gen_end);
+    ASSERT_INT_EQ(1, gen_reads);
+    ASSERT_INT_EQ(1, gen_writes);
+    ASSERT_INT_EQ(2, loop_begins);   /* spatial: d (free) + s (reduction) */
+
+    ir_free(ir);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
 int main(void) {
     RUN_TEST(test_ir_gemm_structure);
     RUN_TEST(test_ir_loop_order);
     RUN_TEST(test_ir_carries_merge_and_identity);
     RUN_TEST(test_ir_default_merge_is_passthrough);
+    RUN_TEST(test_ir_generational_structure);
     return test_report();
 }

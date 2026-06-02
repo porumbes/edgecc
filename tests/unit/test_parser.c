@@ -139,6 +139,54 @@ TEST(test_parse_einsum_default_merge) {
     parse_result = NULL;
 }
 
+TEST(test_parse_generational_rank) {
+    YY_BUFFER_STATE buf = yy_scan_string(
+        "tensor F[gen I, R=N] : float, empty = 0.0;");
+    ASSERT_INT_EQ(0, yyparse());
+    ASSERT_NOT_NULL(parse_result);
+    AstNode *td = parse_result->data.program.statements[0];
+    ASSERT_INT_EQ(NODE_TENSOR_DECL, td->type);
+    ASSERT_INT_EQ(2, td->data.tensor_decl.num_ranks);
+    ASSERT_INT_EQ(1, td->data.tensor_decl.ranks[0].is_generational);
+    ASSERT_STR_EQ("I", td->data.tensor_decl.ranks[0].rank_name);
+    ASSERT_INT_EQ(0, td->data.tensor_decl.ranks[1].is_generational);
+    ASSERT_STR_EQ("R", td->data.tensor_decl.ranks[1].rank_name);
+    ASSERT_STR_EQ("N", td->data.tensor_decl.ranks[1].dim_name);
+    ast_free(parse_result);
+    parse_result = NULL;
+    yy_delete_buffer(buf);
+}
+
+TEST(test_parse_offset_coord) {
+    YY_BUFFER_STATE buf = yy_scan_string(
+        "F[i+1, d] = G[s,d] . F[i, s] :: map(mul, intersect) reduce(max, union);");
+    ASSERT_INT_EQ(0, yyparse());
+    ASSERT_NOT_NULL(parse_result);
+    AstNode *e = parse_result->data.program.statements[0];
+    ASSERT_INT_EQ(NODE_EINSUM, e->type);
+    ASSERT_INT_EQ(0, e->data.einsum.output.gen_axis);
+    ASSERT_INT_EQ(1, e->data.einsum.output.gen_offset);
+    ASSERT_STR_EQ("i", e->data.einsum.output.rank_vars[0]);
+    ASSERT_STR_EQ("d", e->data.einsum.output.rank_vars[1]);
+    ASSERT_INT_EQ(-1, e->data.einsum.input2.gen_axis);
+    ASSERT_INT_EQ(0, e->data.einsum.input2.gen_offset);
+    ast_free(parse_result);
+    parse_result = NULL;
+    yy_delete_buffer(buf);
+}
+
+TEST(test_parse_stop_stmt) {
+    YY_BUFFER_STATE buf = yy_scan_string("stop: stable(F);");
+    ASSERT_INT_EQ(0, yyparse());
+    ASSERT_NOT_NULL(parse_result);
+    AstNode *s = parse_result->data.program.statements[0];
+    ASSERT_INT_EQ(NODE_STOP, s->type);
+    ASSERT_STR_EQ("F", s->data.stop.watch_tensor);
+    ast_free(parse_result);
+    parse_result = NULL;
+    yy_delete_buffer(buf);
+}
+
 int main(void) {
     RUN_TEST(test_parse_dim_decl);
     RUN_TEST(test_parse_tensor_decl);
@@ -147,5 +195,8 @@ int main(void) {
     RUN_TEST(test_parse_full_program);
     RUN_TEST(test_parse_einsum_with_merge);
     RUN_TEST(test_parse_einsum_default_merge);
+    RUN_TEST(test_parse_generational_rank);
+    RUN_TEST(test_parse_offset_coord);
+    RUN_TEST(test_parse_stop_stmt);
     return test_report();
 }

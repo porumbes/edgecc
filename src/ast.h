@@ -16,7 +16,8 @@ typedef enum {
     NODE_DIM_DECL,
     NODE_TENSOR_DECL,
     NODE_INIT,
-    NODE_EINSUM
+    NODE_EINSUM,
+    NODE_STOP
 } NodeType;
 
 typedef enum {
@@ -51,13 +52,16 @@ typedef enum {
 
 struct RankPair {
     char *rank_name;
-    char *dim_name;
+    char *dim_name;        /* NULL when is_generational */
+    int   is_generational; /* 1 if declared `gen NAME` (unbounded, no dim) */
 };
 
 struct TensorRef {
     char *tensor_name;
     char **rank_vars;
     int num_vars;
+    int gen_axis;    /* index of the coord written as `var + N`, else -1 */
+    int gen_offset;  /* the N in `var + N` (0 when gen_axis == -1) */
 };
 
 struct LiteralData {
@@ -97,6 +101,10 @@ typedef struct {
 } InitData;
 
 typedef struct {
+    char *watch_tensor;
+} StopData;
+
+typedef struct {
     TensorRef output;
     TensorRef input1;
     TensorRef input2;
@@ -120,6 +128,7 @@ struct AstNode {
         TensorDeclData tensor_decl;
         InitData init;
         EinsumData einsum;
+        StopData stop;
     } data;
 };
 
@@ -134,6 +143,7 @@ AstNode *ast_init_new(char *tensor_name, LiteralData *data);
 AstNode *ast_einsum_new(TensorRef output, TensorRef input1, TensorRef input2,
                          OperatorType map_op, MergeOp map_merge_op,
                          OperatorType reduce_op, MergeOp reduce_merge_op);
+AstNode *ast_stop_new(char *watch_tensor);
 
 TensorRef tensor_ref_new(char *name, char **rank_vars, int num_vars);
 

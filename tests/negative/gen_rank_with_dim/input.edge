@@ -1,0 +1,4 @@
+dim N = 4;
+tensor F[gen I = N, R=N] : float, empty = 0.0;
+F[i+1, d] = F[i, d] . F[i, d] :: map(mul, intersect) reduce(max, union);
+stop: stable(F);

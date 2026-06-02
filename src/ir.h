@@ -14,7 +14,9 @@ typedef enum {
     IR_LOAD,
     IR_MAP,
     IR_REDUCE,
-    IR_STORE
+    IR_STORE,
+    IR_GEN_LOOP_BEGIN,
+    IR_GEN_LOOP_END
 } IRType;
 
 typedef struct {
@@ -44,6 +46,7 @@ typedef struct {
     char *tensor_name;
     char **coords;
     int ncoords;
+    int gen_read;   /* 1 if this loads the generational tensor's prev slice */
 } IRLoad;
 
 typedef struct {
@@ -72,7 +75,16 @@ typedef struct {
     char **coords;
     int ncoords;
     int src_reg;
+    int gen_write;  /* 1 if this stores into the generational tensor's next slice */
 } IRStore;
+
+typedef struct {
+    char *tensor_name;       /* the generational tensor */
+    int spatial_dims[8];     /* shape excluding the generational axis */
+    int spatial_ndims;
+    double empty_val;        /* for the fresh slice */
+    int max_gen;             /* safety iteration cap */
+} IRGenLoop;
 
 typedef struct {
     IRType type;
@@ -85,6 +97,7 @@ typedef struct {
         IRMap map;
         IRReduce reduce;
         IRStore store;
+        IRGenLoop gen_loop;
     } data;
 } IRInstr;
 

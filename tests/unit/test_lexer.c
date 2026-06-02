@@ -49,6 +49,30 @@ TEST(test_double_colon) {
     yy_delete_buffer(buf);
 }
 
+TEST(test_gen_keyword) {
+    YY_BUFFER_STATE buf = yy_scan_string("gen");
+    ASSERT_INT_EQ(TOK_GEN, yylex());
+    yy_delete_buffer(buf);
+}
+
+TEST(test_stop_keyword) {
+    YY_BUFFER_STATE buf = yy_scan_string("stop");
+    ASSERT_INT_EQ(TOK_STOP, yylex());
+    yy_delete_buffer(buf);
+}
+
+TEST(test_stable_keyword) {
+    YY_BUFFER_STATE buf = yy_scan_string("stable");
+    ASSERT_INT_EQ(TOK_STABLE, yylex());
+    yy_delete_buffer(buf);
+}
+
+TEST(test_plus_token) {
+    YY_BUFFER_STATE buf = yy_scan_string("+");
+    ASSERT_INT_EQ('+', yylex());
+    yy_delete_buffer(buf);
+}
+
 TEST(test_full_token_sequence) {
     YY_BUFFER_STATE buf = yy_scan_string("dim M = 4;");
     ASSERT_INT_EQ(TOK_DIM, yylex());
@@ -82,6 +106,10 @@ int main(void) {
     RUN_TEST(test_int_literal);
     RUN_TEST(test_float_literal);
     RUN_TEST(test_double_colon);
+    RUN_TEST(test_gen_keyword);
+    RUN_TEST(test_stop_keyword);
+    RUN_TEST(test_stable_keyword);
+    RUN_TEST(test_plus_token);
     RUN_TEST(test_full_token_sequence);
     RUN_TEST(test_comment_skipped);
     RUN_TEST(test_map_reduce_keywords);

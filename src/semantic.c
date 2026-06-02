@@ -89,20 +89,27 @@ static void analyze_tensor_decl(SemanticResult *res, AstNode *node) {
     te->num_ranks = d->num_ranks;
     te->datatype = d->datatype;
     te->empty_val = d->empty_val;
+    te->gen_axis = -1;
 
-    int ok = 1;
     for (int i = 0; i < d->num_ranks; i++) {
+        if (d->ranks[i].is_generational) {
+            if (te->gen_axis != -1) {
+                add_error(res, "tensor '%s' has more than one generational rank",
+                          d->name);
+            }
+            te->gen_axis = i;
+            te->dim_sizes[i] = -1;   /* unbounded sentinel */
+            continue;
+        }
         int sz = find_dim(st, d->ranks[i].dim_name);
         if (sz == -1) {
             add_error(res, "tensor '%s' references undeclared dim '%s'",
                       d->name, d->ranks[i].dim_name);
-            ok = 0;
             te->dim_sizes[i] = 0;
         } else {
             te->dim_sizes[i] = sz;
         }
     }
-    (void)ok;
     st->num_tensors++;
 }
 
@@ -161,7 +168,15 @@ static void analyze_init(SemanticResult *res, AstNode *node) {
         return;
     }
 
-    check_init_shape(res, d->data, 0, te->num_ranks, te->dim_sizes,
+    /* Build spatial dim sizes (excluding the generational axis, if any). */
+    int spatial_sizes[8];
+    int spatial_ranks = 0;
+    for (int i = 0; i < te->num_ranks; i++) {
+        if (i == te->gen_axis) continue;
+        spatial_sizes[spatial_ranks++] = te->dim_sizes[i];
+    }
+
+    check_init_shape(res, d->data, 0, spatial_ranks, spatial_sizes,
                      d->tensor_name);
 }
 
@@ -232,6 +247,90 @@ static void analyze_einsum(SemanticResult *res, AstNode *node) {
                   d->input2.tensor_name, in2_te->num_ranks, d->input2.num_vars);
     }
 
+    /* ---- Generational rank handling ---- */
+    /* The generational tensor is whichever operand's TensorEntry has gen_axis >= 0.
+       For A there is exactly one such tensor; it must be the output and one input. */
+    char *gen_var = NULL;   /* the index var bound to the gen rank */
+    {
+        TensorEntry *gen_te = NULL;
+        if (out_te->gen_axis >= 0) gen_te = out_te;
+        else if (in1_te->gen_axis >= 0) gen_te = in1_te;
+        else if (in2_te->gen_axis >= 0) gen_te = in2_te;
+
+        /* A supports exactly one generational tensor. Reject a second distinct one. */
+        {
+            const char *gnames[3];
+            int ng = 0;
+            TensorEntry *tes[3]    = { out_te, in1_te, in2_te };
+            const char *tnames[3]  = { d->output.tensor_name,
+                                       d->input1.tensor_name,
+                                       d->input2.tensor_name };
+            for (int k = 0; k < 3; k++) {
+                if (tes[k]->gen_axis >= 0) {
+                    int seen = 0;
+                    for (int m = 0; m < ng; m++)
+                        if (strcmp(gnames[m], tnames[k]) == 0) seen = 1;
+                    if (!seen) gnames[ng++] = tnames[k];
+                }
+            }
+            if (ng > 1) {
+                add_error(res,
+                    "more than one generational tensor ('%s' and '%s'); "
+                    "only one is supported", gnames[0], gnames[1]);
+            }
+        }
+
+        if (gen_te != NULL) {
+            st->is_iterative = 1;
+            st->gen_tensor = gen_te->name;
+
+            /* Output must be the generational tensor, written at offset +1. */
+            if (strcmp(d->output.tensor_name, gen_te->name) != 0) {
+                add_error(res,
+                    "generational tensor '%s' must be the output of the einsum",
+                    gen_te->name);
+            } else {
+                if (d->output.gen_axis != out_te->gen_axis ||
+                    d->output.gen_offset != 1) {
+                    add_error(res,
+                        "generational output '%s' must be written at offset +1 "
+                        "on its generational rank (e.g. %s[i+1, ...])",
+                        gen_te->name, gen_te->name);
+                }
+                if (d->output.gen_axis == out_te->gen_axis)
+                    gen_var = d->output.rank_vars[out_te->gen_axis];
+            }
+
+            /* The matching read of the generational tensor must use offset 0
+               (no `+N`) on its generational rank. */
+            TensorRef *in_gen = NULL;
+            TensorEntry *in_gen_te = NULL;
+            if (strcmp(d->input1.tensor_name, gen_te->name) == 0) {
+                in_gen = &d->input1; in_gen_te = in1_te;
+            } else if (strcmp(d->input2.tensor_name, gen_te->name) == 0) {
+                in_gen = &d->input2; in_gen_te = in2_te;
+            }
+            if (in_gen == NULL) {
+                add_error(res,
+                    "generational tensor '%s' must also appear as an input "
+                    "read at generation i", gen_te->name);
+            } else if (in_gen->gen_offset != 0) {
+                add_error(res,
+                    "generational input '%s' must be read at offset 0 "
+                    "(e.g. %s[i, ...]), not with a +N offset",
+                    gen_te->name, gen_te->name);
+            } else if (gen_var != NULL &&
+                       in_gen_te->gen_axis >= 0 &&
+                       in_gen_te->gen_axis < in_gen->num_vars &&
+                       strcmp(in_gen->rank_vars[in_gen_te->gen_axis], gen_var) != 0) {
+                add_error(res,
+                    "generational rank variable mismatch: output uses '%s' but "
+                    "input uses '%s'",
+                    gen_var, in_gen->rank_vars[in_gen_te->gen_axis]);
+            }
+        }
+    }
+
     /* collect all indices and resolve sizes */
     IndexInfo indices[MAX_INDICES * 3];
     int num_indices = 0;
@@ -260,13 +359,18 @@ static void analyze_einsum(SemanticResult *res, AstNode *node) {
 } while(0)
 
     for (int i = 0; i < d->output.num_vars && i < out_te->num_ranks; i++)
-        REGISTER_INDEX(d->output.rank_vars[i], out_te->dim_sizes[i]);
+        if (i != out_te->gen_axis)
+            REGISTER_INDEX(d->output.rank_vars[i], out_te->dim_sizes[i]);
     for (int i = 0; i < d->input1.num_vars && i < in1_te->num_ranks; i++)
-        REGISTER_INDEX(d->input1.rank_vars[i], in1_te->dim_sizes[i]);
+        if (i != in1_te->gen_axis)
+            REGISTER_INDEX(d->input1.rank_vars[i], in1_te->dim_sizes[i]);
     for (int i = 0; i < d->input2.num_vars && i < in2_te->num_ranks; i++)
-        REGISTER_INDEX(d->input2.rank_vars[i], in2_te->dim_sizes[i]);
+        if (i != in2_te->gen_axis)
+            REGISTER_INDEX(d->input2.rank_vars[i], in2_te->dim_sizes[i]);
 
 #undef REGISTER_INDEX
+
+    if (gen_var != NULL) st->gen_rank_var = gen_var;
 
     /* classify indices into free (in output) or reduction (not in output) */
     st->num_free_indices = 0;
@@ -304,6 +408,20 @@ static void analyze_einsum(SemanticResult *res, AstNode *node) {
 
 }
 
+static void analyze_stop(SemanticResult *res, AstNode *node) {
+    SymbolTable *st = res->symtab;
+    const char *watch = node->data.stop.watch_tensor;
+    TensorEntry *te = symtab_find_tensor(st, watch);
+    if (te == NULL) {
+        add_error(res, "stop: undeclared tensor '%s'", watch);
+        return;
+    }
+    if (te->gen_axis < 0) {
+        add_error(res, "stop: tensor '%s' is not generational", watch);
+    }
+    st->stop_watch = te->name;
+}
+
 /* ---- Public API ---- */
 
 SemanticResult semantic_analyze(AstNode *program) {
@@ -333,10 +451,29 @@ SemanticResult semantic_analyze(AstNode *program) {
             case NODE_EINSUM:
                 analyze_einsum(&res, stmt);
                 break;
+            case NODE_STOP:
+                analyze_stop(&res, stmt);
+                break;
             default:
                 add_error(&res, "unknown statement type %d", stmt->type);
                 break;
         }
+    }
+
+    /* Iterative consistency: a generational einsum needs a stop clause that
+       watches the generational tensor, and vice versa. */
+    SymbolTable *st = res.symtab;
+    if (st->is_iterative && st->stop_watch == NULL) {
+        add_error(&res, "generational einsum on '%s' requires a 'stop: stable(...)' clause",
+                  st->gen_tensor ? st->gen_tensor : "?");
+    }
+    if (st->stop_watch != NULL && !st->is_iterative) {
+        add_error(&res, "'stop' clause present but no generational einsum");
+    }
+    if (st->is_iterative && st->stop_watch != NULL && st->gen_tensor != NULL &&
+        strcmp(st->stop_watch, st->gen_tensor) != 0) {
+        add_error(&res, "stop watches '%s' but the generational tensor is '%s'",
+                  st->stop_watch, st->gen_tensor);
     }
 
     return res;

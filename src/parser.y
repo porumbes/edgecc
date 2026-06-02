@@ -13,6 +13,7 @@ AstNode *parse_result = NULL;
 
 typedef struct {
     char **items;
+    int   *offsets;
     int count;
     int capacity;
 } StrList;
@@ -21,16 +22,20 @@ static StrList *strlist_new(void) {
     StrList *sl = malloc(sizeof(StrList));
     sl->capacity = 4;
     sl->items = malloc(sl->capacity * sizeof(char *));
+    sl->offsets = malloc(sl->capacity * sizeof(int));
     sl->count = 0;
     return sl;
 }
 
-static void strlist_add(StrList *sl, char *s) {
+static void strlist_add(StrList *sl, char *s, int offset) {
     if (sl->count >= sl->capacity) {
         sl->capacity *= 2;
         sl->items = realloc(sl->items, sl->capacity * sizeof(char *));
+        sl->offsets = realloc(sl->offsets, sl->capacity * sizeof(int));
     }
-    sl->items[sl->count++] = s;
+    sl->items[sl->count] = s;
+    sl->offsets[sl->count] = offset;
+    sl->count++;
 }
 
 typedef struct {
@@ -93,13 +98,14 @@ static void litlist_add(LitList *ll, LiteralData *lit) {
 }
 
 %token TOK_DIM TOK_TENSOR TOK_INIT TOK_MAP TOK_REDUCE TOK_EMPTY
+%token TOK_GEN TOK_STOP TOK_STABLE
 %token TOK_TYPE_INTEGER TOK_TYPE_FLOAT TOK_TYPE_BOOLEAN
 %token TOK_DOUBLE_COLON
 %token <int_val> TOK_INT_LIT TOK_BOOL_LIT
 %token <float_val> TOK_FLOAT_LIT
 %token <str_val> TOK_IDENT
 
-%type <node> program stmt_list stmt dim_decl tensor_decl init_stmt einsum_stmt
+%type <node> program stmt_list stmt dim_decl tensor_decl init_stmt einsum_stmt stop_stmt
 %type <ptr> rank_pair_list ident_list nested_literal lit_list tensor_ref
 %type <datatype> datatype
 %type <float_val> literal_value
@@ -131,6 +137,14 @@ stmt:
     | tensor_decl
     | init_stmt
     | einsum_stmt
+    | stop_stmt
+    ;
+
+stop_stmt:
+    TOK_STOP ':' TOK_STABLE '(' TOK_IDENT ')' ';'
+    {
+        $$ = (void *)ast_stop_new($5);
+    }
     ;
 
 dim_decl:
@@ -156,6 +170,17 @@ rank_pair_list:
         RankPair rp;
         rp.rank_name = $1;
         rp.dim_name = $3;
+        rp.is_generational = 0;
+        rankpairlist_add(rpl, rp);
+        $$ = (void *)rpl;
+    }
+    | TOK_GEN TOK_IDENT
+    {
+        RankPairList *rpl = rankpairlist_new();
+        RankPair rp;
+        rp.rank_name = $2;
+        rp.dim_name = NULL;
+        rp.is_generational = 1;
         rankpairlist_add(rpl, rp);
         $$ = (void *)rpl;
     }
@@ -165,6 +190,17 @@ rank_pair_list:
         RankPair rp;
         rp.rank_name = $3;
         rp.dim_name = $5;
+        rp.is_generational = 0;
+        rankpairlist_add(rpl, rp);
+        $$ = (void *)rpl;
+    }
+    | rank_pair_list ',' TOK_GEN TOK_IDENT
+    {
+        RankPairList *rpl = (RankPairList *)$1;
+        RankPair rp;
+        rp.rank_name = $4;
+        rp.dim_name = NULL;
+        rp.is_generational = 1;
         rankpairlist_add(rpl, rp);
         $$ = (void *)rpl;
     }
@@ -277,6 +313,13 @@ tensor_ref:
         StrList *sl = (StrList *)$3;
         TensorRef *ref = malloc(sizeof(TensorRef));
         *ref = tensor_ref_new($1, sl->items, sl->count);
+        for (int i = 0; i < sl->count; i++) {
+            if (sl->offsets[i] != 0) {
+                ref->gen_axis = i;
+                ref->gen_offset = sl->offsets[i];
+            }
+        }
+        free(sl->offsets);
         free(sl);  /* free list struct but not items */
         $$ = (void *)ref;
     }
@@ -286,13 +329,25 @@ ident_list:
     TOK_IDENT
     {
         StrList *sl = strlist_new();
-        strlist_add(sl, $1);
+        strlist_add(sl, $1, 0);
+        $$ = (void *)sl;
+    }
+    | TOK_IDENT '+' TOK_INT_LIT
+    {
+        StrList *sl = strlist_new();
+        strlist_add(sl, $1, $3);
         $$ = (void *)sl;
     }
     | ident_list ',' TOK_IDENT
     {
         StrList *sl = (StrList *)$1;
-        strlist_add(sl, $3);
+        strlist_add(sl, $3, 0);
+        $$ = (void *)sl;
+    }
+    | ident_list ',' TOK_IDENT '+' TOK_INT_LIT
+    {
+        StrList *sl = (StrList *)$1;
+        strlist_add(sl, $3, $5);
         $$ = (void *)sl;
     }
     ;

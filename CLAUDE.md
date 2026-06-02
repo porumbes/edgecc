@@ -60,6 +60,29 @@ init A = [[1, 2], [3, 4]];
 Z[m,n] = A[k,m] . B[k,n] :: map(mul, intersect) reduce(add, union);
 ```
 
+### Generational (iterative) ranks
+
+A single Einsum may iterate via a **generational rank** declared with `gen` (no
+dimension). The Einsum reads generation `i` and writes generation `i+1`; the
+loop runs until the watched tensor is stable:
+
+```
+dim N = 4;
+tensor G[R=N, C=N]   : float, empty = 0.0;
+tensor F[gen I, R=N] : float, empty = 0.0;
+init F = [1.0, 0.0, 0.0, 0.0];           // generation 0
+F[i+1, d] = G[s,d] . F[i, s] :: map(mul, intersect) reduce(max, union);
+stop: stable(F);
+```
+
+Generated `run()` loops internally with a **fresh (empty) output slice each
+generation** (the paper's default populate; no cross-generation accumulation),
+double-buffered as `F_prev`/`F_next`, and returns the final state. A fixed
+safety cap (`__EDGECC_MAX_GEN__ = 1000`) raises `RuntimeError` if the watched
+tensor never stabilizes. Limitations: one generational tensor / one
+generational rank, offsets `i` and `i+1` only, `stable` stop only, single
+Einsum, no `<<` accumulation. See `docs/superpowers/specs/2026-06-01-edgecc-generational-ranks-a-design.md`.
+
 Rank variables in expressions bind to declared rank names by position. Built-in compute operators: `add`, `sub`, `mul`, `min`, `max`, `and`, `or`. Built-in merge operators (optional second arg, default `passthrough`): `passthrough`, `nopass`, `intersect`, `take_left`, `take_left_only`, `take_right`, `take_right_only`, `xor`, `union`. Omitting the merge argument preserves v1 source-program semantics.
 
 ## Generated Python ABI
@@ -129,4 +152,4 @@ Coverage is Tier 1 only — static dropdowns for compute / merge / type / empty-
 
 ## v2 Scope Limitations
 
-Not yet supported: multi-operation expressions with compute labels, generational/iterative ranks expressed in EDGE source (use the iterative test harness or a Python driver instead), anonymous tensors / parenthesized sub-expressions, unary functions, the 7 (No,No)→Yes merge operators (NOR, equivalence, NAND, ¬→, ¬←, ⇐, ⇒), file-based init, sparse tensor storage, optimizations of any kind, user-defined compute operators.
+Not yet supported: multi-operation expressions with compute labels, multi-Einsum generational cascades (the `<<` update/accumulation populate, and chained Einsums sharing a generational rank — single-Einsum generational ranks are supported; see "Generational (iterative) ranks"), anonymous tensors / parenthesized sub-expressions, unary functions, the 7 (No,No)→Yes merge operators (NOR, equivalence, NAND, ¬→, ¬←, ⇐, ⇒), file-based init, sparse tensor storage, optimizations of any kind, user-defined compute operators.

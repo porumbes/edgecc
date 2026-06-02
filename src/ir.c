@@ -37,6 +37,21 @@ static char **dup_str_array(char **src, int count) {
     return dst;
 }
 
+/* Duplicate coords, omitting index `strip_axis` (pass -1 to keep all). */
+static char **dup_coords_strip(char **src, int count, int strip_axis, int *out_count) {
+    int n = 0;
+    for (int i = 0; i < count; i++) if (i != strip_axis) n++;
+    *out_count = n;
+    if (n == 0) return NULL;
+    char **dst = malloc(n * sizeof(char *));
+    int j = 0;
+    for (int i = 0; i < count; i++) {
+        if (i == strip_axis) continue;
+        dst[j++] = dup_str(src[i]);
+    }
+    return dst;
+}
+
 /* ---- Emit phases ---- */
 
 static void emit_dim_defs(IRProgram *ir, SymbolTable *symtab) {
@@ -89,7 +104,29 @@ static void emit_tensor_inits(IRProgram *ir, AstNode *program) {
 static void emit_einsum(IRProgram *ir, AstNode *einsum_node, SymbolTable *symtab) {
     EinsumData *e = &einsum_node->data.einsum;
 
-    /* Emit LOOP_BEGIN for free indices first, then reduction indices */
+    /* Resolve the generational tensor's axis per operand (-1 if not the gen tensor). */
+    int out_gen_axis = -1, in1_gen_axis = -1, in2_gen_axis = -1;
+    if (symtab->is_iterative && symtab->gen_tensor) {
+        TensorEntry *gte = symtab_find_tensor(symtab, symtab->gen_tensor);
+        int gax = gte ? gte->gen_axis : -1;
+        if (strcmp(e->output.tensor_name, symtab->gen_tensor) == 0) out_gen_axis = gax;
+        if (strcmp(e->input1.tensor_name, symtab->gen_tensor) == 0) in1_gen_axis = gax;
+        if (strcmp(e->input2.tensor_name, symtab->gen_tensor) == 0) in2_gen_axis = gax;
+
+        IRInstr *gl = ir_emit(ir, IR_GEN_LOOP_BEGIN);
+        gl->data.gen_loop.tensor_name = dup_str(symtab->gen_tensor);
+        gl->data.gen_loop.empty_val = gte ? gte->empty_val : 0.0;
+        gl->data.gen_loop.max_gen = 1000;
+        int sn = 0;
+        for (int i = 0; gte && i < gte->num_ranks; i++) {
+            if (i == gte->gen_axis) continue;
+            gl->data.gen_loop.spatial_dims[sn++] = gte->dim_sizes[i];
+        }
+        gl->data.gen_loop.spatial_ndims = sn;
+    }
+
+    /* Spatial loops: free indices, then reduction indices (gen rank excluded
+       by semantic analysis). */
     for (int i = 0; i < symtab->num_free_indices; i++) {
         IRInstr *instr = ir_emit(ir, IR_LOOP_BEGIN);
         instr->data.loop_begin.index_var = dup_str(symtab->free_indices[i].name);
@@ -106,8 +143,9 @@ static void emit_einsum(IRProgram *ir, AstNode *einsum_node, SymbolTable *symtab
         IRInstr *instr = ir_emit(ir, IR_LOAD);
         instr->data.load.reg = 0;
         instr->data.load.tensor_name = dup_str(e->input1.tensor_name);
-        instr->data.load.ncoords = e->input1.num_vars;
-        instr->data.load.coords = dup_str_array(e->input1.rank_vars, e->input1.num_vars);
+        instr->data.load.coords = dup_coords_strip(e->input1.rank_vars,
+            e->input1.num_vars, in1_gen_axis, &instr->data.load.ncoords);
+        instr->data.load.gen_read = (in1_gen_axis >= 0);
     }
 
     /* LOAD input2 -> reg 1 */
@@ -115,8 +153,9 @@ static void emit_einsum(IRProgram *ir, AstNode *einsum_node, SymbolTable *symtab
         IRInstr *instr = ir_emit(ir, IR_LOAD);
         instr->data.load.reg = 1;
         instr->data.load.tensor_name = dup_str(e->input2.tensor_name);
-        instr->data.load.ncoords = e->input2.num_vars;
-        instr->data.load.coords = dup_str_array(e->input2.rank_vars, e->input2.num_vars);
+        instr->data.load.coords = dup_coords_strip(e->input2.rank_vars,
+            e->input2.num_vars, in2_gen_axis, &instr->data.load.ncoords);
+        instr->data.load.gen_read = (in2_gen_axis >= 0);
     }
 
     /* MAP: reg 2 = map_op(reg 0, reg 1) */
@@ -149,9 +188,10 @@ static void emit_einsum(IRProgram *ir, AstNode *einsum_node, SymbolTable *symtab
     {
         IRInstr *instr = ir_emit(ir, IR_STORE);
         instr->data.store.tensor_name = dup_str(e->output.tensor_name);
-        instr->data.store.ncoords = e->output.num_vars;
-        instr->data.store.coords = dup_str_array(e->output.rank_vars, e->output.num_vars);
+        instr->data.store.coords = dup_coords_strip(e->output.rank_vars,
+            e->output.num_vars, out_gen_axis, &instr->data.store.ncoords);
         instr->data.store.src_reg = 3;
+        instr->data.store.gen_write = (out_gen_axis >= 0);
     }
 
     /* LOOP_END in reverse order: reduction first, then free */
@@ -160,6 +200,10 @@ static void emit_einsum(IRProgram *ir, AstNode *einsum_node, SymbolTable *symtab
     }
     for (int i = symtab->num_free_indices - 1; i >= 0; i--) {
         ir_emit(ir, IR_LOOP_END);
+    }
+
+    if (symtab->is_iterative) {
+        ir_emit(ir, IR_GEN_LOOP_END);
     }
 }
 
@@ -204,6 +248,11 @@ void ir_free(IRProgram *ir) {
                 free(instr->data.loop_begin.index_var);
                 break;
             case IR_LOOP_END:
+                break;
+            case IR_GEN_LOOP_BEGIN:
+                free(instr->data.gen_loop.tensor_name);
+                break;
+            case IR_GEN_LOOP_END:
                 break;
             case IR_LOAD:
                 free(instr->data.load.tensor_name);
@@ -266,8 +315,9 @@ void ir_dump(IRProgram *ir, FILE *out) {
                 fprintf(out, "LOOP_END\n");
                 break;
             case IR_LOAD:
-                fprintf(out, "LOAD(r%d, %s, ", instr->data.load.reg,
-                        instr->data.load.tensor_name);
+                fprintf(out, "LOAD(r%d, %s%s, ", instr->data.load.reg,
+                        instr->data.load.tensor_name,
+                        instr->data.load.gen_read ? " [gen_read]" : "");
                 dump_coords(out, instr->data.load.coords, instr->data.load.ncoords);
                 fprintf(out, ")\n");
                 break;
@@ -292,9 +342,24 @@ void ir_dump(IRProgram *ir, FILE *out) {
                         instr->data.reduce.dst_reg);
                 break;
             case IR_STORE:
-                fprintf(out, "STORE(%s, ", instr->data.store.tensor_name);
+                fprintf(out, "STORE(%s%s, ", instr->data.store.tensor_name,
+                        instr->data.store.gen_write ? " [gen_write]" : "");
                 dump_coords(out, instr->data.store.coords, instr->data.store.ncoords);
                 fprintf(out, ", r%d)\n", instr->data.store.src_reg);
+                break;
+            case IR_GEN_LOOP_BEGIN:
+                fprintf(out, "GEN_LOOP_BEGIN(%s, spatial=[",
+                        instr->data.gen_loop.tensor_name);
+                for (int j = 0; j < instr->data.gen_loop.spatial_ndims; j++) {
+                    if (j > 0) fprintf(out, ",");
+                    fprintf(out, "%d", instr->data.gen_loop.spatial_dims[j]);
+                }
+                fprintf(out, "], empty=%g, max_gen=%d)\n",
+                        instr->data.gen_loop.empty_val,
+                        instr->data.gen_loop.max_gen);
+                break;
+            case IR_GEN_LOOP_END:
+                fprintf(out, "GEN_LOOP_END\n");
                 break;
         }
     }
