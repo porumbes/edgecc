@@ -306,13 +306,29 @@ static void emit_general_skeleton(CodeBuf *cb,
     char *eB = format_double_literal(map_i->data.map.empty_b);
     char *eZ = format_double_literal(map_i->data.map.empty_z);
 
+    /* Generational tensors are double-buffered: reads use <name>_prev,
+       writes use <name>_next. Non-generational tensors keep their name. */
+    char a_name[128], b_name[128], z_name[128];
+    if (load1->data.load.gen_read)
+        snprintf(a_name, sizeof(a_name), "%s_prev", load1->data.load.tensor_name);
+    else
+        snprintf(a_name, sizeof(a_name), "%s", load1->data.load.tensor_name);
+    if (load2->data.load.gen_read)
+        snprintf(b_name, sizeof(b_name), "%s_prev", load2->data.load.tensor_name);
+    else
+        snprintf(b_name, sizeof(b_name), "%s", load2->data.load.tensor_name);
+    if (store_i->data.store.gen_write)
+        snprintf(z_name, sizeof(z_name), "%s_next", store_i->data.store.tensor_name);
+    else
+        snprintf(z_name, sizeof(z_name), "%s", store_i->data.store.tensor_name);
+
     /* LOAD operands */
     cb_indent(cb); cb_append(cb, "a_val = ");
-    emit_tensor_access(cb, load1->data.load.tensor_name,
+    emit_tensor_access(cb, a_name,
                        load1->data.load.coords, load1->data.load.ncoords);
     cb_append(cb, "\n");
     cb_indent(cb); cb_append(cb, "b_val = ");
-    emit_tensor_access(cb, load2->data.load.tensor_name,
+    emit_tensor_access(cb, b_name,
                        load2->data.load.coords, load2->data.load.ncoords);
     cb_append(cb, "\n");
 
@@ -342,8 +358,7 @@ static void emit_general_skeleton(CodeBuf *cb,
 
     /* REDUCE existence */
     cb_indent(cb); cb_append(cb, "state = ");
-    emit_tensor_access(cb, store_i->data.store.tensor_name,
-                       store_i->data.store.coords, store_i->data.store.ncoords);
+    emit_tensor_access(cb, z_name, store_i->data.store.coords, store_i->data.store.ncoords);
     cb_append(cb, "\n");
     cb_indent(cb); cb_appendf(cb, "b_s = state != %s\n", eZ);
     cb_indent(cb); cb_append(cb, "b_m = map_emitted\n");
@@ -358,15 +373,13 @@ static void emit_general_skeleton(CodeBuf *cb,
                                      compute_buf, sizeof(compute_buf)));
     cb_append(cb, "\n");
     cb_indent(cb);
-    emit_tensor_access(cb, store_i->data.store.tensor_name,
-                       store_i->data.store.coords, store_i->data.store.ncoords);
+    emit_tensor_access(cb, z_name, store_i->data.store.coords, store_i->data.store.ncoords);
     cb_appendf(cb, " = new_state if new_state != %s else %s\n", eZ, eZ);
     cb->indent--;
     cb_indent(cb); cb_append(cb, "else:\n");
     cb->indent++;
     cb_indent(cb);
-    emit_tensor_access(cb, store_i->data.store.tensor_name,
-                       store_i->data.store.coords, store_i->data.store.ncoords);
+    emit_tensor_access(cb, z_name, store_i->data.store.coords, store_i->data.store.ncoords);
     cb_appendf(cb, " = %s\n", eZ);
     cb->indent--;
 
@@ -398,6 +411,20 @@ char *codegen_python(IRProgram *ir) {
     char *output = NULL;
     collect_io(ir, &inputs, &output);
 
+    /* Detect generational mode and capture the gen-loop metadata. */
+    int iterative = 0;
+    const char *gen_tensor = NULL;
+    for (int i = 0; i < ir->count; i++) {
+        if (ir->instrs[i].type == IR_GEN_LOOP_BEGIN) {
+            iterative = 1;
+            gen_tensor = ir->instrs[i].data.gen_loop.tensor_name;
+            break;
+        }
+    }
+    if (iterative) {
+        cb_append(&cb, "__EDGECC_MAX_GEN__ = 1000\n\n");
+    }
+
     /* __edgecc_meta__ */
     cb_append(&cb, "__edgecc_meta__ = {\n");
     cb_append(&cb, "    \"inputs\": [");
@@ -426,9 +453,11 @@ char *codegen_python(IRProgram *ir) {
                 /* already emitted at module scope */
                 break;
             case IR_TENSOR_ALLOC:
-                /* Only emit allocation for the OUTPUT tensor inside run().
-                   Inputs come in as parameters. */
-                if (output && strcmp(instr->data.tensor_alloc.name, output) == 0) {
+                /* Output tensor is allocated inside run(); but a generational
+                   tensor arrives as a parameter and is buffered by the gen loop. */
+                if (output && strcmp(instr->data.tensor_alloc.name, output) == 0 &&
+                    !(iterative && gen_tensor &&
+                      strcmp(instr->data.tensor_alloc.name, gen_tensor) == 0)) {
                     cb_indent(&cb);
                     cb_appendf(&cb, "%s = ", instr->data.tensor_alloc.name);
                     emit_alloc(&cb, &instr->data.tensor_alloc, ir, i);
@@ -458,6 +487,47 @@ char *codegen_python(IRProgram *ir) {
             case IR_LOOP_END:
                 cb.indent--;
                 break;
+            case IR_GEN_LOOP_BEGIN: {
+                cb_indent(&cb);
+                cb_appendf(&cb, "%s_prev = %s\n",
+                           instr->data.gen_loop.tensor_name,
+                           instr->data.gen_loop.tensor_name);
+                cb_indent(&cb);
+                cb_append(&cb, "_it = 0\n");
+                cb_indent(&cb);
+                cb_append(&cb, "while True:\n");
+                cb.indent++;
+                /* fresh empty slice for this generation */
+                IRTensorAlloc tmp;
+                memset(&tmp, 0, sizeof(tmp));
+                tmp.ndims = instr->data.gen_loop.spatial_ndims;
+                tmp.empty_val = instr->data.gen_loop.empty_val;
+                for (int k = 0; k < tmp.ndims; k++)
+                    tmp.dim_sizes[k] = instr->data.gen_loop.spatial_dims[k];
+                cb_indent(&cb);
+                cb_appendf(&cb, "%s_next = ", instr->data.gen_loop.tensor_name);
+                emit_alloc(&cb, &tmp, ir, i);
+                cb_append(&cb, "\n");
+                break;
+            }
+            case IR_GEN_LOOP_END: {
+                const char *t = gen_tensor;
+                cb_indent(&cb);
+                cb_appendf(&cb, "if %s_next == %s_prev:\n", t, t);
+                cb.indent++;
+                cb_indent(&cb); cb_append(&cb, "break\n");
+                cb.indent--;
+                cb_indent(&cb);
+                cb_appendf(&cb, "%s_prev = %s_next\n", t, t);
+                cb_indent(&cb); cb_append(&cb, "_it += 1\n");
+                cb_indent(&cb); cb_append(&cb, "if _it >= __EDGECC_MAX_GEN__:\n");
+                cb.indent++;
+                cb_indent(&cb);
+                cb_append(&cb, "raise RuntimeError(\"generational loop did not stabilize\")\n");
+                cb.indent--;
+                cb.indent--;   /* close the while body */
+                break;
+            }
             case IR_LOAD: case IR_MAP: case IR_REDUCE:
                 /* Combined into STORE emission below. */
                 break;
@@ -479,7 +549,11 @@ char *codegen_python(IRProgram *ir) {
 
     if (output) {
         cb_indent(&cb);
-        cb_appendf(&cb, "return %s\n", output);
+        if (iterative && gen_tensor) {
+            cb_appendf(&cb, "return %s_prev\n", gen_tensor);
+        } else {
+            cb_appendf(&cb, "return %s\n", output);
+        }
     }
     cb.indent = 0;
     cb_append(&cb, "\n");
@@ -496,6 +570,8 @@ char *codegen_python(IRProgram *ir) {
             if (strcmp(instr->data.tensor_alloc.name, inputs.names[j]) == 0) { is_input = 1; break; }
         }
         if (!is_input) continue;
+        if (iterative && gen_tensor &&
+            strcmp(instr->data.tensor_alloc.name, gen_tensor) == 0) continue;
         cb_indent(&cb);
         cb_appendf(&cb, "%s = ", instr->data.tensor_alloc.name);
         emit_alloc(&cb, &instr->data.tensor_alloc, ir, i);

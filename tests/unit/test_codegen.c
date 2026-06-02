@@ -78,8 +78,42 @@ TEST(test_codegen_intersect_union) {
     ast_free(ast);
 }
 
+TEST(test_codegen_generational) {
+    AstNode *ast = parse(
+        "dim N = 4;\n"
+        "tensor G[R=N, C=N]   : float, empty = 0.0;\n"
+        "tensor F[gen I, R=N] : float, empty = 0.0;\n"
+        "init G = [[1.0,1.0,0.0,0.0],[0.0,1.0,1.0,0.0],[0.0,0.0,1.0,0.0],[0.0,0.0,0.0,1.0]];\n"
+        "init F = [1.0, 0.0, 0.0, 0.0];\n"
+        "F[i+1, d] = G[s,d] . F[i, s] :: map(mul, intersect) reduce(max, union);\n"
+        "stop: stable(F);\n"
+    );
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    char *code = codegen_python(ir);
+    ASSERT_NOT_NULL(code);
+    ASSERT_TRUE(strstr(code, "__EDGECC_MAX_GEN__ = 1000") != NULL);
+    ASSERT_TRUE(strstr(code, "def run(G, F):") != NULL);
+    ASSERT_TRUE(strstr(code, "F_prev = F") != NULL);
+    ASSERT_TRUE(strstr(code, "while True:") != NULL);
+    ASSERT_TRUE(strstr(code, "F_next = [0.0] * N") != NULL);
+    ASSERT_TRUE(strstr(code, "b_val = F_prev[s]") != NULL);
+    ASSERT_TRUE(strstr(code, "state = F_next[d]") != NULL);
+    ASSERT_TRUE(strstr(code, "if F_next == F_prev:") != NULL);
+    ASSERT_TRUE(strstr(code, "break") != NULL);
+    ASSERT_TRUE(strstr(code, "F_prev = F_next") != NULL);
+    ASSERT_TRUE(strstr(code, "raise RuntimeError") != NULL);
+    ASSERT_TRUE(strstr(code, "return F_prev") != NULL);
+    free(code);
+    ir_free(ir);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
 int main(void) {
     RUN_TEST(test_codegen_gemm);
     RUN_TEST(test_codegen_intersect_union);
+    RUN_TEST(test_codegen_generational);
     return test_report();
 }
