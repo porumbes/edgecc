@@ -1,1 +1,1 @@
-more than one generational tensor
+generational rank variable mismatch

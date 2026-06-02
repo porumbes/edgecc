@@ -1,0 +1,8 @@
+dim N = 4;
+tensor W[R=N, C=N]   : float, empty = inf;
+tensor T[gen I, R=N] : float, empty = inf;
+tensor D[gen I, R=N] : float, empty = inf;
+init D = [0.0, inf, inf, inf];
+D[i+1, d] = D[i, d] . T[i, d] :: map(min, union) reduce(min, union);
+T[i, d]   = W[s,d] . D[i, s] :: map(add, intersect) reduce(min, union);
+stop: stable(D);
