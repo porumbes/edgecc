@@ -1,0 +1,30 @@
+// Bellman-Ford as a 3-Einsum cascade with TWO intra-generation intermediates.
+//
+// A multi-intermediate variant of examples/bellman_ford.edge. Each generation
+// runs three Einsums sharing the generational rank I:
+//   T1 = relaxed candidate distances from D (intermediate)
+//   T2 = min(D, T1), the merged distances        (intermediate)
+//   D[i+1] = min(D, T2), committed to next gen   (cross-generational)
+// SSA chain: T1 is written, then read by T2's Einsum; T2 is then read by D's
+// Einsum. T1 and T2 are recomputed fresh each generation; only D is carried
+// across generations (double-buffered) and returned.
+//
+// Same graph/source as bellman_ford.edge:
+//   edges (weight): 0->1(1), 0->2(4), 1->2(2), 1->3(6), 2->3(3); source 0.
+//
+// Run:  ./build/edgecc examples/bellman_ford_2stage.edge -o out.py && python3 out.py
+// Output: [0.0, 1.0, 3.0, 6.0]
+dim N = 4;
+
+tensor W[R=N, C=N]    : float, empty = inf;
+tensor T1[gen I, R=N] : float, empty = inf;
+tensor T2[gen I, R=N] : float, empty = inf;
+tensor D[gen I, R=N]  : float, empty = inf;
+
+init W = [[inf, 1.0, 4.0, inf], [inf, inf, 2.0, 6.0], [inf, inf, inf, 3.0], [inf, inf, inf, inf]];
+init D = [0.0, inf, inf, inf];
+
+T1[i, d]  = W[s,d] . D[i, s]  :: map(add, intersect) reduce(min, union);   // relax: candidates
+T2[i, d]  = D[i, d] . T1[i, d] :: map(min, union) reduce(min, union);      // merge: min(D, candidates)
+D[i+1, d] = D[i, d] . T2[i, d] :: map(min, union) reduce(min, union);      // commit
+stop: stable(D);
