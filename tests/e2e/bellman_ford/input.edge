@@ -1,0 +1,17 @@
+// Bellman-Ford shortest paths as a 2-Einsum generational cascade.
+// D is cross-generational (distances, written at i+1); T is an intra-generation
+// intermediate (relaxed candidates, written at i). Each generation: relax all
+// edges into T, then keep the smaller of the old and new distance into D.
+// Graph edges (weight): 0->1(1), 0->2(4), 1->2(2), 1->3(6), 2->3(3); source 0.
+dim N = 4;
+
+tensor W[R=N, C=N]   : float, empty = inf;
+tensor T[gen I, R=N] : float, empty = inf;
+tensor D[gen I, R=N] : float, empty = inf;
+
+init W = [[inf, 1.0, 4.0, inf], [inf, inf, 2.0, 6.0], [inf, inf, inf, 3.0], [inf, inf, inf, inf]];
+init D = [0.0, inf, inf, inf];
+
+T[i, d]   = W[s,d] . D[i, s] :: map(add, intersect) reduce(min, union);   // relax
+D[i+1, d] = D[i, d] . T[i, d] :: map(min, union) reduce(min, union);      // combine
+stop: stable(D);
