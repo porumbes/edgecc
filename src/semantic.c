@@ -257,6 +257,29 @@ static void analyze_einsum(SemanticResult *res, AstNode *node) {
         else if (in1_te->gen_axis >= 0) gen_te = in1_te;
         else if (in2_te->gen_axis >= 0) gen_te = in2_te;
 
+        /* A supports exactly one generational tensor. Reject a second distinct one. */
+        {
+            const char *gnames[3];
+            int ng = 0;
+            TensorEntry *tes[3]    = { out_te, in1_te, in2_te };
+            const char *tnames[3]  = { d->output.tensor_name,
+                                       d->input1.tensor_name,
+                                       d->input2.tensor_name };
+            for (int k = 0; k < 3; k++) {
+                if (tes[k]->gen_axis >= 0) {
+                    int seen = 0;
+                    for (int m = 0; m < ng; m++)
+                        if (strcmp(gnames[m], tnames[k]) == 0) seen = 1;
+                    if (!seen) gnames[ng++] = tnames[k];
+                }
+            }
+            if (ng > 1) {
+                add_error(res,
+                    "more than one generational tensor ('%s' and '%s'); "
+                    "only one is supported", gnames[0], gnames[1]);
+            }
+        }
+
         if (gen_te != NULL) {
             st->is_iterative = 1;
             st->gen_tensor = gen_te->name;

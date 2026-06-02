@@ -180,6 +180,20 @@ TEST(test_generational_init_spatial_shape) {
     ast_free(ast);
 }
 
+TEST(test_generational_two_gen_tensors) {
+    AstNode *ast = parse(
+        "dim N = 4;\n"
+        "tensor F[gen I, R=N] : float, empty = 0.0;\n"
+        "tensor H[gen J, R=N] : float, empty = 0.0;\n"
+        "F[i+1, d] = H[j, d] . F[i, d] :: map(mul, intersect) reduce(max, union);\n"
+        "stop: stable(F);\n"
+    );
+    SemanticResult res = semantic_analyze(ast);
+    ASSERT_TRUE(res.error_count > 0);
+    semantic_result_free(&res);
+    ast_free(ast);
+}
+
 int main(void) {
     RUN_TEST(test_valid_gemm);
     RUN_TEST(test_undeclared_dim);
@@ -198,5 +212,6 @@ int main(void) {
     RUN_TEST(test_generational_missing_stop);
     RUN_TEST(test_generational_bad_offset);
     RUN_TEST(test_generational_init_spatial_shape);
+    RUN_TEST(test_generational_two_gen_tensors);
     return test_report();
 }
