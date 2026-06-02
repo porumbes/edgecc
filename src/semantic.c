@@ -167,6 +167,7 @@ static void analyze_init(SemanticResult *res, AstNode *node) {
         add_error(res, "init references undeclared tensor '%s'", d->tensor_name);
         return;
     }
+    te->has_init = 1;
 
     /* Build spatial dim sizes (excluding the generational axis, if any). */
     int spatial_sizes[8];
@@ -194,7 +195,7 @@ static int find_index(IndexInfo *arr, int count, const char *name) {
     return -1;
 }
 
-static void analyze_einsum(SemanticResult *res, AstNode *node) {
+static void analyze_einsum(SemanticResult *res, AstNode *node, int eidx) {
     EinsumData *d = &node->data.einsum;
     SymbolTable *st = res->symtab;
 
@@ -247,86 +248,70 @@ static void analyze_einsum(SemanticResult *res, AstNode *node) {
                   d->input2.tensor_name, in2_te->num_ranks, d->input2.num_vars);
     }
 
-    /* ---- Generational rank handling ---- */
-    /* The generational tensor is whichever operand's TensorEntry has gen_axis >= 0.
-       For A there is exactly one such tensor; it must be the output and one input. */
-    char *gen_var = NULL;   /* the index var bound to the gen rank */
+    /* ---- Generational rank handling (cascade-aware) ---- */
+    char *gen_var = NULL;   /* the index var bound to the gen rank, this einsum */
     {
-        TensorEntry *gen_te = NULL;
-        if (out_te->gen_axis >= 0) gen_te = out_te;
-        else if (in1_te->gen_axis >= 0) gen_te = in1_te;
-        else if (in2_te->gen_axis >= 0) gen_te = in2_te;
+        TensorEntry *tes[3]  = { out_te, in1_te, in2_te };
+        TensorRef   *refs[3] = { &d->output, &d->input1, &d->input2 };
 
-        /* A supports exactly one generational tensor. Reject a second distinct one. */
-        {
-            const char *gnames[3];
-            int ng = 0;
-            TensorEntry *tes[3]    = { out_te, in1_te, in2_te };
-            const char *tnames[3]  = { d->output.tensor_name,
-                                       d->input1.tensor_name,
-                                       d->input2.tensor_name };
-            for (int k = 0; k < 3; k++) {
-                if (tes[k]->gen_axis >= 0) {
-                    int seen = 0;
-                    for (int m = 0; m < ng; m++)
-                        if (strcmp(gnames[m], tnames[k]) == 0) seen = 1;
-                    if (!seen) gnames[ng++] = tnames[k];
+        /* Detect the shared generational rank variable. */
+        for (int k = 0; k < 3; k++) {
+            if (tes[k]->gen_axis >= 0 && tes[k]->gen_axis < refs[k]->num_vars) {
+                st->is_iterative = 1;
+                char *v = refs[k]->rank_vars[tes[k]->gen_axis];
+                if (gen_var == NULL) gen_var = v;
+                if (st->gen_rank_var == NULL) {
+                    st->gen_rank_var = v;
+                } else if (strcmp(st->gen_rank_var, v) != 0) {
+                    add_error(res,
+                        "generational rank variable mismatch: '%s' vs '%s'",
+                        st->gen_rank_var, v);
                 }
-            }
-            if (ng > 1) {
-                add_error(res,
-                    "more than one generational tensor ('%s' and '%s'); "
-                    "only one is supported", gnames[0], gnames[1]);
             }
         }
 
-        if (gen_te != NULL) {
-            st->is_iterative = 1;
-            st->gen_tensor = gen_te->name;
-
-            /* Output must be the generational tensor, written at offset +1. */
-            if (strcmp(d->output.tensor_name, gen_te->name) != 0) {
+        /* Classify the OUTPUT's generational role by its effective write offset
+           on the declared generational axis. A `+N` offset on the ref, if
+           present, must be on that axis. */
+        if (out_te->gen_axis >= 0) {
+            if (d->output.gen_axis >= 0 && d->output.gen_axis != out_te->gen_axis) {
                 add_error(res,
-                    "generational tensor '%s' must be the output of the einsum",
-                    gen_te->name);
+                    "generational tensor '%s' written with an offset on the wrong axis",
+                    out_te->name);
             } else {
-                if (d->output.gen_axis != out_te->gen_axis ||
-                    d->output.gen_offset != 1) {
+                int eff_off = (d->output.gen_axis == out_te->gen_axis)
+                              ? d->output.gen_offset : 0;
+                if (eff_off == 1) {
+                    /* cross-generational write: D[i+1, ...] */
+                    if (st->gen_tensor == NULL) {
+                        st->gen_tensor = out_te->name;
+                    } else if (strcmp(st->gen_tensor, out_te->name) != 0) {
+                        add_error(res,
+                            "more than one cross-generational tensor ('%s' and '%s'); "
+                            "only one is supported", st->gen_tensor, out_te->name);
+                    }
+                } else if (eff_off == 0) {
+                    /* intra-generation intermediate write: T[i, ...] */
+                    int seen = 0;
+                    for (int m = 0; m < st->num_intermediates; m++)
+                        if (strcmp(st->intermediates[m], out_te->name) == 0) seen = 1;
+                    if (!seen && st->num_intermediates < MAX_TENSORS)
+                        st->intermediates[st->num_intermediates++] = out_te->name;
+                } else {
                     add_error(res,
-                        "generational output '%s' must be written at offset +1 "
-                        "on its generational rank (e.g. %s[i+1, ...])",
-                        gen_te->name, gen_te->name);
+                        "generational tensor '%s' written at unsupported offset +%d "
+                        "(only i and i+1 are allowed)", out_te->name, eff_off);
                 }
-                if (d->output.gen_axis == out_te->gen_axis)
-                    gen_var = d->output.rank_vars[out_te->gen_axis];
             }
+        }
 
-            /* The matching read of the generational tensor must use offset 0
-               (no `+N`) on its generational rank. */
-            TensorRef *in_gen = NULL;
-            TensorEntry *in_gen_te = NULL;
-            if (strcmp(d->input1.tensor_name, gen_te->name) == 0) {
-                in_gen = &d->input1; in_gen_te = in1_te;
-            } else if (strcmp(d->input2.tensor_name, gen_te->name) == 0) {
-                in_gen = &d->input2; in_gen_te = in2_te;
-            }
-            if (in_gen == NULL) {
+        /* Generational inputs must be read at offset 0 (no +N). */
+        for (int k = 1; k < 3; k++) {
+            if (tes[k]->gen_axis >= 0 && refs[k]->gen_offset != 0) {
                 add_error(res,
-                    "generational tensor '%s' must also appear as an input "
-                    "read at generation i", gen_te->name);
-            } else if (in_gen->gen_offset != 0) {
-                add_error(res,
-                    "generational input '%s' must be read at offset 0 "
+                    "generational tensor '%s' must be read at offset 0 "
                     "(e.g. %s[i, ...]), not with a +N offset",
-                    gen_te->name, gen_te->name);
-            } else if (gen_var != NULL &&
-                       in_gen_te->gen_axis >= 0 &&
-                       in_gen_te->gen_axis < in_gen->num_vars &&
-                       strcmp(in_gen->rank_vars[in_gen_te->gen_axis], gen_var) != 0) {
-                add_error(res,
-                    "generational rank variable mismatch: output uses '%s' but "
-                    "input uses '%s'",
-                    gen_var, in_gen->rank_vars[in_gen_te->gen_axis]);
+                    tes[k]->name, tes[k]->name);
             }
         }
     }
@@ -406,6 +391,19 @@ static void analyze_einsum(SemanticResult *res, AstNode *node) {
         }
     }
 
+    /* Copy this Einsum's classification into the per-Einsum slot (cascade support).
+       The global free/reduction fields remain populated for the single-Einsum path. */
+    if (eidx >= 0 && eidx < MAX_EINSUMS) {
+        EinsumClass *ec = &st->einsum_class[eidx];
+        ec->num_free_indices = st->num_free_indices;
+        for (int i = 0; i < st->num_free_indices; i++)
+            ec->free_indices[i] = st->free_indices[i];
+        ec->num_reduction_indices = st->num_reduction_indices;
+        for (int i = 0; i < st->num_reduction_indices; i++)
+            ec->reduction_indices[i] = st->reduction_indices[i];
+        if (eidx + 1 > st->num_einsums) st->num_einsums = eidx + 1;
+    }
+
 }
 
 static void analyze_stop(SemanticResult *res, AstNode *node) {
@@ -422,6 +420,44 @@ static void analyze_stop(SemanticResult *res, AstNode *node) {
     st->stop_watch = te->name;
 }
 
+/* Validate SSA ordering: an intra-generation intermediate must be written by an
+   earlier Einsum before a later Einsum reads it. */
+static void validate_cascade_ordering(SemanticResult *res, AstNode *program) {
+    SymbolTable *st = res->symtab;
+    if (!st->is_iterative) return;
+
+    char *written[MAX_TENSORS];
+    int nwritten = 0;
+    ProgramData *pd = &program->data.program;
+    for (int i = 0; i < pd->count; i++) {
+        AstNode *stmt = pd->statements[i];
+        if (stmt->type != NODE_EINSUM) continue;
+        EinsumData *e = &stmt->data.einsum;
+
+        TensorRef *ins[2] = { &e->input1, &e->input2 };
+        for (int k = 0; k < 2; k++) {
+            const char *nm = ins[k]->tensor_name;
+            int is_inter = 0;
+            for (int m = 0; m < st->num_intermediates; m++)
+                if (strcmp(st->intermediates[m], nm) == 0) is_inter = 1;
+            if (!is_inter) continue;
+            int found = 0;
+            for (int w = 0; w < nwritten; w++)
+                if (strcmp(written[w], nm) == 0) found = 1;
+            if (!found)
+                add_error(res, "intermediate '%s' is read before it is written", nm);
+        }
+
+        const char *onm = e->output.tensor_name;
+        for (int m = 0; m < st->num_intermediates; m++) {
+            if (strcmp(st->intermediates[m], onm) == 0) {
+                written[nwritten++] = st->intermediates[m];
+                break;
+            }
+        }
+    }
+}
+
 /* ---- Public API ---- */
 
 SemanticResult semantic_analyze(AstNode *program) {
@@ -436,6 +472,7 @@ SemanticResult semantic_analyze(AstNode *program) {
     }
 
     ProgramData *pd = &program->data.program;
+    int einsum_index = 0;
     for (int i = 0; i < pd->count; i++) {
         AstNode *stmt = pd->statements[i];
         switch (stmt->type) {
@@ -449,7 +486,7 @@ SemanticResult semantic_analyze(AstNode *program) {
                 analyze_init(&res, stmt);
                 break;
             case NODE_EINSUM:
-                analyze_einsum(&res, stmt);
+                analyze_einsum(&res, stmt, einsum_index++);
                 break;
             case NODE_STOP:
                 analyze_stop(&res, stmt);
@@ -459,6 +496,8 @@ SemanticResult semantic_analyze(AstNode *program) {
                 break;
         }
     }
+
+    validate_cascade_ordering(&res, program);
 
     /* Iterative consistency: a generational einsum needs a stop clause that
        watches the generational tensor, and vice versa. */
@@ -474,6 +513,24 @@ SemanticResult semantic_analyze(AstNode *program) {
         strcmp(st->stop_watch, st->gen_tensor) != 0) {
         add_error(&res, "stop watches '%s' but the generational tensor is '%s'",
                   st->stop_watch, st->gen_tensor);
+    }
+
+    /* The cross-generational tensor needs a generation-0 init; intermediates must not. */
+    if (st->is_iterative && st->gen_tensor != NULL) {
+        TensorEntry *cg = symtab_find_tensor(st, st->gen_tensor);
+        if (cg != NULL && !cg->has_init) {
+            add_error(&res,
+                "cross-generational tensor '%s' requires an init (generation 0)",
+                st->gen_tensor);
+        }
+    }
+    for (int m = 0; m < st->num_intermediates; m++) {
+        TensorEntry *te = symtab_find_tensor(st, st->intermediates[m]);
+        if (te != NULL && te->has_init) {
+            add_error(&res,
+                "intermediate tensor '%s' must not have an init "
+                "(it is recomputed each generation)", st->intermediates[m]);
+        }
     }
 
     return res;

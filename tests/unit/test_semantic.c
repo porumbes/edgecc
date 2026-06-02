@@ -194,6 +194,89 @@ TEST(test_generational_two_gen_tensors) {
     ast_free(ast);
 }
 
+TEST(test_cascade_valid_bellman_ford) {
+    AstNode *ast = parse(
+        "dim N = 4;\n"
+        "tensor W[R=N, C=N]   : float, empty = inf;\n"
+        "tensor T[gen I, R=N] : float, empty = inf;\n"
+        "tensor D[gen I, R=N] : float, empty = inf;\n"
+        "init D = [0.0, inf, inf, inf];\n"
+        "T[i, d]   = W[s,d] . D[i, s] :: map(add, intersect) reduce(min, union);\n"
+        "D[i+1, d] = D[i, d] . T[i, d] :: map(min, union) reduce(min, union);\n"
+        "stop: stable(D);\n"
+    );
+    SemanticResult res = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, res.error_count);
+    ASSERT_INT_EQ(1, res.symtab->is_iterative);
+    ASSERT_STR_EQ("D", res.symtab->gen_tensor);
+    ASSERT_STR_EQ("i", res.symtab->gen_rank_var);
+    ASSERT_STR_EQ("D", res.symtab->stop_watch);
+    ASSERT_INT_EQ(1, res.symtab->num_intermediates);
+    ASSERT_STR_EQ("T", res.symtab->intermediates[0]);
+    ASSERT_INT_EQ(2, res.symtab->num_einsums);
+    ASSERT_INT_EQ(1, res.symtab->einsum_class[0].num_free_indices);
+    ASSERT_STR_EQ("d", res.symtab->einsum_class[0].free_indices[0].name);
+    ASSERT_INT_EQ(1, res.symtab->einsum_class[0].num_reduction_indices);
+    ASSERT_STR_EQ("s", res.symtab->einsum_class[0].reduction_indices[0].name);
+    ASSERT_INT_EQ(1, res.symtab->einsum_class[1].num_free_indices);
+    ASSERT_STR_EQ("d", res.symtab->einsum_class[1].free_indices[0].name);
+    ASSERT_INT_EQ(0, res.symtab->einsum_class[1].num_reduction_indices);
+    semantic_result_free(&res);
+    ast_free(ast);
+}
+
+TEST(test_cascade_two_cross_gen_tensors) {
+    AstNode *ast = parse(
+        "dim N = 4;\n"
+        "tensor D[gen I, R=N] : float, empty = inf;\n"
+        "tensor E[gen I, R=N] : float, empty = inf;\n"
+        "init D = [0.0, inf, inf, inf];\n"
+        "init E = [0.0, inf, inf, inf];\n"
+        "D[i+1, d] = D[i, d] . E[i, d] :: map(min, union) reduce(min, union);\n"
+        "E[i+1, d] = E[i, d] . D[i, d] :: map(min, union) reduce(min, union);\n"
+        "stop: stable(D);\n"
+    );
+    SemanticResult res = semantic_analyze(ast);
+    ASSERT_TRUE(res.error_count > 0);
+    semantic_result_free(&res);
+    ast_free(ast);
+}
+
+TEST(test_cascade_intermediate_with_init) {
+    AstNode *ast = parse(
+        "dim N = 4;\n"
+        "tensor W[R=N, C=N]   : float, empty = inf;\n"
+        "tensor T[gen I, R=N] : float, empty = inf;\n"
+        "tensor D[gen I, R=N] : float, empty = inf;\n"
+        "init D = [0.0, inf, inf, inf];\n"
+        "init T = [0.0, inf, inf, inf];\n"
+        "T[i, d]   = W[s,d] . D[i, s] :: map(add, intersect) reduce(min, union);\n"
+        "D[i+1, d] = D[i, d] . T[i, d] :: map(min, union) reduce(min, union);\n"
+        "stop: stable(D);\n"
+    );
+    SemanticResult res = semantic_analyze(ast);
+    ASSERT_TRUE(res.error_count > 0);
+    semantic_result_free(&res);
+    ast_free(ast);
+}
+
+TEST(test_cascade_intermediate_read_before_write) {
+    AstNode *ast = parse(
+        "dim N = 4;\n"
+        "tensor W[R=N, C=N]   : float, empty = inf;\n"
+        "tensor T[gen I, R=N] : float, empty = inf;\n"
+        "tensor D[gen I, R=N] : float, empty = inf;\n"
+        "init D = [0.0, inf, inf, inf];\n"
+        "D[i+1, d] = D[i, d] . T[i, d] :: map(min, union) reduce(min, union);\n"
+        "T[i, d]   = W[s,d] . D[i, s] :: map(add, intersect) reduce(min, union);\n"
+        "stop: stable(D);\n"
+    );
+    SemanticResult res = semantic_analyze(ast);
+    ASSERT_TRUE(res.error_count > 0);
+    semantic_result_free(&res);
+    ast_free(ast);
+}
+
 int main(void) {
     RUN_TEST(test_valid_gemm);
     RUN_TEST(test_undeclared_dim);
@@ -213,5 +296,9 @@ int main(void) {
     RUN_TEST(test_generational_bad_offset);
     RUN_TEST(test_generational_init_spatial_shape);
     RUN_TEST(test_generational_two_gen_tensors);
+    RUN_TEST(test_cascade_valid_bellman_ford);
+    RUN_TEST(test_cascade_two_cross_gen_tensors);
+    RUN_TEST(test_cascade_intermediate_with_init);
+    RUN_TEST(test_cascade_intermediate_read_before_write);
     return test_report();
 }
