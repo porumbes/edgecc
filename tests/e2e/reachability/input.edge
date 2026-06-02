@@ -1,0 +1,14 @@
+// Boolean reachability / transitive closure over a reflexive adjacency matrix.
+// G is reflexive (1.0 on the diagonal) so each generation re-derives the prior
+// frontier and adds one hop; F grows monotonically and goes stable at the
+// reachable set. Edges: 0->1, 1->2 (node 3 is unreachable from node 0).
+dim N = 4;
+
+tensor G[R=N, C=N]   : float, empty = 0.0;
+tensor F[gen I, R=N] : float, empty = 0.0;
+
+init G = [[1.0, 1.0, 0.0, 0.0], [0.0, 1.0, 1.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+init F = [1.0, 0.0, 0.0, 0.0];
+
+F[i+1, d] = G[s,d] . F[i, s] :: map(mul, intersect) reduce(max, union);
+stop: stable(F);
