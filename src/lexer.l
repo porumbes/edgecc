@@ -18,6 +18,9 @@
 "init"              { return TOK_INIT; }
 "map"               { return TOK_MAP; }
 "reduce"            { return TOK_REDUCE; }
+"gen"               { return TOK_GEN; }
+"stop"              { return TOK_STOP; }
+"stable"            { return TOK_STABLE; }
 "empty"             { return TOK_EMPTY; }
 "integer"           { return TOK_TYPE_INTEGER; }
 "float"             { return TOK_TYPE_FLOAT; }
@@ -33,7 +36,7 @@
 
 [a-zA-Z_][a-zA-Z0-9_]* { yylval.str_val = strdup(yytext); return TOK_IDENT; }
 
-[=\.\,\;\:\[\]\(\)]  { return yytext[0]; }
+[=\.\,\;\:\[\]\(\)+]  { return yytext[0]; }
 
 .                   { fprintf(stderr, "lexer error: unexpected character '%c'\n", yytext[0]); }
 

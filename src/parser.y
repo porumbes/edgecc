@@ -93,6 +93,7 @@ static void litlist_add(LitList *ll, LiteralData *lit) {
 }
 
 %token TOK_DIM TOK_TENSOR TOK_INIT TOK_MAP TOK_REDUCE TOK_EMPTY
+%token TOK_GEN TOK_STOP TOK_STABLE
 %token TOK_TYPE_INTEGER TOK_TYPE_FLOAT TOK_TYPE_BOOLEAN
 %token TOK_DOUBLE_COLON
 %token <int_val> TOK_INT_LIT TOK_BOOL_LIT
