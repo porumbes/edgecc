@@ -79,11 +79,17 @@ typedef struct {
 } IRStore;
 
 typedef struct {
-    char *tensor_name;       /* the generational tensor */
+    char *name;
     int spatial_dims[8];     /* shape excluding the generational axis */
     int spatial_ndims;
-    double empty_val;        /* for the fresh slice */
-    int max_gen;             /* safety iteration cap */
+    double empty_val;
+} IRGenAlloc;
+
+typedef struct {
+    IRGenAlloc cross_gen;            /* the cross-generational tensor (prev/next) */
+    IRGenAlloc intermediates[8];     /* intra-generation intermediates (fresh each gen) */
+    int num_intermediates;
+    int max_gen;                     /* safety iteration cap */
 } IRGenLoop;
 
 typedef struct {
