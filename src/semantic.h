@@ -7,6 +7,7 @@
 #define MAX_DIMS 64
 #define MAX_TENSORS 64
 #define MAX_INDICES 16
+#define MAX_EINSUMS 16
 
 typedef struct {
     char *name;
@@ -21,6 +22,7 @@ typedef struct {
     double empty_val;
     int dim_sizes[8];
     int gen_axis;   /* index of generational rank, or -1 */
+    int has_init;   /* 1 if an `init` statement provides this tensor's values */
 } TensorEntry;
 
 typedef struct {
@@ -28,6 +30,13 @@ typedef struct {
     int size;
     int is_free;
 } IndexEntry;
+
+typedef struct {
+    IndexEntry free_indices[MAX_INDICES];
+    int num_free_indices;
+    IndexEntry reduction_indices[MAX_INDICES];
+    int num_reduction_indices;
+} EinsumClass;
 
 typedef struct {
     DimEntry dims[MAX_DIMS];
@@ -44,6 +53,12 @@ typedef struct {
     char *gen_tensor;    /* name of the generational tensor (borrowed) */
     char *gen_rank_var;  /* the index var bound to the gen rank, e.g. "i" (borrowed) */
     char *stop_watch;    /* tensor named in `stop: stable(...)` (borrowed) */
+    /* Per-Einsum index classification, in source order (cascade support). */
+    EinsumClass einsum_class[MAX_EINSUMS];
+    int num_einsums;
+    /* Intra-generation intermediate tensors (gen-rank, written at offset i). */
+    char *intermediates[MAX_TENSORS];   /* borrowed names */
+    int num_intermediates;
 } SymbolTable;
 
 typedef struct {

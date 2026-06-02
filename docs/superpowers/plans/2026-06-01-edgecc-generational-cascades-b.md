@@ -210,32 +210,39 @@ Replace the entire `/* ---- Generational rank handling ---- */` block (the `char
             }
         }
 
-        /* Classify the OUTPUT's generational role by its write offset. */
+        /* Classify the OUTPUT's generational role by its effective write offset
+           on the declared generational axis. A `+N` offset on the ref, if
+           present, must be on that axis. (TensorRef.gen_axis is the coordinate
+           where a `+N` literally appeared, -1 if none — not the declared axis.) */
         if (out_te->gen_axis >= 0) {
-            if (d->output.gen_axis != out_te->gen_axis) {
+            if (d->output.gen_axis >= 0 && d->output.gen_axis != out_te->gen_axis) {
                 add_error(res,
                     "generational tensor '%s' written with an offset on the wrong axis",
                     out_te->name);
-            } else if (d->output.gen_offset == 1) {
-                /* cross-generational write: D[i+1, ...] */
-                if (st->gen_tensor == NULL) {
-                    st->gen_tensor = out_te->name;
-                } else if (strcmp(st->gen_tensor, out_te->name) != 0) {
-                    add_error(res,
-                        "more than one cross-generational tensor ('%s' and '%s'); "
-                        "only one is supported", st->gen_tensor, out_te->name);
-                }
-            } else if (d->output.gen_offset == 0) {
-                /* intra-generation intermediate write: T[i, ...] */
-                int seen = 0;
-                for (int m = 0; m < st->num_intermediates; m++)
-                    if (strcmp(st->intermediates[m], out_te->name) == 0) seen = 1;
-                if (!seen && st->num_intermediates < MAX_TENSORS)
-                    st->intermediates[st->num_intermediates++] = out_te->name;
             } else {
-                add_error(res,
-                    "generational tensor '%s' written at unsupported offset +%d "
-                    "(only i and i+1 are allowed)", out_te->name, d->output.gen_offset);
+                int eff_off = (d->output.gen_axis == out_te->gen_axis)
+                              ? d->output.gen_offset : 0;
+                if (eff_off == 1) {
+                    /* cross-generational write: D[i+1, ...] */
+                    if (st->gen_tensor == NULL) {
+                        st->gen_tensor = out_te->name;
+                    } else if (strcmp(st->gen_tensor, out_te->name) != 0) {
+                        add_error(res,
+                            "more than one cross-generational tensor ('%s' and '%s'); "
+                            "only one is supported", st->gen_tensor, out_te->name);
+                    }
+                } else if (eff_off == 0) {
+                    /* intra-generation intermediate write: T[i, ...] */
+                    int seen = 0;
+                    for (int m = 0; m < st->num_intermediates; m++)
+                        if (strcmp(st->intermediates[m], out_te->name) == 0) seen = 1;
+                    if (!seen && st->num_intermediates < MAX_TENSORS)
+                        st->intermediates[st->num_intermediates++] = out_te->name;
+                } else {
+                    add_error(res,
+                        "generational tensor '%s' written at unsupported offset +%d "
+                        "(only i and i+1 are allowed)", out_te->name, eff_off);
+                }
             }
         }
 
@@ -245,7 +252,7 @@ Replace the entire `/* ---- Generational rank handling ---- */` block (the `char
                 add_error(res,
                     "generational tensor '%s' must be read at offset 0 "
                     "(e.g. %s[i, ...]), not with a +N offset",
-                    tes[k]->tensor_name, tes[k]->tensor_name);
+                    tes[k]->name, tes[k]->name);
             }
         }
     }

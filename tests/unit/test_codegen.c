@@ -111,9 +111,43 @@ TEST(test_codegen_generational) {
     ast_free(ast);
 }
 
+TEST(test_codegen_cascade_bellman_ford) {
+    AstNode *ast = parse(
+        "dim N = 4;\n"
+        "tensor W[R=N, C=N]   : float, empty = inf;\n"
+        "tensor T[gen I, R=N] : float, empty = inf;\n"
+        "tensor D[gen I, R=N] : float, empty = inf;\n"
+        "init W = [[inf,1.0,4.0,inf],[inf,inf,2.0,6.0],[inf,inf,inf,3.0],[inf,inf,inf,inf]];\n"
+        "init D = [0.0, inf, inf, inf];\n"
+        "T[i, d]   = W[s,d] . D[i, s] :: map(add, intersect) reduce(min, union);\n"
+        "D[i+1, d] = D[i, d] . T[i, d] :: map(min, union) reduce(min, union);\n"
+        "stop: stable(D);\n"
+    );
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    char *code = codegen_python(ir);
+    ASSERT_NOT_NULL(code);
+    ASSERT_TRUE(strstr(code, "def run(W, D):") != NULL);
+    ASSERT_TRUE(strstr(code, "\"output\": \"D\"") != NULL);
+    ASSERT_TRUE(strstr(code, "D_prev = D") != NULL);
+    ASSERT_TRUE(strstr(code, "while True:") != NULL);
+    ASSERT_TRUE(strstr(code, "D_next = [math.inf] * N") != NULL);
+    ASSERT_TRUE(strstr(code, "T = [math.inf] * N") != NULL);
+    ASSERT_TRUE(strstr(code, "b_val = T[d]") != NULL);
+    ASSERT_TRUE(strstr(code, "a_val = D_prev[d]") != NULL);
+    ASSERT_TRUE(strstr(code, "if D_next == D_prev:") != NULL);
+    ASSERT_TRUE(strstr(code, "return D_prev") != NULL);
+    free(code);
+    ir_free(ir);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
 int main(void) {
     RUN_TEST(test_codegen_gemm);
     RUN_TEST(test_codegen_intersect_union);
     RUN_TEST(test_codegen_generational);
+    RUN_TEST(test_codegen_cascade_bellman_ford);
     return test_report();
 }

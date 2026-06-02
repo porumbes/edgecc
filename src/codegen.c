@@ -414,13 +414,38 @@ char *codegen_python(IRProgram *ir) {
     /* Detect generational mode and capture the gen-loop metadata. */
     int iterative = 0;
     const char *gen_tensor = NULL;
+    const char *intermediates[8];
+    int num_intermediates = 0;
     for (int i = 0; i < ir->count; i++) {
         if (ir->instrs[i].type == IR_GEN_LOOP_BEGIN) {
             iterative = 1;
-            gen_tensor = ir->instrs[i].data.gen_loop.tensor_name;
+            gen_tensor = ir->instrs[i].data.gen_loop.cross_gen.name;
+            num_intermediates = ir->instrs[i].data.gen_loop.num_intermediates;
+            for (int j = 0; j < num_intermediates && j < 8; j++)
+                intermediates[j] = ir->instrs[i].data.gen_loop.intermediates[j].name;
             break;
         }
     }
+
+    /* Cascade I/O: intermediates are neither parameters nor the return value;
+       the returned tensor is the cross-generational one. */
+    if (iterative) {
+        TensorNameList filtered;
+        filtered.count = 0;
+        for (int i = 0; i < inputs.count; i++) {
+            int is_inter = 0;
+            for (int j = 0; j < num_intermediates; j++)
+                if (strcmp(inputs.names[i], intermediates[j]) == 0) is_inter = 1;
+            if (is_inter) { free(inputs.names[i]); continue; }
+            filtered.names[filtered.count++] = inputs.names[i];
+        }
+        inputs = filtered;
+        if (gen_tensor) {
+            if (output) free(output);
+            output = strdup(gen_tensor);
+        }
+    }
+
     if (iterative) {
         cb_append(&cb, "__EDGECC_MAX_GEN__ = 1000\n\n");
     }
@@ -488,26 +513,40 @@ char *codegen_python(IRProgram *ir) {
                 cb.indent--;
                 break;
             case IR_GEN_LOOP_BEGIN: {
+                IRGenLoop *gloop = &instr->data.gen_loop;
                 cb_indent(&cb);
-                cb_appendf(&cb, "%s_prev = %s\n",
-                           instr->data.gen_loop.tensor_name,
-                           instr->data.gen_loop.tensor_name);
+                cb_appendf(&cb, "%s_prev = %s\n", gloop->cross_gen.name, gloop->cross_gen.name);
                 cb_indent(&cb);
                 cb_append(&cb, "_it = 0\n");
                 cb_indent(&cb);
                 cb_append(&cb, "while True:\n");
                 cb.indent++;
-                /* fresh empty slice for this generation */
-                IRTensorAlloc tmp;
-                memset(&tmp, 0, sizeof(tmp));
-                tmp.ndims = instr->data.gen_loop.spatial_ndims;
-                tmp.empty_val = instr->data.gen_loop.empty_val;
-                for (int k = 0; k < tmp.ndims; k++)
-                    tmp.dim_sizes[k] = instr->data.gen_loop.spatial_dims[k];
-                cb_indent(&cb);
-                cb_appendf(&cb, "%s_next = ", instr->data.gen_loop.tensor_name);
-                emit_alloc(&cb, &tmp, ir, i);
-                cb_append(&cb, "\n");
+                /* cross-generational next slice (fresh each generation) */
+                {
+                    IRTensorAlloc tmp;
+                    memset(&tmp, 0, sizeof(tmp));
+                    tmp.ndims = gloop->cross_gen.spatial_ndims;
+                    tmp.empty_val = gloop->cross_gen.empty_val;
+                    for (int k = 0; k < tmp.ndims; k++)
+                        tmp.dim_sizes[k] = gloop->cross_gen.spatial_dims[k];
+                    cb_indent(&cb);
+                    cb_appendf(&cb, "%s_next = ", gloop->cross_gen.name);
+                    emit_alloc(&cb, &tmp, ir, i);
+                    cb_append(&cb, "\n");
+                }
+                /* each intra-generation intermediate (fresh each generation) */
+                for (int m = 0; m < gloop->num_intermediates; m++) {
+                    IRTensorAlloc tmp;
+                    memset(&tmp, 0, sizeof(tmp));
+                    tmp.ndims = gloop->intermediates[m].spatial_ndims;
+                    tmp.empty_val = gloop->intermediates[m].empty_val;
+                    for (int k = 0; k < tmp.ndims; k++)
+                        tmp.dim_sizes[k] = gloop->intermediates[m].spatial_dims[k];
+                    cb_indent(&cb);
+                    cb_appendf(&cb, "%s = ", gloop->intermediates[m].name);
+                    emit_alloc(&cb, &tmp, ir, i);
+                    cb_append(&cb, "\n");
+                }
                 break;
             }
             case IR_GEN_LOOP_END: {
