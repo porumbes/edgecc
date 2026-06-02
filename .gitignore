@@ -1,6 +1,7 @@
 build/
 *.o
 *.pyc
+.DS_Store
 __pycache__/
 output.py
 examples/*.py
