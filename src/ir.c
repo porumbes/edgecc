@@ -28,15 +28,6 @@ static char *dup_str(const char *s) {
     return d;
 }
 
-static char **dup_str_array(char **src, int count) {
-    if (!src || count == 0) return NULL;
-    char **dst = malloc(count * sizeof(char *));
-    for (int i = 0; i < count; i++) {
-        dst[i] = dup_str(src[i]);
-    }
-    return dst;
-}
-
 /* Duplicate coords, omitting index `strip_axis` (pass -1 to keep all). */
 static char **dup_coords_strip(char **src, int count, int strip_axis, int *out_count) {
     int n = 0;
