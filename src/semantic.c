@@ -282,13 +282,13 @@ static void analyze_einsum(SemanticResult *res, AstNode *node, int eidx) {
                 int eff_off = (d->output.gen_axis == out_te->gen_axis)
                               ? d->output.gen_offset : 0;
                 if (eff_off == 1) {
-                    /* cross-generational write: D[i+1, ...] */
-                    if (st->gen_tensor == NULL) {
-                        st->gen_tensor = out_te->name;
-                    } else if (strcmp(st->gen_tensor, out_te->name) != 0) {
-                        add_error(res,
-                            "more than one cross-generational tensor ('%s' and '%s'); "
-                            "only one is supported", st->gen_tensor, out_te->name);
+                    /* cross-generational write: D[i+1, ...] — collect, allow many. */
+                    int seen = 0;
+                    for (int m = 0; m < st->num_gen_tensors; m++)
+                        if (strcmp(st->gen_tensors[m], out_te->name) == 0) seen = 1;
+                    if (!seen && st->num_gen_tensors < MAX_TENSORS) {
+                        st->gen_tensors[st->num_gen_tensors++] = out_te->name;
+                        if (st->gen_tensor == NULL) st->gen_tensor = out_te->name;
                     }
                 } else if (eff_off == 0) {
                     /* intra-generation intermediate write: T[i, ...] */
@@ -305,13 +305,15 @@ static void analyze_einsum(SemanticResult *res, AstNode *node, int eidx) {
             }
         }
 
-        /* Generational inputs must be read at offset 0 (no +N). */
+        /* Generational inputs may be read at offset 0 (i) or +1 (i+1, the
+           just-written cross-gen value from an earlier Einsum). Offsets >1 are
+           unsupported. The "written before read at i+1" SSA rule is enforced in
+           validate_cascade_ordering. */
         for (int k = 1; k < 3; k++) {
-            if (tes[k]->gen_axis >= 0 && refs[k]->gen_offset != 0) {
+            if (tes[k]->gen_axis >= 0 && refs[k]->gen_offset > 1) {
                 add_error(res,
-                    "generational tensor '%s' must be read at offset 0 "
-                    "(e.g. %s[i, ...]), not with a +N offset",
-                    tes[k]->name, tes[k]->name);
+                    "generational tensor '%s' read at unsupported offset +%d "
+                    "(only i and i+1 are allowed)", tes[k]->name, refs[k]->gen_offset);
             }
         }
     }
@@ -420,14 +422,17 @@ static void analyze_stop(SemanticResult *res, AstNode *node) {
     st->stop_watch = te->name;
 }
 
-/* Validate SSA ordering: an intra-generation intermediate must be written by an
-   earlier Einsum before a later Einsum reads it. */
+/* Validate SSA ordering within a generation:
+   (1) an intra-generation intermediate must be written by an earlier Einsum
+       before a later Einsum reads it;
+   (2) a cross-generational tensor read at i+1 must already be written at i+1 by
+       an earlier Einsum (next-reads-next). */
 static void validate_cascade_ordering(SemanticResult *res, AstNode *program) {
     SymbolTable *st = res->symtab;
     if (!st->is_iterative) return;
 
-    char *written[MAX_TENSORS];
-    int nwritten = 0;
+    char *written[MAX_TENSORS];      int nwritten = 0;     /* intermediates written so far */
+    char *cg_written[MAX_TENSORS];   int ncg_written = 0;  /* cross-gen written at i+1 so far */
     ProgramData *pd = &program->data.program;
     for (int i = 0; i < pd->count; i++) {
         AstNode *stmt = pd->statements[i];
@@ -437,22 +442,40 @@ static void validate_cascade_ordering(SemanticResult *res, AstNode *program) {
         TensorRef *ins[2] = { &e->input1, &e->input2 };
         for (int k = 0; k < 2; k++) {
             const char *nm = ins[k]->tensor_name;
+            /* (1) intermediate read-before-write */
             int is_inter = 0;
             for (int m = 0; m < st->num_intermediates; m++)
                 if (strcmp(st->intermediates[m], nm) == 0) is_inter = 1;
-            if (!is_inter) continue;
-            int found = 0;
-            for (int w = 0; w < nwritten; w++)
-                if (strcmp(written[w], nm) == 0) found = 1;
-            if (!found)
-                add_error(res, "intermediate '%s' is read before it is written", nm);
+            if (is_inter) {
+                int found = 0;
+                for (int w = 0; w < nwritten; w++)
+                    if (strcmp(written[w], nm) == 0) found = 1;
+                if (!found)
+                    add_error(res, "intermediate '%s' is read before it is written", nm);
+            }
+            /* (2) cross-gen i+1 read-before-write */
+            TensorEntry *te = symtab_find_tensor(st, nm);
+            int eff = (te && ins[k]->gen_axis == te->gen_axis) ? ins[k]->gen_offset : 0;
+            if (eff == 1) {
+                int found = 0;
+                for (int w = 0; w < ncg_written; w++)
+                    if (strcmp(cg_written[w], nm) == 0) found = 1;
+                if (!found)
+                    add_error(res,
+                        "cross-generational tensor '%s' is read at i+1 before it is written", nm);
+            }
         }
 
+        /* record this Einsum's output */
         const char *onm = e->output.tensor_name;
         for (int m = 0; m < st->num_intermediates; m++) {
             if (strcmp(st->intermediates[m], onm) == 0) {
-                written[nwritten++] = st->intermediates[m];
-                break;
+                written[nwritten++] = st->intermediates[m]; break;
+            }
+        }
+        for (int m = 0; m < st->num_gen_tensors; m++) {
+            if (strcmp(st->gen_tensors[m], onm) == 0) {
+                cg_written[ncg_written++] = st->gen_tensors[m]; break;
             }
         }
     }
@@ -509,19 +532,29 @@ SemanticResult semantic_analyze(AstNode *program) {
     if (st->stop_watch != NULL && !st->is_iterative) {
         add_error(&res, "'stop' clause present but no generational einsum");
     }
-    if (st->is_iterative && st->stop_watch != NULL && st->gen_tensor != NULL &&
-        strcmp(st->stop_watch, st->gen_tensor) != 0) {
-        add_error(&res, "stop watches '%s' but the generational tensor is '%s'",
-                  st->stop_watch, st->gen_tensor);
+    /* A generational program must write at least one cross-generational tensor
+       (a gen-rank tensor at offset i+1); otherwise nothing crosses generations. */
+    if (st->is_iterative && st->num_gen_tensors == 0) {
+        add_error(&res, "generational program has no cross-generational tensor "
+                        "(write one at offset i+1, e.g. F[i+1, ...])");
+    }
+    if (st->is_iterative && st->stop_watch != NULL && st->num_gen_tensors > 0) {
+        int ok = 0;
+        for (int m = 0; m < st->num_gen_tensors; m++)
+            if (strcmp(st->stop_watch, st->gen_tensors[m]) == 0) ok = 1;
+        if (!ok)
+            add_error(&res,
+                "stop watches '%s' but it is not a cross-generational tensor",
+                st->stop_watch);
     }
 
-    /* The cross-generational tensor needs a generation-0 init; intermediates must not. */
-    if (st->is_iterative && st->gen_tensor != NULL) {
-        TensorEntry *cg = symtab_find_tensor(st, st->gen_tensor);
+    /* Every cross-generational tensor needs a generation-0 init. */
+    for (int m = 0; m < st->num_gen_tensors; m++) {
+        TensorEntry *cg = symtab_find_tensor(st, st->gen_tensors[m]);
         if (cg != NULL && !cg->has_init) {
             add_error(&res,
                 "cross-generational tensor '%s' requires an init (generation 0)",
-                st->gen_tensor);
+                st->gen_tensors[m]);
         }
     }
     for (int m = 0; m < st->num_intermediates; m++) {
@@ -533,24 +566,28 @@ SemanticResult semantic_analyze(AstNode *program) {
         }
     }
 
-    /* The cross-generational tensor must also be read at generation i somewhere
-       in the cascade (otherwise it has no generation-0 input wired into run()). */
-    if (st->is_iterative && st->gen_tensor != NULL) {
+    /* Every cross-generational tensor must be read at generation i somewhere
+       (so its generation-0 value is wired into run() as a parameter). */
+    for (int m = 0; st->is_iterative && m < st->num_gen_tensors; m++) {
+        const char *gt = st->gen_tensors[m];
         int read_at_i = 0;
         for (int i = 0; i < pd->count; i++) {
             AstNode *s = pd->statements[i];
             if (s->type != NODE_EINSUM) continue;
             EinsumData *e = &s->data.einsum;
-            if (strcmp(e->input1.tensor_name, st->gen_tensor) == 0 ||
-                strcmp(e->input2.tensor_name, st->gen_tensor) == 0) {
-                read_at_i = 1;
-                break;
+            TensorEntry *t1 = symtab_find_tensor(st, e->input1.tensor_name);
+            TensorEntry *t2 = symtab_find_tensor(st, e->input2.tensor_name);
+            int eff1 = (t1 && e->input1.gen_axis == t1->gen_axis) ? e->input1.gen_offset : 0;
+            int eff2 = (t2 && e->input2.gen_axis == t2->gen_axis) ? e->input2.gen_offset : 0;
+            if ((strcmp(e->input1.tensor_name, gt) == 0 && eff1 == 0) ||
+                (strcmp(e->input2.tensor_name, gt) == 0 && eff2 == 0)) {
+                read_at_i = 1; break;
             }
         }
         if (!read_at_i) {
             add_error(&res,
                 "cross-generational tensor '%s' must be read at generation i "
-                "somewhere in the cascade", st->gen_tensor);
+                "somewhere in the cascade", gt);
         }
     }
 

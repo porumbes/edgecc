@@ -144,10 +144,83 @@ TEST(test_codegen_cascade_bellman_ford) {
     ast_free(ast);
 }
 
+TEST(test_codegen_two_cross_gen) {
+    AstNode *ast = parse(
+        "dim N = 2;\n"
+        "tensor G[R=N, C=N]   : float, empty = 0.0;\n"
+        "tensor F[gen I, R=N] : float, empty = 0.0;\n"
+        "tensor P[gen I, R=N] : float, empty = 0.0;\n"
+        "init F = [1.0,0.0];\n"
+        "init P = [1.0,0.0];\n"
+        "F[i+1, d] = G[s,d] . F[i,s]   :: map(and, intersect) reduce(or, union);\n"
+        "P[i+1, d] = P[i,d] . F[i+1,d] :: map(or, union) reduce(or, union);\n"
+        "stop: stable(P);\n"
+    );
+    SemanticResult sem = semantic_analyze(ast);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    char *code = codegen_python(ir);
+    ASSERT_NOT_NULL(code);
+
+    ASSERT_TRUE(strstr(code, "def run(G, F, P):") != NULL);
+    ASSERT_TRUE(strstr(code, "F_prev = F") != NULL);
+    ASSERT_TRUE(strstr(code, "P_prev = P") != NULL);
+    ASSERT_TRUE(strstr(code, "F_next = ") != NULL);
+    ASSERT_TRUE(strstr(code, "P_next = ") != NULL);
+    ASSERT_TRUE(strstr(code, "b_val = F_next[d]") != NULL);  /* P einsum reads F at i+1 (next) */
+    ASSERT_TRUE(strstr(code, "_done = P_next == P_prev") != NULL);
+    ASSERT_TRUE(strstr(code, "F_prev = F_next") != NULL);    /* both cross-gen buffers swap */
+    ASSERT_TRUE(strstr(code, "P_prev = P_next") != NULL);
+    ASSERT_TRUE(strstr(code, "return P_prev") != NULL);
+
+    free(code);
+    ir_free(ir);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
+/* Two INDEPENDENT cross-gen tensors (no next-reads-next): both are double-
+   buffered and advanced each generation, but the loop terminates on the single
+   watched tensor (A). Guards the "advance all, gate watched" epilogue path
+   independently of the coupled BFS shape. */
+TEST(test_codegen_independent_cross_gen) {
+    AstNode *ast = parse(
+        "dim N = 2;\n"
+        "tensor G[R=N, C=N]   : float, empty = 0.0;\n"
+        "tensor A[gen I, R=N] : float, empty = 0.0;\n"
+        "tensor B[gen I, R=N] : float, empty = 0.0;\n"
+        "init A = [1.0,0.0];\n"
+        "init B = [0.0,1.0];\n"
+        "A[i+1, d] = G[s,d] . A[i,s] :: map(and, intersect) reduce(or, union);\n"
+        "B[i+1, d] = G[s,d] . B[i,s] :: map(and, intersect) reduce(or, union);\n"
+        "stop: stable(A);\n"
+    );
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    char *code = codegen_python(ir);
+    ASSERT_NOT_NULL(code);
+
+    ASSERT_TRUE(strstr(code, "def run(G, A, B):") != NULL);
+    ASSERT_TRUE(strstr(code, "A_next = ") != NULL);
+    ASSERT_TRUE(strstr(code, "B_next = ") != NULL);
+    ASSERT_TRUE(strstr(code, "_done = A_next == A_prev") != NULL);  /* gate on watched A */
+    ASSERT_TRUE(strstr(code, "A_prev = A_next") != NULL);           /* advance both buffers */
+    ASSERT_TRUE(strstr(code, "B_prev = B_next") != NULL);
+    ASSERT_TRUE(strstr(code, "_done = B_next") == NULL);            /* B is NOT the gate */
+    ASSERT_TRUE(strstr(code, "return A_prev") != NULL);
+
+    free(code);
+    ir_free(ir);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
 int main(void) {
     RUN_TEST(test_codegen_gemm);
     RUN_TEST(test_codegen_intersect_union);
     RUN_TEST(test_codegen_generational);
     RUN_TEST(test_codegen_cascade_bellman_ford);
+    RUN_TEST(test_codegen_two_cross_gen);
+    RUN_TEST(test_codegen_independent_cross_gen);
     return test_report();
 }

@@ -50,7 +50,11 @@ typedef struct {
     /* Generational (iterative) program metadata. is_iterative == 0 for
        ordinary single-pass programs. */
     int is_iterative;
-    char *gen_tensor;    /* name of the generational tensor (borrowed) */
+    /* Cross-generational tensors: gen-rank tensors written at offset i+1.
+       C1 allows more than one (e.g. BFS frontier F and visited set P). */
+    char *gen_tensors[MAX_TENSORS];   /* borrowed names, source order */
+    int num_gen_tensors;
+    char *gen_tensor;    /* alias = gen_tensors[0]; kept for diagnostics (borrowed) */
     char *gen_rank_var;  /* the index var bound to the gen rank, e.g. "i" (borrowed) */
     char *stop_watch;    /* tensor named in `stop: stable(...)` (borrowed) */
     /* Per-Einsum index classification, in source order (cascade support). */

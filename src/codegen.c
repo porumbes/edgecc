@@ -309,11 +309,15 @@ static void emit_general_skeleton(CodeBuf *cb,
     /* Generational tensors are double-buffered: reads use <name>_prev,
        writes use <name>_next. Non-generational tensors keep their name. */
     char a_name[128], b_name[128], z_name[128];
-    if (load1->data.load.gen_read)
+    if (load1->data.load.gen_read == 2)
+        snprintf(a_name, sizeof(a_name), "%s_next", load1->data.load.tensor_name);
+    else if (load1->data.load.gen_read == 1)
         snprintf(a_name, sizeof(a_name), "%s_prev", load1->data.load.tensor_name);
     else
         snprintf(a_name, sizeof(a_name), "%s", load1->data.load.tensor_name);
-    if (load2->data.load.gen_read)
+    if (load2->data.load.gen_read == 2)
+        snprintf(b_name, sizeof(b_name), "%s_next", load2->data.load.tensor_name);
+    else if (load2->data.load.gen_read == 1)
         snprintf(b_name, sizeof(b_name), "%s_prev", load2->data.load.tensor_name);
     else
         snprintf(b_name, sizeof(b_name), "%s", load2->data.load.tensor_name);
@@ -388,6 +392,13 @@ static void emit_general_skeleton(CodeBuf *cb,
 
 /* ---- Main codegen ---- */
 
+/* Return 1 if `name` matches any entry in `list[0..n)`. */
+static int name_in_list(const char *name, const char **list, int n) {
+    for (int i = 0; i < n; i++)
+        if (strcmp(name, list[i]) == 0) return 1;
+    return 0;
+}
+
 char *codegen_python(IRProgram *ir) {
     if (!ir) return NULL;
     CodeBuf cb;
@@ -413,16 +424,21 @@ char *codegen_python(IRProgram *ir) {
 
     /* Detect generational mode and capture the gen-loop metadata. */
     int iterative = 0;
-    const char *gen_tensor = NULL;
+    const char *cross_gens[8]; int num_cross_gens = 0;
+    const char *watch = NULL;
     const char *intermediates[8];
     int num_intermediates = 0;
     for (int i = 0; i < ir->count; i++) {
         if (ir->instrs[i].type == IR_GEN_LOOP_BEGIN) {
+            IRGenLoop *gl = &ir->instrs[i].data.gen_loop;
             iterative = 1;
-            gen_tensor = ir->instrs[i].data.gen_loop.cross_gen.name;
-            num_intermediates = ir->instrs[i].data.gen_loop.num_intermediates;
+            num_cross_gens = gl->num_cross_gens;
+            for (int j = 0; j < num_cross_gens && j < 8; j++)
+                cross_gens[j] = gl->cross_gens[j].name;
+            watch = gl->watch;
+            num_intermediates = gl->num_intermediates;
             for (int j = 0; j < num_intermediates && j < 8; j++)
-                intermediates[j] = ir->instrs[i].data.gen_loop.intermediates[j].name;
+                intermediates[j] = gl->intermediates[j].name;
             break;
         }
     }
@@ -433,16 +449,15 @@ char *codegen_python(IRProgram *ir) {
         TensorNameList filtered;
         filtered.count = 0;
         for (int i = 0; i < inputs.count; i++) {
-            int is_inter = 0;
-            for (int j = 0; j < num_intermediates; j++)
-                if (strcmp(inputs.names[i], intermediates[j]) == 0) is_inter = 1;
-            if (is_inter) { free(inputs.names[i]); continue; }
+            if (name_in_list(inputs.names[i], intermediates, num_intermediates)) {
+                free(inputs.names[i]); continue;
+            }
             filtered.names[filtered.count++] = inputs.names[i];
         }
         inputs = filtered;
-        if (gen_tensor) {
+        if (watch) {
             if (output) free(output);
-            output = strdup(gen_tensor);
+            output = strdup(watch);
         }
     }
 
@@ -481,8 +496,8 @@ char *codegen_python(IRProgram *ir) {
                 /* Output tensor is allocated inside run(); but a generational
                    tensor arrives as a parameter and is buffered by the gen loop. */
                 if (output && strcmp(instr->data.tensor_alloc.name, output) == 0 &&
-                    !(iterative && gen_tensor &&
-                      strcmp(instr->data.tensor_alloc.name, gen_tensor) == 0)) {
+                    !(iterative &&
+                      name_in_list(instr->data.tensor_alloc.name, cross_gens, num_cross_gens))) {
                     cb_indent(&cb);
                     cb_appendf(&cb, "%s = ", instr->data.tensor_alloc.name);
                     emit_alloc(&cb, &instr->data.tensor_alloc, ir, i);
@@ -514,30 +529,27 @@ char *codegen_python(IRProgram *ir) {
                 break;
             case IR_GEN_LOOP_BEGIN: {
                 IRGenLoop *gloop = &instr->data.gen_loop;
-                cb_indent(&cb);
-                cb_appendf(&cb, "%s_prev = %s\n", gloop->cross_gen.name, gloop->cross_gen.name);
-                cb_indent(&cb);
-                cb_append(&cb, "_it = 0\n");
-                cb_indent(&cb);
-                cb_append(&cb, "while True:\n");
-                cb.indent++;
-                /* cross-generational next slice (fresh each generation) */
-                {
-                    IRTensorAlloc tmp;
-                    memset(&tmp, 0, sizeof(tmp));
-                    tmp.ndims = gloop->cross_gen.spatial_ndims;
-                    tmp.empty_val = gloop->cross_gen.empty_val;
-                    for (int k = 0; k < tmp.ndims; k++)
-                        tmp.dim_sizes[k] = gloop->cross_gen.spatial_dims[k];
+                for (int c = 0; c < gloop->num_cross_gens; c++) {
                     cb_indent(&cb);
-                    cb_appendf(&cb, "%s_next = ", gloop->cross_gen.name);
+                    cb_appendf(&cb, "%s_prev = %s\n",
+                               gloop->cross_gens[c].name, gloop->cross_gens[c].name);
+                }
+                cb_indent(&cb); cb_append(&cb, "_it = 0\n");
+                cb_indent(&cb); cb_append(&cb, "while True:\n");
+                cb.indent++;
+                for (int c = 0; c < gloop->num_cross_gens; c++) {
+                    IRTensorAlloc tmp; memset(&tmp, 0, sizeof(tmp));
+                    tmp.ndims = gloop->cross_gens[c].spatial_ndims;
+                    tmp.empty_val = gloop->cross_gens[c].empty_val;
+                    for (int k = 0; k < tmp.ndims; k++)
+                        tmp.dim_sizes[k] = gloop->cross_gens[c].spatial_dims[k];
+                    cb_indent(&cb);
+                    cb_appendf(&cb, "%s_next = ", gloop->cross_gens[c].name);
                     emit_alloc(&cb, &tmp, ir, i);
                     cb_append(&cb, "\n");
                 }
-                /* each intra-generation intermediate (fresh each generation) */
                 for (int m = 0; m < gloop->num_intermediates; m++) {
-                    IRTensorAlloc tmp;
-                    memset(&tmp, 0, sizeof(tmp));
+                    IRTensorAlloc tmp; memset(&tmp, 0, sizeof(tmp));
                     tmp.ndims = gloop->intermediates[m].spatial_ndims;
                     tmp.empty_val = gloop->intermediates[m].empty_val;
                     for (int k = 0; k < tmp.ndims; k++)
@@ -550,21 +562,41 @@ char *codegen_python(IRProgram *ir) {
                 break;
             }
             case IR_GEN_LOOP_END: {
-                const char *t = gen_tensor;
-                cb_indent(&cb);
-                cb_appendf(&cb, "if %s_next == %s_prev:\n", t, t);
-                cb.indent++;
-                cb_indent(&cb); cb_append(&cb, "break\n");
-                cb.indent--;
-                cb_indent(&cb);
-                cb_appendf(&cb, "%s_prev = %s_next\n", t, t);
-                cb_indent(&cb); cb_append(&cb, "_it += 1\n");
-                cb_indent(&cb); cb_append(&cb, "if _it >= __EDGECC_MAX_GEN__:\n");
-                cb.indent++;
-                cb_indent(&cb);
-                cb_append(&cb, "raise RuntimeError(\"generational loop did not stabilize\")\n");
-                cb.indent--;
-                cb.indent--;   /* close the while body */
+                if (num_cross_gens <= 1) {
+                    const char *t = watch;
+                    cb_indent(&cb);
+                    cb_appendf(&cb, "if %s_next == %s_prev:\n", t, t);
+                    cb.indent++;
+                    cb_indent(&cb); cb_append(&cb, "break\n");
+                    cb.indent--;
+                    cb_indent(&cb);
+                    cb_appendf(&cb, "%s_prev = %s_next\n", t, t);
+                    cb_indent(&cb); cb_append(&cb, "_it += 1\n");
+                    cb_indent(&cb); cb_append(&cb, "if _it >= __EDGECC_MAX_GEN__:\n");
+                    cb.indent++;
+                    cb_indent(&cb);
+                    cb_append(&cb, "raise RuntimeError(\"generational loop did not stabilize\")\n");
+                    cb.indent--;
+                    cb.indent--;
+                } else {
+                    cb_indent(&cb);
+                    cb_appendf(&cb, "_done = %s_next == %s_prev\n", watch, watch);
+                    for (int c = 0; c < num_cross_gens; c++) {
+                        cb_indent(&cb);
+                        cb_appendf(&cb, "%s_prev = %s_next\n", cross_gens[c], cross_gens[c]);
+                    }
+                    cb_indent(&cb); cb_append(&cb, "if _done:\n");
+                    cb.indent++;
+                    cb_indent(&cb); cb_append(&cb, "break\n");
+                    cb.indent--;
+                    cb_indent(&cb); cb_append(&cb, "_it += 1\n");
+                    cb_indent(&cb); cb_append(&cb, "if _it >= __EDGECC_MAX_GEN__:\n");
+                    cb.indent++;
+                    cb_indent(&cb);
+                    cb_append(&cb, "raise RuntimeError(\"generational loop did not stabilize\")\n");
+                    cb.indent--;
+                    cb.indent--;
+                }
                 break;
             }
             case IR_LOAD: case IR_MAP: case IR_REDUCE:
@@ -588,8 +620,8 @@ char *codegen_python(IRProgram *ir) {
 
     if (output) {
         cb_indent(&cb);
-        if (iterative && gen_tensor) {
-            cb_appendf(&cb, "return %s_prev\n", gen_tensor);
+        if (iterative && watch) {
+            cb_appendf(&cb, "return %s_prev\n", watch);
         } else {
             cb_appendf(&cb, "return %s\n", output);
         }
@@ -609,8 +641,8 @@ char *codegen_python(IRProgram *ir) {
             if (strcmp(instr->data.tensor_alloc.name, inputs.names[j]) == 0) { is_input = 1; break; }
         }
         if (!is_input) continue;
-        if (iterative && gen_tensor &&
-            strcmp(instr->data.tensor_alloc.name, gen_tensor) == 0) continue;
+        if (iterative &&
+            name_in_list(instr->data.tensor_alloc.name, cross_gens, num_cross_gens)) continue;
         cb_indent(&cb);
         cb_appendf(&cb, "%s = ", instr->data.tensor_alloc.name);
         emit_alloc(&cb, &instr->data.tensor_alloc, ir, i);

@@ -1,8 +1,0 @@
-dim N = 4;
-tensor D[gen I, R=N] : float, empty = inf;
-tensor E[gen I, R=N] : float, empty = inf;
-init D = [0.0, inf, inf, inf];
-init E = [0.0, inf, inf, inf];
-D[i+1, d] = D[i, d] . E[i, d] :: map(min, union) reduce(min, union);
-E[i+1, d] = E[i, d] . D[i, d] :: map(min, union) reduce(min, union);
-stop: stable(D);

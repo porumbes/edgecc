@@ -107,6 +107,22 @@ special accumulation operator is needed. An Einsum with no reduction rank (the
 combine) still writes `reduce(...)`; with zero reduction indices it passes the
 map value through. See `docs/superpowers/specs/2026-06-01-edgecc-generational-cascades-b-design.md`.
 
+**Multiple cross-generational tensors (C1).** A cascade may write **more than one**
+cross-generational tensor (each declared with `gen`, written at `i+1`, carrying an
+`init`). A later Einsum may read an earlier one's just-written `i+1` value
+(*next-reads-next*). `run()` returns the single tensor named by `stop: stable(...)`;
+the others are computed and double-buffered each generation but not returned. Naive
+reachability BFS — frontier `F` (recomputed, unpruned) and visited set `P`
+(accumulated by union, watched because it is monotone):
+
+```
+F[i+1, d] = G[s,d] . F[i,s]   :: map(and, intersect) reduce(or, union);   // gather neighbors
+P[i+1, d] = P[i,d] . F[i+1,d] :: map(or, union) reduce(or, union);        // accumulate visited
+stop: stable(P);
+```
+
+See `docs/superpowers/specs/2026-06-02-edgecc-multi-cross-gen-tensors-c1-design.md`.
+
 Rank variables in expressions bind to declared rank names by position. Built-in compute operators: `add`, `sub`, `mul`, `min`, `max`, `and`, `or`. Built-in merge operators (optional second arg, default `passthrough`): `passthrough`, `nopass`, `intersect`, `take_left`, `take_left_only`, `take_right`, `take_right_only`, `xor`, `union`. Omitting the merge argument preserves v1 source-program semantics.
 
 ## Generated Python ABI
@@ -176,4 +192,4 @@ Coverage is Tier 1 only — static dropdowns for compute / merge / type / empty-
 
 ## v2 Scope Limitations
 
-Not yet supported: multi-operation expressions with compute labels, the `<<` update compute operator, multiple cross-generational tensors / full 3-step BFS (needs unary `¬` and a take-left compute op), `ANY` compute, occupancy (`‖F‖≡0`) termination, and nested cascades / multiple generational ranks — single-Einsum generational ranks and single-cross-generational-tensor cascades (e.g. Bellman-Ford) are supported; see "Generational (iterative) ranks", anonymous tensors / parenthesized sub-expressions, unary functions, the 7 (No,No)→Yes merge operators (NOR, equivalence, NAND, ¬→, ¬←, ⇐, ⇒), file-based init, sparse tensor storage, optimizations of any kind, user-defined compute operators.
+Not yet supported: multi-operation expressions with compute labels, the `<<` update compute operator, the remaining gaps for full 3-step BFS (unary `¬`, a take-left compute op, depth-valued masking, multi-output return, `ANY` compute, occupancy (`‖F‖≡0`) termination), and nested cascades / multiple generational ranks — single-Einsum generational ranks and cascades with one **or more** cross-generational tensors (e.g. Bellman-Ford; naive reachability BFS) are supported; see "Generational (iterative) ranks", anonymous tensors / parenthesized sub-expressions, unary functions, the 7 (No,No)→Yes merge operators (NOR, equivalence, NAND, ¬→, ¬←, ⇐, ⇒), file-based init, sparse tensor storage, optimizations of any kind, user-defined compute operators.
