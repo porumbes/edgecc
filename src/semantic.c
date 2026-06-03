@@ -532,6 +532,12 @@ SemanticResult semantic_analyze(AstNode *program) {
     if (st->stop_watch != NULL && !st->is_iterative) {
         add_error(&res, "'stop' clause present but no generational einsum");
     }
+    /* A generational program must write at least one cross-generational tensor
+       (a gen-rank tensor at offset i+1); otherwise nothing crosses generations. */
+    if (st->is_iterative && st->num_gen_tensors == 0) {
+        add_error(&res, "generational program has no cross-generational tensor "
+                        "(write one at offset i+1, e.g. F[i+1, ...])");
+    }
     if (st->is_iterative && st->stop_watch != NULL && st->num_gen_tensors > 0) {
         int ok = 0;
         for (int m = 0; m < st->num_gen_tensors; m++)
