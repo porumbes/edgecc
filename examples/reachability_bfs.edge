@@ -1,0 +1,26 @@
+// Naive reachability BFS — two cross-generational tensors (C1).
+//
+// Frontier F and visited set P are BOTH cross-generational (written at i+1).
+// The visited update reads the just-written next frontier (F[i+1]) — a
+// "next-reads-next" dependency. F is recomputed (unpruned) each generation, so
+// it may oscillate, but P accumulates by union and stabilizes once every
+// reachable node is in it. We watch P, which is the reachability answer.
+
+dim N = 6;
+
+tensor G[R=N, C=N]   : float, empty = 0.0;
+tensor F[gen I, R=N] : float, empty = 0.0;
+tensor P[gen I, R=N] : float, empty = 0.0;
+
+init G = [[0.0,1.0,1.0,0.0,0.0,0.0],
+          [0.0,0.0,0.0,1.0,0.0,0.0],
+          [0.0,0.0,0.0,1.0,1.0,0.0],
+          [0.0,0.0,0.0,0.0,0.0,1.0],
+          [0.0,0.0,0.0,0.0,0.0,1.0],
+          [0.0,0.0,0.0,0.0,0.0,0.0]];
+init F = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+init P = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+
+F[i+1, d] = G[s,d] . F[i,s]   :: map(and, intersect) reduce(or, union);
+P[i+1, d] = P[i,d] . F[i+1,d] :: map(or, union) reduce(or, union);
+stop: stable(P);
