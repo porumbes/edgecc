@@ -46,7 +46,7 @@ typedef struct {
     char *tensor_name;
     char **coords;
     int ncoords;
-    int gen_read;   /* 1 if this loads the generational tensor's prev slice */
+    int gen_read;   /* 0: not cross-gen; 1: read at i (-> _prev); 2: read at i+1 (-> _next) */
 } IRLoad;
 
 typedef struct {
@@ -86,10 +86,12 @@ typedef struct {
 } IRGenAlloc;
 
 typedef struct {
-    IRGenAlloc cross_gen;            /* the cross-generational tensor (prev/next) */
-    IRGenAlloc intermediates[8];     /* intra-generation intermediates (fresh each gen) */
+    IRGenAlloc cross_gens[8];         /* cross-generational tensors (each prev/next) */
+    int num_cross_gens;
+    char *watch;                      /* the stop-watched cross-gen tensor name (owned) */
+    IRGenAlloc intermediates[8];      /* intra-generation intermediates (fresh each gen) */
     int num_intermediates;
-    int max_gen;                     /* safety iteration cap */
+    int max_gen;                      /* safety iteration cap */
 } IRGenLoop;
 
 typedef struct {

@@ -92,6 +92,20 @@ static void emit_tensor_inits(IRProgram *ir, AstNode *program) {
     }
 }
 
+static int is_cross_gen_name(SymbolTable *st, const char *name) {
+    for (int m = 0; m < st->num_gen_tensors; m++)
+        if (strcmp(st->gen_tensors[m], name) == 0) return 1;
+    return 0;
+}
+
+/* 0: not cross-gen; 1: cross-gen read at i (prev); 2: cross-gen read at i+1 (next). */
+static int gen_read_kind(SymbolTable *st, TensorRef *ref, TensorEntry *te) {
+    if (!te || te->gen_axis < 0) return 0;
+    if (!is_cross_gen_name(st, te->name)) return 0;
+    int eff = (ref->gen_axis == te->gen_axis) ? ref->gen_offset : 0;
+    return (eff == 1) ? 2 : 1;
+}
+
 static void emit_einsum(IRProgram *ir, AstNode *einsum_node, SymbolTable *symtab, int eidx) {
     EinsumData *e = &einsum_node->data.einsum;
     EinsumClass *cls = &symtab->einsum_class[eidx];
@@ -99,10 +113,6 @@ static void emit_einsum(IRProgram *ir, AstNode *einsum_node, SymbolTable *symtab
     TensorEntry *out_te = symtab_find_tensor(symtab, e->output.tensor_name);
     TensorEntry *in1_te = symtab_find_tensor(symtab, e->input1.tensor_name);
     TensorEntry *in2_te = symtab_find_tensor(symtab, e->input2.tensor_name);
-    const char *cg = symtab->gen_tensor;
-    int out_cross = cg && strcmp(e->output.tensor_name, cg) == 0;
-    int in1_cross = cg && strcmp(e->input1.tensor_name, cg) == 0;
-    int in2_cross = cg && strcmp(e->input2.tensor_name, cg) == 0;
 
     /* Spatial loops: this Einsum's free indices, then its reduction indices. */
     for (int i = 0; i < cls->num_free_indices; i++) {
@@ -123,7 +133,7 @@ static void emit_einsum(IRProgram *ir, AstNode *einsum_node, SymbolTable *symtab
         instr->data.load.tensor_name = dup_str(e->input1.tensor_name);
         instr->data.load.coords = dup_coords_strip(e->input1.rank_vars,
             e->input1.num_vars, in1_te->gen_axis, &instr->data.load.ncoords);
-        instr->data.load.gen_read = in1_cross;
+        instr->data.load.gen_read = gen_read_kind(symtab, &e->input1, in1_te);
     }
     /* LOAD input2 -> reg 1 */
     {
@@ -132,7 +142,7 @@ static void emit_einsum(IRProgram *ir, AstNode *einsum_node, SymbolTable *symtab
         instr->data.load.tensor_name = dup_str(e->input2.tensor_name);
         instr->data.load.coords = dup_coords_strip(e->input2.rank_vars,
             e->input2.num_vars, in2_te->gen_axis, &instr->data.load.ncoords);
-        instr->data.load.gen_read = in2_cross;
+        instr->data.load.gen_read = gen_read_kind(symtab, &e->input2, in2_te);
     }
 
     /* MAP: reg 2 = map_op(reg 0, reg 1) */
@@ -167,7 +177,7 @@ static void emit_einsum(IRProgram *ir, AstNode *einsum_node, SymbolTable *symtab
         instr->data.store.coords = dup_coords_strip(e->output.rank_vars,
             e->output.num_vars, out_te->gen_axis, &instr->data.store.ncoords);
         instr->data.store.src_reg = 3;
-        instr->data.store.gen_write = out_cross;
+        instr->data.store.gen_write = is_cross_gen_name(symtab, e->output.tensor_name);
     }
 
     /* LOOP_END in reverse order: reduction first, then free. */
@@ -202,8 +212,13 @@ IRProgram *ir_lower(AstNode *program, SymbolTable *symtab) {
         /* One generational loop wraps the whole cascade. */
         IRInstr *gl = ir_emit(ir, IR_GEN_LOOP_BEGIN);
         gl->data.gen_loop.max_gen = 1000;
-        TensorEntry *cgte = symtab_find_tensor(symtab, symtab->gen_tensor);
-        if (cgte) fill_gen_alloc(&gl->data.gen_loop.cross_gen, cgte);
+        int nc = 0;
+        for (int m = 0; m < symtab->num_gen_tensors && nc < 8; m++) {
+            TensorEntry *te = symtab_find_tensor(symtab, symtab->gen_tensors[m]);
+            if (te) fill_gen_alloc(&gl->data.gen_loop.cross_gens[nc++], te);
+        }
+        gl->data.gen_loop.num_cross_gens = nc;
+        gl->data.gen_loop.watch = symtab->stop_watch ? dup_str(symtab->stop_watch) : NULL;
         int ni = 0;
         for (int m = 0; m < symtab->num_intermediates && ni < 8; m++) {
             TensorEntry *te = symtab_find_tensor(symtab, symtab->intermediates[m]);
@@ -253,7 +268,9 @@ void ir_free(IRProgram *ir) {
             case IR_LOOP_END:
                 break;
             case IR_GEN_LOOP_BEGIN:
-                free(instr->data.gen_loop.cross_gen.name);
+                for (int c = 0; c < instr->data.gen_loop.num_cross_gens; c++)
+                    free(instr->data.gen_loop.cross_gens[c].name);
+                free(instr->data.gen_loop.watch);
                 for (int j = 0; j < instr->data.gen_loop.num_intermediates; j++)
                     free(instr->data.gen_loop.intermediates[j].name);
                 break;
@@ -353,13 +370,18 @@ void ir_dump(IRProgram *ir, FILE *out) {
                 fprintf(out, ", r%d)\n", instr->data.store.src_reg);
                 break;
             case IR_GEN_LOOP_BEGIN:
-                fprintf(out, "GEN_LOOP_BEGIN(cross=%s, spatial=[",
-                        instr->data.gen_loop.cross_gen.name);
-                for (int j = 0; j < instr->data.gen_loop.cross_gen.spatial_ndims; j++) {
-                    if (j > 0) fprintf(out, ",");
-                    fprintf(out, "%d", instr->data.gen_loop.cross_gen.spatial_dims[j]);
+                fprintf(out, "GEN_LOOP_BEGIN(");
+                for (int c = 0; c < instr->data.gen_loop.num_cross_gens; c++) {
+                    if (c > 0) fprintf(out, ", ");
+                    fprintf(out, "cross=%s, spatial=[",
+                            instr->data.gen_loop.cross_gens[c].name);
+                    for (int j = 0; j < instr->data.gen_loop.cross_gens[c].spatial_ndims; j++) {
+                        if (j > 0) fprintf(out, ",");
+                        fprintf(out, "%d", instr->data.gen_loop.cross_gens[c].spatial_dims[j]);
+                    }
+                    fprintf(out, "]");
                 }
-                fprintf(out, "], intermediates=[");
+                fprintf(out, ", intermediates=[");
                 for (int j = 0; j < instr->data.gen_loop.num_intermediates; j++) {
                     if (j > 0) fprintf(out, ",");
                     fprintf(out, "%s", instr->data.gen_loop.intermediates[j].name);

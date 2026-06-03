@@ -171,9 +171,9 @@ TEST(test_ir_generational_structure) {
         switch (ir->instrs[i].type) {
             case IR_GEN_LOOP_BEGIN:
                 gen_begin++;
-                ASSERT_STR_EQ("F", ir->instrs[i].data.gen_loop.cross_gen.name);
-                ASSERT_INT_EQ(1, ir->instrs[i].data.gen_loop.cross_gen.spatial_ndims);
-                ASSERT_INT_EQ(4, ir->instrs[i].data.gen_loop.cross_gen.spatial_dims[0]);
+                ASSERT_STR_EQ("F", ir->instrs[i].data.gen_loop.cross_gens[0].name);
+                ASSERT_INT_EQ(1, ir->instrs[i].data.gen_loop.cross_gens[0].spatial_ndims);
+                ASSERT_INT_EQ(4, ir->instrs[i].data.gen_loop.cross_gens[0].spatial_dims[0]);
                 break;
             case IR_GEN_LOOP_END: gen_end++; break;
             case IR_LOOP_BEGIN:   loop_begins++; break;
@@ -227,9 +227,9 @@ TEST(test_ir_cascade_structure) {
         switch (ir->instrs[i].type) {
             case IR_GEN_LOOP_BEGIN:
                 gen_begin++;
-                ASSERT_STR_EQ("D", ir->instrs[i].data.gen_loop.cross_gen.name);
-                ASSERT_INT_EQ(1, ir->instrs[i].data.gen_loop.cross_gen.spatial_ndims);
-                ASSERT_INT_EQ(4, ir->instrs[i].data.gen_loop.cross_gen.spatial_dims[0]);
+                ASSERT_STR_EQ("D", ir->instrs[i].data.gen_loop.cross_gens[0].name);
+                ASSERT_INT_EQ(1, ir->instrs[i].data.gen_loop.cross_gens[0].spatial_ndims);
+                ASSERT_INT_EQ(4, ir->instrs[i].data.gen_loop.cross_gens[0].spatial_dims[0]);
                 ASSERT_INT_EQ(1, ir->instrs[i].data.gen_loop.num_intermediates);
                 ASSERT_STR_EQ("T", ir->instrs[i].data.gen_loop.intermediates[0].name);
                 break;
@@ -253,6 +253,50 @@ TEST(test_ir_cascade_structure) {
     ast_free(ast);
 }
 
+TEST(test_ir_two_cross_gen) {
+    AstNode *ast = parse(
+        "dim N = 2;\n"
+        "tensor G[R=N, C=N]   : float, empty = 0.0;\n"
+        "tensor F[gen I, R=N] : float, empty = 0.0;\n"
+        "tensor P[gen I, R=N] : float, empty = 0.0;\n"
+        "init F = [1.0,0.0];\n"
+        "init P = [1.0,0.0];\n"
+        "F[i+1, d] = G[s,d] . F[i,s]   :: map(and, intersect) reduce(or, union);\n"
+        "P[i+1, d] = P[i,d] . F[i+1,d] :: map(or, union) reduce(or, union);\n"
+        "stop: stable(P);\n"
+    );
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    ASSERT_NOT_NULL(ir);
+
+    int found_begin = 0, f_next_read = 0, p_prev_read = 0, stores = 0;
+    for (int i = 0; i < ir->count; i++) {
+        IRInstr *in = &ir->instrs[i];
+        if (in->type == IR_GEN_LOOP_BEGIN) {
+            found_begin = 1;
+            ASSERT_INT_EQ(2, in->data.gen_loop.num_cross_gens);
+            ASSERT_NOT_NULL(in->data.gen_loop.watch);
+            ASSERT_STR_EQ("P", in->data.gen_loop.watch);
+        }
+        if (in->type == IR_LOAD) {
+            if (strcmp(in->data.load.tensor_name, "F") == 0 && in->data.load.gen_read == 2)
+                f_next_read = 1;
+            if (strcmp(in->data.load.tensor_name, "P") == 0 && in->data.load.gen_read == 1)
+                p_prev_read = 1;
+        }
+        if (in->type == IR_STORE && in->data.store.gen_write == 1) stores++;
+    }
+    ASSERT_INT_EQ(1, found_begin);
+    ASSERT_INT_EQ(1, f_next_read);
+    ASSERT_INT_EQ(1, p_prev_read);
+    ASSERT_INT_EQ(2, stores);
+
+    ir_free(ir);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
 int main(void) {
     RUN_TEST(test_ir_gemm_structure);
     RUN_TEST(test_ir_loop_order);
@@ -260,5 +304,6 @@ int main(void) {
     RUN_TEST(test_ir_default_merge_is_passthrough);
     RUN_TEST(test_ir_generational_structure);
     RUN_TEST(test_ir_cascade_structure);
+    RUN_TEST(test_ir_two_cross_gen);
     return test_report();
 }

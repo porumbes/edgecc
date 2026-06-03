@@ -419,7 +419,7 @@ char *codegen_python(IRProgram *ir) {
     for (int i = 0; i < ir->count; i++) {
         if (ir->instrs[i].type == IR_GEN_LOOP_BEGIN) {
             iterative = 1;
-            gen_tensor = ir->instrs[i].data.gen_loop.cross_gen.name;
+            gen_tensor = ir->instrs[i].data.gen_loop.cross_gens[0].name;
             num_intermediates = ir->instrs[i].data.gen_loop.num_intermediates;
             for (int j = 0; j < num_intermediates && j < 8; j++)
                 intermediates[j] = ir->instrs[i].data.gen_loop.intermediates[j].name;
@@ -515,7 +515,7 @@ char *codegen_python(IRProgram *ir) {
             case IR_GEN_LOOP_BEGIN: {
                 IRGenLoop *gloop = &instr->data.gen_loop;
                 cb_indent(&cb);
-                cb_appendf(&cb, "%s_prev = %s\n", gloop->cross_gen.name, gloop->cross_gen.name);
+                cb_appendf(&cb, "%s_prev = %s\n", gloop->cross_gens[0].name, gloop->cross_gens[0].name);
                 cb_indent(&cb);
                 cb_append(&cb, "_it = 0\n");
                 cb_indent(&cb);
@@ -525,12 +525,12 @@ char *codegen_python(IRProgram *ir) {
                 {
                     IRTensorAlloc tmp;
                     memset(&tmp, 0, sizeof(tmp));
-                    tmp.ndims = gloop->cross_gen.spatial_ndims;
-                    tmp.empty_val = gloop->cross_gen.empty_val;
+                    tmp.ndims = gloop->cross_gens[0].spatial_ndims;
+                    tmp.empty_val = gloop->cross_gens[0].empty_val;
                     for (int k = 0; k < tmp.ndims; k++)
-                        tmp.dim_sizes[k] = gloop->cross_gen.spatial_dims[k];
+                        tmp.dim_sizes[k] = gloop->cross_gens[0].spatial_dims[k];
                     cb_indent(&cb);
-                    cb_appendf(&cb, "%s_next = ", gloop->cross_gen.name);
+                    cb_appendf(&cb, "%s_next = ", gloop->cross_gens[0].name);
                     emit_alloc(&cb, &tmp, ir, i);
                     cb_append(&cb, "\n");
                 }
