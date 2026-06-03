@@ -336,6 +336,36 @@ TEST(test_cascade_cross_gen_not_read) {
     ast_free(ast);
 }
 
+TEST(test_take_left_map_valid) {
+    AstNode *ast = parse(
+        "dim N = 3;\n"
+        "tensor Z[R=N] : float, empty = inf;\n"
+        "tensor A[R=N] : float, empty = inf;\n"
+        "tensor B[R=N] : float, empty = inf;\n"
+        "init A = [0.0, 2.0, inf];\n"
+        "init B = [inf, 5.0, inf];\n"
+        "Z[n] = A[n] . B[n] :: map(take_left, take_left_only) reduce(min);\n"
+    );
+    SemanticResult res = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, res.error_count);
+    semantic_result_free(&res);
+    ast_free(ast);
+}
+
+TEST(test_take_left_reduce_is_error) {
+    AstNode *ast = parse(
+        "dim K = 3; dim M = 2;\n"
+        "tensor Z[R=M] : float, empty = inf;\n"
+        "tensor A[R=K, C=M] : float, empty = inf;\n"
+        "tensor B[R=K, C=M] : float, empty = inf;\n"
+        "Z[m] = A[k,m] . B[k,m] :: map(mul, intersect) reduce(take_left, union);\n"
+    );
+    SemanticResult res = semantic_analyze(ast);
+    ASSERT_TRUE(res.error_count > 0);
+    semantic_result_free(&res);
+    ast_free(ast);
+}
+
 int main(void) {
     RUN_TEST(test_valid_gemm);
     RUN_TEST(test_undeclared_dim);
@@ -362,5 +392,7 @@ int main(void) {
     RUN_TEST(test_cascade_intermediate_with_init);
     RUN_TEST(test_cascade_intermediate_read_before_write);
     RUN_TEST(test_cascade_cross_gen_not_read);
+    RUN_TEST(test_take_left_map_valid);
+    RUN_TEST(test_take_left_reduce_is_error);
     return test_report();
 }

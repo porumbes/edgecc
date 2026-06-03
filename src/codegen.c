@@ -293,6 +293,7 @@ static const char *compute_op_pyexpr(OperatorType op,
         case OP_MAX: snprintf(out, cap, "max(%s, %s)", lhs, rhs); break;
         case OP_AND: snprintf(out, cap, "%s and %s", lhs, rhs); break;
         case OP_OR:  snprintf(out, cap, "%s or %s",  lhs, rhs); break;
+        case OP_TAKE_LEFT: snprintf(out, cap, "%s", lhs); break;
     }
     return out;
 }

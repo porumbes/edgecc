@@ -1,0 +1,14 @@
+// take_left preserves a meaningful 0.0 value through a mask, where the older
+// map(or, take_left_only) trick would drop it (0.0 or inf == inf). Output empty
+// is inf so a stored 0.0 is observable. take_left_only emits where A exists and
+// B is empty; reduce(min) passes the map value through (min(inf, v) == v).
+dim N = 3;
+
+tensor Z[R=N] : float, empty = inf;
+tensor A[R=N] : float, empty = inf;
+tensor B[R=N] : float, empty = inf;
+
+init A = [0.0, 2.0, inf];   // A[0] = 0.0 is meaningful; A[2] absent
+init B = [inf, 5.0, inf];   // B present only at n=1
+
+Z[n] = A[n] . B[n] :: map(take_left, take_left_only) reduce(min);

@@ -197,6 +197,11 @@ static int find_index(IndexInfo *arr, int count, const char *name) {
 
 static void analyze_einsum(SemanticResult *res, AstNode *node, int eidx) {
     EinsumData *d = &node->data.einsum;
+    if (d->reduce_op == OP_TAKE_LEFT) {
+        add_error(res,
+            "take_left is a map-only compute operator; "
+            "it cannot be used as a reduce operator");
+    }
     SymbolTable *st = res->symtab;
 
     /* validate all tensors exist */
@@ -620,6 +625,8 @@ double compute_op_identity(OperatorType op, DataType dt) {
             return 1.0;     /* true */
         case OP_OR:
             return 0.0;     /* false */
+        case OP_TAKE_LEFT:
+            return 0.0;     /* map-only; identity unused */
     }
     return 0.0;
 }

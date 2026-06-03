@@ -1,0 +1,5 @@
+dim K = 3; dim M = 2;
+tensor Z[R=M] : float, empty = inf;
+tensor A[R=K, C=M] : float, empty = inf;
+tensor B[R=K, C=M] : float, empty = inf;
+Z[m] = A[k,m] . B[k,m] :: map(mul, intersect) reduce(take_left, union);

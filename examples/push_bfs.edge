@@ -1,0 +1,24 @@
+// Efficient (pruned) push-BFS reachability — the frontier is masked by the
+// visited set so only newly-discovered nodes propagate. The mask uses
+// map(take_left, take_left_only): keep candidate C where P (visited) is empty,
+// preserving C's value robustly. Same graph/result as reachability_bfs.
+dim N = 6;
+
+tensor G[R=N, C=N]   : float, empty = 0.0;
+tensor C[gen I, R=N] : float, empty = 0.0;   // gathered candidates (intermediate, offset i)
+tensor F[gen I, R=N] : float, empty = 0.0;   // frontier (cross-generational)
+tensor P[gen I, R=N] : float, empty = 0.0;   // visited  (cross-generational)
+
+init G = [[0.0,1.0,1.0,0.0,0.0,0.0],
+          [0.0,0.0,0.0,1.0,0.0,0.0],
+          [0.0,0.0,0.0,1.0,1.0,0.0],
+          [0.0,0.0,0.0,0.0,0.0,1.0],
+          [0.0,0.0,0.0,0.0,0.0,1.0],
+          [0.0,0.0,0.0,0.0,0.0,0.0]];
+init F = [1.0,0.0,0.0,0.0,0.0,0.0];
+init P = [1.0,0.0,0.0,0.0,0.0,0.0];
+
+C[i, d]   = G[s,d] . F[i,s] :: map(and, intersect) reduce(or, union);
+F[i+1, d] = C[i,d] . P[i,d] :: map(take_left, take_left_only) reduce(or, union);
+P[i+1, d] = P[i,d] . F[i+1,d] :: map(or, union) reduce(or, union);
+stop: stable(P);
