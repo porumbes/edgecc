@@ -215,6 +215,28 @@ TEST(test_codegen_independent_cross_gen) {
     ast_free(ast);
 }
 
+TEST(test_codegen_take_left_map) {
+    AstNode *ast = parse(
+        "dim N = 3;\n"
+        "tensor Z[R=N] : float, empty = inf;\n"
+        "tensor A[R=N] : float, empty = inf;\n"
+        "tensor B[R=N] : float, empty = inf;\n"
+        "init A = [0.0, 2.0, inf];\n"
+        "init B = [inf, 5.0, inf];\n"
+        "Z[n] = A[n] . B[n] :: map(take_left, take_left_only) reduce(min);\n"
+    );
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    char *code = codegen_python(ir);
+    ASSERT_NOT_NULL(code);
+    ASSERT_TRUE(strstr(code, "map_val = a_op") != NULL);   /* left operand verbatim */
+    free(code);
+    ir_free(ir);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
 int main(void) {
     RUN_TEST(test_codegen_gemm);
     RUN_TEST(test_codegen_intersect_union);
@@ -222,5 +244,6 @@ int main(void) {
     RUN_TEST(test_codegen_cascade_bellman_ford);
     RUN_TEST(test_codegen_two_cross_gen);
     RUN_TEST(test_codegen_independent_cross_gen);
+    RUN_TEST(test_codegen_take_left_map);
     return test_report();
 }

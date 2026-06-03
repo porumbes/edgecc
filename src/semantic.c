@@ -620,6 +620,8 @@ double compute_op_identity(OperatorType op, DataType dt) {
             return 1.0;     /* true */
         case OP_OR:
             return 0.0;     /* false */
+        case OP_TAKE_LEFT:
+            return 0.0;     /* map-only; identity unused */
     }
     return 0.0;
 }

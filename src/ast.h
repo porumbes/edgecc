@@ -33,7 +33,8 @@ typedef enum {
     OP_MIN,
     OP_MAX,
     OP_AND,
-    OP_OR
+    OP_OR,
+    OP_TAKE_LEFT
 } OperatorType;
 
 typedef enum {

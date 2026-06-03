@@ -192,6 +192,7 @@ const char *operator_to_str(OperatorType op) {
         case OP_MAX: return "max";
         case OP_AND: return "and";
         case OP_OR:  return "or";
+        case OP_TAKE_LEFT: return "take_left";
     }
     return "unknown";
 }
@@ -204,6 +205,7 @@ OperatorType operator_from_str(const char *name) {
     if (strcmp(name, "max") == 0) return OP_MAX;
     if (strcmp(name, "and") == 0) return OP_AND;
     if (strcmp(name, "or") == 0)  return OP_OR;
+    if (strcmp(name, "take_left") == 0) return OP_TAKE_LEFT;
     return -1;
 }
 
