@@ -144,10 +144,45 @@ TEST(test_codegen_cascade_bellman_ford) {
     ast_free(ast);
 }
 
+TEST(test_codegen_two_cross_gen) {
+    AstNode *ast = parse(
+        "dim N = 2;\n"
+        "tensor G[R=N, C=N]   : float, empty = 0.0;\n"
+        "tensor F[gen I, R=N] : float, empty = 0.0;\n"
+        "tensor P[gen I, R=N] : float, empty = 0.0;\n"
+        "init F = [1.0,0.0];\n"
+        "init P = [1.0,0.0];\n"
+        "F[i+1, d] = G[s,d] . F[i,s]   :: map(and, intersect) reduce(or, union);\n"
+        "P[i+1, d] = P[i,d] . F[i+1,d] :: map(or, union) reduce(or, union);\n"
+        "stop: stable(P);\n"
+    );
+    SemanticResult sem = semantic_analyze(ast);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    char *code = codegen_python(ir);
+    ASSERT_NOT_NULL(code);
+
+    ASSERT_TRUE(strstr(code, "def run(G, F, P):") != NULL);
+    ASSERT_TRUE(strstr(code, "F_prev = F") != NULL);
+    ASSERT_TRUE(strstr(code, "P_prev = P") != NULL);
+    ASSERT_TRUE(strstr(code, "F_next = ") != NULL);
+    ASSERT_TRUE(strstr(code, "P_next = ") != NULL);
+    ASSERT_TRUE(strstr(code, "b_val = F_next[d]") != NULL);  /* P einsum reads F at i+1 (next) */
+    ASSERT_TRUE(strstr(code, "_done = P_next == P_prev") != NULL);
+    ASSERT_TRUE(strstr(code, "F_prev = F_next") != NULL);    /* both cross-gen buffers swap */
+    ASSERT_TRUE(strstr(code, "P_prev = P_next") != NULL);
+    ASSERT_TRUE(strstr(code, "return P_prev") != NULL);
+
+    free(code);
+    ir_free(ir);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
 int main(void) {
     RUN_TEST(test_codegen_gemm);
     RUN_TEST(test_codegen_intersect_union);
     RUN_TEST(test_codegen_generational);
     RUN_TEST(test_codegen_cascade_bellman_ford);
+    RUN_TEST(test_codegen_two_cross_gen);
     return test_report();
 }
