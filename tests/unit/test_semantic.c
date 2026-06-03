@@ -226,15 +226,59 @@ TEST(test_cascade_valid_bellman_ford) {
 }
 
 TEST(test_cascade_two_cross_gen_tensors) {
+    /* Reachability BFS: F and P are both cross-generational (written at i+1).
+       Under C1 this is valid, and P[i+1] reads the just-written F[i+1]. */
     AstNode *ast = parse(
-        "dim N = 4;\n"
-        "tensor D[gen I, R=N] : float, empty = inf;\n"
-        "tensor E[gen I, R=N] : float, empty = inf;\n"
-        "init D = [0.0, inf, inf, inf];\n"
-        "init E = [0.0, inf, inf, inf];\n"
-        "D[i+1, d] = D[i, d] . E[i, d] :: map(min, union) reduce(min, union);\n"
-        "E[i+1, d] = E[i, d] . D[i, d] :: map(min, union) reduce(min, union);\n"
-        "stop: stable(D);\n"
+        "dim N = 6;\n"
+        "tensor G[R=N, C=N]   : float, empty = 0.0;\n"
+        "tensor F[gen I, R=N] : float, empty = 0.0;\n"
+        "tensor P[gen I, R=N] : float, empty = 0.0;\n"
+        "init G = [[0.0,1.0,1.0,0.0,0.0,0.0],[0.0,0.0,0.0,1.0,0.0,0.0],"
+        "[0.0,0.0,0.0,1.0,1.0,0.0],[0.0,0.0,0.0,0.0,0.0,1.0],"
+        "[0.0,0.0,0.0,0.0,0.0,1.0],[0.0,0.0,0.0,0.0,0.0,0.0]];\n"
+        "init F = [1.0,0.0,0.0,0.0,0.0,0.0];\n"
+        "init P = [1.0,0.0,0.0,0.0,0.0,0.0];\n"
+        "F[i+1, d] = G[s,d] . F[i,s]   :: map(and, intersect) reduce(or, union);\n"
+        "P[i+1, d] = P[i,d] . F[i+1,d] :: map(or, union) reduce(or, union);\n"
+        "stop: stable(P);\n"
+    );
+    SemanticResult res = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, res.error_count);
+    ASSERT_INT_EQ(2, res.symtab->num_gen_tensors);
+    semantic_result_free(&res);
+    ast_free(ast);
+}
+
+TEST(test_cascade_i1_read_before_write) {
+    /* P reads F[i+1] but F is written by a LATER Einsum -> SSA error. */
+    AstNode *ast = parse(
+        "dim N = 2;\n"
+        "tensor G[R=N, C=N]   : float, empty = 0.0;\n"
+        "tensor F[gen I, R=N] : float, empty = 0.0;\n"
+        "tensor P[gen I, R=N] : float, empty = 0.0;\n"
+        "init F = [1.0,0.0];\n"
+        "init P = [1.0,0.0];\n"
+        "P[i+1, d] = P[i,d] . F[i+1,d] :: map(or, union) reduce(or, union);\n"
+        "F[i+1, d] = G[s,d] . F[i,s]   :: map(and, intersect) reduce(or, union);\n"
+        "stop: stable(P);\n"
+    );
+    SemanticResult res = semantic_analyze(ast);
+    ASSERT_TRUE(res.error_count > 0);
+    semantic_result_free(&res);
+    ast_free(ast);
+}
+
+TEST(test_cascade_cross_gen_missing_init) {
+    /* Two cross-gen tensors but P has no init -> error. */
+    AstNode *ast = parse(
+        "dim N = 2;\n"
+        "tensor G[R=N, C=N]   : float, empty = 0.0;\n"
+        "tensor F[gen I, R=N] : float, empty = 0.0;\n"
+        "tensor P[gen I, R=N] : float, empty = 0.0;\n"
+        "init F = [1.0,0.0];\n"
+        "F[i+1, d] = G[s,d] . F[i,s]   :: map(and, intersect) reduce(or, union);\n"
+        "P[i+1, d] = P[i,d] . F[i+1,d] :: map(or, union) reduce(or, union);\n"
+        "stop: stable(P);\n"
     );
     SemanticResult res = semantic_analyze(ast);
     ASSERT_TRUE(res.error_count > 0);
@@ -313,6 +357,8 @@ int main(void) {
     RUN_TEST(test_generational_two_gen_tensors);
     RUN_TEST(test_cascade_valid_bellman_ford);
     RUN_TEST(test_cascade_two_cross_gen_tensors);
+    RUN_TEST(test_cascade_i1_read_before_write);
+    RUN_TEST(test_cascade_cross_gen_missing_init);
     RUN_TEST(test_cascade_intermediate_with_init);
     RUN_TEST(test_cascade_intermediate_read_before_write);
     RUN_TEST(test_cascade_cross_gen_not_read);
