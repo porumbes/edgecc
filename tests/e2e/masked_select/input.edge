@@ -1,0 +1,18 @@
+// Masked select / gate — keep a tensor's values only where a mask is present,
+// using the take_left compute operator (C2) with the intersect merge.
+//
+// map(take_left, intersect): the intersect merge emits only where BOTH A and M
+// are non-empty, and take_left carries A's value through unchanged. Unlike a
+// numeric compute (e.g. mul), this preserves a meaningful 0.0 in A — A[0]=0.0 is
+// kept because the mask M[0] is present, not dropped as if it were empty.
+
+dim N = 4;
+
+tensor Z[R=N] : float, empty = inf;
+tensor A[R=N] : float, empty = inf;   // values, including a meaningful 0.0
+tensor M[R=N] : float, empty = inf;   // mask: present = keep A's value here
+
+init A = [0.0, 7.0, 3.0, 9.0];
+init M = [1.0, 1.0, inf, inf];        // keep indices 0 and 1; drop 2 and 3
+
+Z[n] = A[n] . M[n] :: map(take_left, intersect) reduce(min);

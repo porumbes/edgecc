@@ -1,0 +1,32 @@
+// Depth-valued push-BFS — efficient (pruned) BFS that records each node's hop
+// distance from the source, using the take_left compute operator (C2).
+//
+// Gather candidate depths (parent depth + 1, since each edge weighs 1.0), then
+// mask the frontier by the discovery set D with map(take_left, take_left_only):
+// keep a candidate depth only where D is empty (node not yet discovered), and
+// take_left carries the depth value through unchanged. D accumulates the minimum
+// (first) discovery depth and is watched for stability.
+//
+// Complements examples/push_bfs.edge (Boolean reachability): here the masked
+// value is a depth, so the value-preserving take_left is the proper primitive.
+
+dim N = 6;
+
+tensor G[R=N, C=N]   : float, empty = 0.0;   // edge present = weight 1.0
+tensor C[gen I, R=N] : float, empty = inf;   // candidate depths (intermediate, offset i)
+tensor F[gen I, R=N] : float, empty = inf;   // frontier depths (cross-generational)
+tensor D[gen I, R=N] : float, empty = inf;   // discovery depth, monotone (cross-gen, watched)
+
+init G = [[0.0,1.0,1.0,0.0,0.0,0.0],
+          [0.0,0.0,0.0,1.0,0.0,0.0],
+          [0.0,0.0,0.0,1.0,1.0,0.0],
+          [0.0,0.0,0.0,0.0,0.0,1.0],
+          [0.0,0.0,0.0,0.0,0.0,1.0],
+          [0.0,0.0,0.0,0.0,0.0,0.0]];
+init F = [0.0, inf, inf, inf, inf, inf];      // generation 0: source = node 0, depth 0
+init D = [0.0, inf, inf, inf, inf, inf];
+
+C[i, d]   = G[s,d] . F[i,s] :: map(add, intersect) reduce(min, union);        // parent depth + 1
+F[i+1, d] = C[i,d] . D[i,d] :: map(take_left, take_left_only) reduce(min, union); // keep if undiscovered
+D[i+1, d] = D[i,d] . F[i+1,d] :: map(min, union) reduce(min, union);          // record discovery depth
+stop: stable(D);

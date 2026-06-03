@@ -1,0 +1,19 @@
+// Set difference (anti-join) — keep left's values for keys NOT present in right,
+// using the take_left compute operator (C2) with the take_left_only merge.
+//
+// map(take_left, take_left_only): the take_left_only merge emits exactly where A
+// is non-empty AND B is empty ("left AND NOT right"), and take_left carries A's
+// value through unchanged. A[1]=7 and A[3]=9 survive (B empty there); A[0]=0.0
+// and A[2]=3 are removed (B present there) — note the 0.0 is correctly dropped
+// because B[0] is present, not mishandled as if A[0] were empty.
+
+dim N = 4;
+
+tensor Z[R=N] : float, empty = inf;
+tensor A[R=N] : float, empty = inf;
+tensor B[R=N] : float, empty = inf;
+
+init A = [0.0, 7.0, 3.0, 9.0];
+init B = [5.0, inf, 2.0, inf];        // B present at indices 0 and 2
+
+Z[n] = A[n] . B[n] :: map(take_left, take_left_only) reduce(min);
