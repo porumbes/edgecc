@@ -1,0 +1,16 @@
+dim N = 4;
+
+tensor G[R=N, C=N]   : float, empty = inf;
+tensor F[gen I, R=N] : float, empty = inf;   // wavefront candidate distances (cross-gen)
+tensor D[gen I, R=N] : float, empty = inf;   // best-known distances, monotone (cross-gen)
+
+init G = [[inf, 1.0, 4.0, inf],
+          [inf, inf, 2.0, 6.0],
+          [inf, inf, inf, 3.0],
+          [inf, inf, inf, inf]];
+init F = [0.0, inf, inf, inf];
+init D = [0.0, inf, inf, inf];
+
+F[i+1, d] = G[s,d] . F[i,s]   :: map(add, intersect) reduce(min, union);
+D[i+1, d] = D[i,d] . F[i+1,d] :: map(min, union) reduce(min, union);
+stop: stable(D);

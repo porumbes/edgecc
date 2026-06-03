@@ -1,0 +1,30 @@
+// Single-source shortest paths as a wavefront — two cross-generational tensors (C1).
+//
+// This is the "frontier + monotone accumulator over a semiring" pattern in the
+// min-plus semiring. F carries the candidate distances of the current wavefront
+// (relax neighbours: edge weight + frontier distance, keep the min); because F
+// is recomputed fresh each generation it OSCILLATES (a node's wavefront value
+// can rise once the wavefront passes it). D reads the just-written F[i+1] and
+// keeps the running minimum, so D is monotone non-increasing and stabilises to
+// the true shortest distances — that is what `stop: stable(D)` watches.
+//
+// Same answer as examples/bellman_ford.edge on this graph ([0, 1, 3, 6]) but a
+// different formulation: distances ride the frontier instead of being relaxed
+// into an intermediate. Needs the next-reads-next read (D[i+1] reads F[i+1]).
+
+dim N = 4;
+
+tensor G[R=N, C=N]   : float, empty = inf;   // edge weights; inf = no edge
+tensor F[gen I, R=N] : float, empty = inf;   // wavefront candidate distances (cross-gen)
+tensor D[gen I, R=N] : float, empty = inf;   // best-known distances, monotone (cross-gen)
+
+init G = [[inf, 1.0, 4.0, inf],
+          [inf, inf, 2.0, 6.0],
+          [inf, inf, inf, 3.0],
+          [inf, inf, inf, inf]];
+init F = [0.0, inf, inf, inf];               // generation 0: source = node 0
+init D = [0.0, inf, inf, inf];
+
+F[i+1, d] = G[s,d] . F[i,s]   :: map(add, intersect) reduce(min, union);   // relax wavefront
+D[i+1, d] = D[i,d] . F[i+1,d] :: map(min, union) reduce(min, union);       // keep the minimum
+stop: stable(D);
