@@ -1,0 +1,6 @@
+dim N = 2;
+tensor F[R=N] : float, empty = 0.0;
+tensor Z[R=N] : float, empty = 0.0;
+init F = [1.0, 0.0];
+Z[d] = F[d] . F[d] :: map(add, union) reduce(add, union);
+save: Q -> "out.mtx";
