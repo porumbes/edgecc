@@ -3,7 +3,7 @@
 
 Usage:
     python tools/edgecc_viz.py TRACE.json --graph ADJ.mtx -o FRAMES_DIR \
-        [--color TENSOR] [--layout spring] [--theme dark]
+        [--color TENSOR] [--layout spring|circular|shell] [--theme dark]
 
 matplotlib / networkx are imported lazily inside the render functions, so the
 pure helpers below (load_trace, validate_trace, active_edges) are importable and
@@ -112,7 +112,31 @@ def _finite_range(vals):
     return lo, hi
 
 
-def _layout(adj, kind, seed=1):
+def shell_nlist(steps, color, empty, n):
+    """Ring assignment for the shell layout: shell k = node indices whose `color`
+    tensor first became non-empty at generation index k (walking `steps` in order);
+    a trailing ring holds nodes never reached. Pure (no networkx/matplotlib)."""
+    first = [None] * n
+    for gi, step in enumerate(steps):
+        vals = step.get("tensors", {}).get(color)
+        if not vals or isinstance(vals[0], list):   # tensor absent this gen, or 2-D
+            continue
+        for node in range(min(n, len(vals))):
+            if first[node] is None and vals[node] != empty:
+                first[node] = gi
+    buckets, unreached = {}, []
+    for node in range(n):
+        if first[node] is None:
+            unreached.append(node)
+        else:
+            buckets.setdefault(first[node], []).append(node)
+    shells = [buckets[g] for g in sorted(buckets)]
+    if unreached:
+        shells.append(unreached)
+    return shells
+
+
+def _layout(adj, kind, seed=1, nlist=None):
     import networkx as nx
     n = len(adj)
     directed = any(adj[i][j] != adj[j][i] for i in range(n) for j in range(n))
@@ -122,7 +146,12 @@ def _layout(adj, kind, seed=1):
         for j in range(n):
             if adj[i][j] != 0.0:
                 G.add_edge(i, j)
-    pos = nx.spring_layout(G, seed=seed) if kind == "spring" else nx.circular_layout(G)
+    if kind == "shell":
+        pos = nx.shell_layout(G, nlist=nlist)
+    elif kind == "spring":
+        pos = nx.spring_layout(G, seed=seed)
+    else:
+        pos = nx.circular_layout(G)
     return G, pos
 
 
@@ -133,7 +162,9 @@ def render_all(tr, adj, color, out_dir, theme, layout_kind, empty=0.0):
     import networkx as nx
 
     os.makedirs(out_dir, exist_ok=True)
-    G, pos = _layout(adj, layout_kind)
+    nlist = (shell_nlist(tr["steps"], color, empty, len(adj))
+             if layout_kind == "shell" else None)
+    G, pos = _layout(adj, layout_kind, nlist=nlist)
     steps = tr["steps"]
     gen_tensors = tr.get("gen_tensors", [])
     empties = tr.get("empty", {})
@@ -193,7 +224,7 @@ def parse_args(argv=None):
     p.add_argument("--graph", required=True)
     p.add_argument("-o", "--out", default="frames")
     p.add_argument("--color", default=None, help="tensor to color nodes by (default: watch)")
-    p.add_argument("--layout", default="spring")
+    p.add_argument("--layout", default="spring", choices=["spring", "circular", "shell"])
     p.add_argument("--theme", default="dark")
     return p.parse_args(argv)
 
