@@ -50,6 +50,7 @@ static void emit_dim_defs(IRProgram *ir, SymbolTable *symtab) {
         IRInstr *instr = ir_emit(ir, IR_DIM_DEF);
         instr->data.dim_def.name = dup_str(symtab->dims[i].name);
         instr->data.dim_def.size = symtab->dims[i].size;
+        instr->data.dim_def.is_inferred = symtab->dims[i].is_inferred;
     }
 }
 
@@ -76,6 +77,8 @@ static void emit_tensor_allocs(IRProgram *ir, AstNode *program, SymbolTable *sym
         if (te) {
             for (int d = 0; d < te->num_ranks && d < 8; d++) {
                 instr->data.tensor_alloc.dim_sizes[d] = te->dim_sizes[d];
+                const char *dn = te->ranks[d].dim_name;
+                instr->data.tensor_alloc.dim_names[d] = dn ? dup_str(dn) : NULL;
             }
         }
     }
@@ -88,7 +91,10 @@ static void emit_tensor_inits(IRProgram *ir, AstNode *program) {
 
         IRInstr *instr = ir_emit(ir, IR_TENSOR_INIT);
         instr->data.tensor_init.name = dup_str(stmt->data.init.tensor_name);
-        instr->data.tensor_init.data = stmt->data.init.data;  /* borrowed */
+        instr->data.tensor_init.data = stmt->data.init.data;  /* borrowed (NULL when load) */
+        instr->data.tensor_init.is_load = stmt->data.init.is_load;
+        instr->data.tensor_init.path = stmt->data.init.is_load
+                                     ? dup_str(stmt->data.init.path) : NULL;
     }
 }
 
@@ -243,6 +249,12 @@ IRProgram *ir_lower(AstNode *program, SymbolTable *symtab) {
         }
     }
 
+    if (symtab->save_tensor) {
+        IRInstr *s = ir_emit(ir, IR_SAVE);
+        s->data.save.tensor_name = dup_str(symtab->save_tensor);
+        s->data.save.path = dup_str(symtab->save_path);
+    }
+
     return ir;
 }
 
@@ -257,10 +269,12 @@ void ir_free(IRProgram *ir) {
                 break;
             case IR_TENSOR_ALLOC:
                 free(instr->data.tensor_alloc.name);
+                for (int d = 0; d < instr->data.tensor_alloc.ndims; d++)
+                    free(instr->data.tensor_alloc.dim_names[d]);
                 break;
             case IR_TENSOR_INIT:
                 free(instr->data.tensor_init.name);
-                /* data is borrowed, not freed */
+                free(instr->data.tensor_init.path);  /* NULL-safe; borrowed .data not freed */
                 break;
             case IR_LOOP_BEGIN:
                 free(instr->data.loop_begin.index_var);
@@ -275,6 +289,10 @@ void ir_free(IRProgram *ir) {
                     free(instr->data.gen_loop.intermediates[j].name);
                 break;
             case IR_GEN_LOOP_END:
+                break;
+            case IR_SAVE:
+                free(instr->data.save.tensor_name);
+                free(instr->data.save.path);
                 break;
             case IR_LOAD:
                 free(instr->data.load.tensor_name);
@@ -327,7 +345,11 @@ void ir_dump(IRProgram *ir, FILE *out) {
                 fprintf(out, "], empty=%g)\n", instr->data.tensor_alloc.empty_val);
                 break;
             case IR_TENSOR_INIT:
-                fprintf(out, "TENSOR_INIT(%s, ...)\n", instr->data.tensor_init.name);
+                if (instr->data.tensor_init.is_load)
+                    fprintf(out, "TENSOR_INIT(%s, load=%s)\n",
+                            instr->data.tensor_init.name, instr->data.tensor_init.path);
+                else
+                    fprintf(out, "TENSOR_INIT(%s, ...)\n", instr->data.tensor_init.name);
                 break;
             case IR_LOOP_BEGIN:
                 fprintf(out, "LOOP_BEGIN(%s, %d)\n",
@@ -390,6 +412,10 @@ void ir_dump(IRProgram *ir, FILE *out) {
                 break;
             case IR_GEN_LOOP_END:
                 fprintf(out, "GEN_LOOP_END\n");
+                break;
+            case IR_SAVE:
+                fprintf(out, "SAVE(%s -> %s)\n",
+                        instr->data.save.tensor_name, instr->data.save.path);
                 break;
         }
     }
