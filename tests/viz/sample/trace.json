@@ -1,0 +1,13 @@
+{
+  "schema": "edgecc-trace/1",
+  "kernel": "reachability_bfs",
+  "dims": {"N": 4},
+  "gen_tensors": ["F", "P"],
+  "watch": "P",
+  "steps": [
+    {"kind": "generation", "gen": 0, "tensors": {"F": [1.0,0.0,0.0,0.0], "P": [1.0,0.0,0.0,0.0]}},
+    {"kind": "generation", "gen": 1, "tensors": {"F": [0.0,1.0,0.0,0.0], "P": [1.0,1.0,0.0,0.0]}},
+    {"kind": "generation", "gen": 2, "tensors": {"F": [0.0,0.0,1.0,0.0], "P": [1.0,1.0,1.0,0.0]}},
+    {"kind": "generation", "gen": 3, "tensors": {"F": [0.0,0.0,0.0,1.0], "P": [1.0,1.0,1.0,1.0]}}
+  ]
+}
