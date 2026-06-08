@@ -17,3 +17,6 @@ data/suitesparse/*.mtx
 !data/suitesparse/karate.mtx
 !data/suitesparse/lesmis.mtx
 !data/suitesparse/GD98_a.mtx
+
+# Generated feature-status image (tools/roadmap_png.py)
+edgecc_status.png
