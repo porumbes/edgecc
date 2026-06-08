@@ -112,6 +112,29 @@ static int gen_read_kind(SymbolTable *st, TensorRef *ref, TensorEntry *te) {
     return (eff == 1) ? 2 : 1;
 }
 
+/* Find the dim name bounding a loop index by locating that rank variable in one
+   of the Einsum's tensor refs and reading the corresponding axis's dim name.
+   Rank vars align positionally with the tensor's declared ranks; the
+   generational axis has a NULL dim name, so we keep searching past it. */
+static const char *dim_name_for_index(EinsumData *e,
+                                      TensorEntry *out_te,
+                                      TensorEntry *in1_te,
+                                      TensorEntry *in2_te,
+                                      const char *idx) {
+    TensorRef *refs[3]  = { &e->output, &e->input1, &e->input2 };
+    TensorEntry *tes[3] = { out_te, in1_te, in2_te };
+    for (int c = 0; c < 3; c++) {
+        TensorRef *r = refs[c];
+        TensorEntry *te = tes[c];
+        if (!te) continue;
+        for (int a = 0; a < r->num_vars && a < te->num_ranks; a++) {
+            if (strcmp(r->rank_vars[a], idx) == 0 && te->ranks[a].dim_name)
+                return te->ranks[a].dim_name;
+        }
+    }
+    return NULL;
+}
+
 static void emit_einsum(IRProgram *ir, AstNode *einsum_node, SymbolTable *symtab, int eidx) {
     EinsumData *e = &einsum_node->data.einsum;
     EinsumClass *cls = &symtab->einsum_class[eidx];
@@ -125,11 +148,17 @@ static void emit_einsum(IRProgram *ir, AstNode *einsum_node, SymbolTable *symtab
         IRInstr *instr = ir_emit(ir, IR_LOOP_BEGIN);
         instr->data.loop_begin.index_var = dup_str(cls->free_indices[i].name);
         instr->data.loop_begin.range = cls->free_indices[i].size;
+        const char *dn = dim_name_for_index(e, out_te, in1_te, in2_te,
+                                            cls->free_indices[i].name);
+        instr->data.loop_begin.range_name = dn ? dup_str(dn) : NULL;
     }
     for (int i = 0; i < cls->num_reduction_indices; i++) {
         IRInstr *instr = ir_emit(ir, IR_LOOP_BEGIN);
         instr->data.loop_begin.index_var = dup_str(cls->reduction_indices[i].name);
         instr->data.loop_begin.range = cls->reduction_indices[i].size;
+        const char *dn = dim_name_for_index(e, out_te, in1_te, in2_te,
+                                            cls->reduction_indices[i].name);
+        instr->data.loop_begin.range_name = dn ? dup_str(dn) : NULL;
     }
 
     /* LOAD input1 -> reg 0 */
@@ -269,7 +298,7 @@ void ir_free(IRProgram *ir) {
                 break;
             case IR_TENSOR_ALLOC:
                 free(instr->data.tensor_alloc.name);
-                for (int d = 0; d < instr->data.tensor_alloc.ndims; d++)
+                for (int d = 0; d < instr->data.tensor_alloc.ndims && d < 8; d++)
                     free(instr->data.tensor_alloc.dim_names[d]);
                 break;
             case IR_TENSOR_INIT:
@@ -278,6 +307,7 @@ void ir_free(IRProgram *ir) {
                 break;
             case IR_LOOP_BEGIN:
                 free(instr->data.loop_begin.index_var);
+                free(instr->data.loop_begin.range_name);
                 break;
             case IR_LOOP_END:
                 break;

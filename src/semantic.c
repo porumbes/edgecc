@@ -621,12 +621,31 @@ SemanticResult semantic_analyze(AstNode *program) {
         }
     }
 
-    /* Save directive: target must be a declared tensor. */
+    /* Save directive: target must be a tensor that some Einsum writes (an
+       output), so that run() defines it. At most one save directive. */
+    int num_saves = 0;
     for (int i = 0; i < pd->count; i++) {
         AstNode *s = pd->statements[i];
         if (s->type != NODE_SAVE) continue;
-        if (!symtab_find_tensor(st, s->data.save.tensor_name)) {
-            add_error(&res, "save: unknown tensor '%s'", s->data.save.tensor_name);
+        if (++num_saves > 1) {
+            add_error(&res, "save: only one save directive is supported");
+            break;
+        }
+        const char *tgt = s->data.save.tensor_name;
+        if (!symtab_find_tensor(st, tgt)) {
+            add_error(&res, "save: unknown tensor '%s'", tgt);
+            continue;
+        }
+        int is_output = 0;
+        for (int j = 0; j < pd->count; j++) {
+            AstNode *st_j = pd->statements[j];
+            if (st_j->type == NODE_EINSUM &&
+                strcmp(st_j->data.einsum.output.tensor_name, tgt) == 0) {
+                is_output = 1; break;
+            }
+        }
+        if (!is_output) {
+            add_error(&res, "save: tensor '%s' is not a computed output", tgt);
             continue;
         }
         st->save_tensor = s->data.save.tensor_name;  /* borrowed */

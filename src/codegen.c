@@ -633,7 +633,11 @@ char *codegen_python(IRProgram *ir) {
                 cb_indent(&cb);
                 const char *var = instr->data.loop_begin.index_var;
                 int range = instr->data.loop_begin.range;
-                const char *dim_name = find_dim_name(ir, i, range);
+                /* Prefer the dim name threaded from the IR (correct for inferred
+                   dims, whose range is 0). Fall back to size-matching, then to a
+                   literal bound. */
+                const char *dim_name = instr->data.loop_begin.range_name;
+                if (!dim_name) dim_name = find_dim_name(ir, i, range);
                 if (dim_name) {
                     cb_appendf(&cb, "for %s in range(%s):\n", var, dim_name);
                 } else {

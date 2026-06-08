@@ -44,6 +44,8 @@ typedef struct {
 typedef struct {
     char *index_var;
     int range;
+    char *range_name;   /* dim name bounding this loop (owned); NULL if anonymous.
+                           Required for inferred dims, whose `range` is 0. */
 } IRLoopBegin;
 
 typedef struct {
