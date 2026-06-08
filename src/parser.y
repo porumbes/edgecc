@@ -107,7 +107,7 @@ static void litlist_add(LitList *ll, LiteralData *lit) {
 %token TOK_LOAD TOK_SAVE TOK_ARROW
 %token <str_val> TOK_STRING_LIT
 
-%type <node> program stmt_list stmt dim_decl tensor_decl init_stmt einsum_stmt stop_stmt
+%type <node> program stmt_list stmt dim_decl tensor_decl init_stmt einsum_stmt stop_stmt save_stmt
 %type <ptr> rank_pair_list ident_list nested_literal lit_list tensor_ref
 %type <datatype> datatype
 %type <float_val> literal_value
@@ -140,6 +140,7 @@ stmt:
     | init_stmt
     | einsum_stmt
     | stop_stmt
+    | save_stmt
     ;
 
 stop_stmt:
@@ -149,10 +150,21 @@ stop_stmt:
     }
     ;
 
+save_stmt:
+    TOK_SAVE ':' TOK_IDENT TOK_ARROW TOK_STRING_LIT ';'
+    {
+        $$ = (void *)ast_save_new($3, $5);
+    }
+    ;
+
 dim_decl:
     TOK_DIM TOK_IDENT '=' TOK_INT_LIT ';'
     {
         $$ = (void *)ast_dim_decl_new($2, $4);
+    }
+    | TOK_DIM TOK_IDENT '=' '*' ';'
+    {
+        $$ = (void *)ast_dim_decl_inferred_new($2);
     }
     ;
 
@@ -224,6 +236,10 @@ init_stmt:
     TOK_INIT TOK_IDENT '=' nested_literal ';'
     {
         $$ = (void *)ast_init_new($2, (LiteralData *)$4);
+    }
+    | TOK_INIT TOK_IDENT '=' TOK_LOAD '(' TOK_STRING_LIT ')' ';'
+    {
+        $$ = (void *)ast_init_load_new($2, $6);
     }
     ;
 
