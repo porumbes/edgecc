@@ -180,7 +180,10 @@ static void analyze_init(SemanticResult *res, AstNode *node) {
     /* seed(source=I, value=V) inits have no literal data; validate and skip
        shape checking. The seed materializes a single scalar at index I. */
     if (d->is_seed) {
-        if (te->num_ranks != 1)
+        /* Count spatial (non-generational) ranks: a generational seed tensor
+           like D[gen I, R=N] is data-1-D even though num_ranks == 2. */
+        int spatial = te->num_ranks - (te->gen_axis >= 0 ? 1 : 0);
+        if (spatial != 1)
             add_error(res, "seed: tensor '%s' must be 1-D", d->tensor_name);
         if (d->seed_source < 0)
             add_error(res, "seed: source index must be non-negative");

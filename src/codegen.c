@@ -403,6 +403,16 @@ static int name_in_list(const char *name, const char **list, int n) {
 
 /* For an inferred dim `dimname`, find the first INPUT tensor alloc that has it
    on some axis and emit `dimname = len(input)` (axis 0) or `len(input[0])`. */
+/* Runtime Python subscript depth of alloc dim `d`: a generational axis (dim_size
+   == -1 sentinel) is not a materialized Python dimension, so skip it. Returns 0
+   or 1 for edgecc's <=2 spatial dims. */
+static int python_axis_of(const IRTensorAlloc *a, int d) {
+    int axis = 0;
+    for (int j = 0; j < d; j++)
+        if (a->dim_sizes[j] != -1) axis++;
+    return axis;
+}
+
 static void emit_inferred_dim_derivation(CodeBuf *cb, IRProgram *ir,
                                          const char *dimname,
                                          TensorNameList *inputs) {
@@ -416,8 +426,8 @@ static void emit_inferred_dim_derivation(CodeBuf *cb, IRProgram *ir,
         for (int d = 0; d < a->ndims; d++) {
             if (a->dim_names[d] && strcmp(a->dim_names[d], dimname) == 0) {
                 cb_indent(cb);
-                if (d == 0) cb_appendf(cb, "%s = len(%s)\n", dimname, a->name);
-                else        cb_appendf(cb, "%s = len(%s[0])\n", dimname, a->name);
+                if (python_axis_of(a, d) == 0) cb_appendf(cb, "%s = len(%s)\n", dimname, a->name);
+                else                           cb_appendf(cb, "%s = len(%s[0])\n", dimname, a->name);
                 return;
             }
         }
@@ -435,8 +445,15 @@ static void emit_seed_init(CodeBuf *cb, IRProgram *ir, const char *name,
     for (int i = 0; i < ir->count; i++) {
         if (ir->instrs[i].type != IR_TENSOR_ALLOC) continue;
         if (strcmp(ir->instrs[i].data.tensor_alloc.name, name) != 0) continue;
-        empty_val = ir->instrs[i].data.tensor_alloc.empty_val;
-        dimname = ir->instrs[i].data.tensor_alloc.dim_names[0];
+        IRTensorAlloc *sa = &ir->instrs[i].data.tensor_alloc;
+        empty_val = sa->empty_val;
+        /* Pick the spatial (data) dim, skipping a generational axis (dim_size
+           == -1 sentinel) so D[gen I, R=N] resolves to N, not the gen index. */
+        for (int d = 0; d < sa->ndims; d++) {
+            if (sa->dim_sizes[d] == -1) continue;
+            dimname = sa->dim_names[d];
+            break;
+        }
         break;
     }
 
@@ -509,10 +526,12 @@ static void emit_inferred_dim_asserts(CodeBuf *cb, IRProgram *ir,
         for (int j = 0; j < inputs->count; j++)
             if (strcmp(a->name, inputs->names[j]) == 0) { is_input = 1; break; }
         if (!is_input) continue;
-        int axis = -1;
+        int found = 0, axis = 0;
         for (int d = 0; d < a->ndims; d++)
-            if (a->dim_names[d] && strcmp(a->dim_names[d], dimname) == 0) { axis = d; break; }
-        if (axis < 0) continue;
+            if (a->dim_names[d] && strcmp(a->dim_names[d], dimname) == 0) {
+                axis = python_axis_of(a, d); found = 1; break;
+            }
+        if (!found) continue;
         if (!first) { first = a->name; continue; }   /* the source; skip */
         const char *suffix = (axis == 0) ? "" : "[0]";
         cb_indent(cb);

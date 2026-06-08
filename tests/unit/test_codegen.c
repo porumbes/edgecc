@@ -406,6 +406,32 @@ TEST(test_codegen_seed_init) {
     ast_free(ast);
 }
 
+/* Generational seed tensor D[gen I, R=N]: the gen axis must be skipped when
+   sizing (D = [..] * len(W), not via the gen index) and in the inferred-dim
+   shape assert (len(D), not len(D[0])). */
+TEST(test_codegen_seed_generational) {
+    AstNode *ast = parse(
+        "dim N = *;\n"
+        "tensor W[R=N, C=N]   : float, empty = 0.0;\n"
+        "tensor D[gen I, R=N] : float, empty = inf;\n"
+        "init W = load(\"g.mtx\");\n"
+        "init D = seed(source=0, value=0.0);\n"
+        "D[i+1, d] = W[s,d] . D[i, s] :: map(add, intersect) reduce(min, union);\n"
+        "stop: stable(D);\n"
+    );
+    SemanticResult sem = semantic_analyze(ast);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    char *code = codegen_python(ir);
+    ASSERT_NOT_NULL(code);
+    ASSERT_TRUE(strstr(code, "D = [math.inf] * len(W)") != NULL);
+    ASSERT_TRUE(strstr(code, "if len(D) != N:") != NULL);
+    ASSERT_TRUE(strstr(code, "if len(D[0]) != N:") == NULL);
+    free(code);
+    ir_free(ir);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
 int main(void) {
     RUN_TEST(test_codegen_gemm);
     RUN_TEST(test_codegen_intersect_union);
@@ -419,6 +445,7 @@ int main(void) {
     RUN_TEST(test_codegen_emits_save);
     RUN_TEST(test_codegen_shared_dim_assert);
     RUN_TEST(test_codegen_seed_init);
+    RUN_TEST(test_codegen_seed_generational);
     RUN_TEST(test_codegen_default_no_trace);
     RUN_TEST(test_codegen_trace_on_nongenerational_warns_no_scaffold);
     RUN_TEST(test_codegen_trace_scaffolding);
