@@ -1,0 +1,112 @@
+{
+  "karate": {
+    "group": "Newman",
+    "name": "karate",
+    "n": 34,
+    "vendored": true,
+    "sha256": "074a23e758ebeddb766fb08f617ee4bc5debc8d2564287c3e1e24f5ccdb77813",
+    "kind": "undirected-pattern",
+    "semiring": "boolean",
+    "source": "Zachary 1977 karate club",
+    "url": "https://sparse.tamu.edu/Newman/karate"
+  },
+  "lesmis": {
+    "group": "Newman",
+    "name": "lesmis",
+    "n": 77,
+    "vendored": true,
+    "sha256": "47fe4f41bcc02c4567326852779117ed96672934b921aa16faeed390d3c9acee",
+    "kind": "undirected-weighted",
+    "semiring": "weighted",
+    "source": "Knuth, Les Miserables co-appearance",
+    "url": "https://sparse.tamu.edu/Newman/lesmis"
+  },
+  "GD98_a": {
+    "group": "Pajek",
+    "name": "GD98_a",
+    "n": 38,
+    "vendored": true,
+    "sha256": "6115064913311c66a00306c190c65f246b3d223e874a2eca03672af722b5cee4",
+    "kind": "directed",
+    "semiring": "directed",
+    "source": "Graph Drawing 1998 contest",
+    "url": "https://sparse.tamu.edu/Pajek/GD98_a"
+  },
+  "dolphins": {
+    "group": "Newman",
+    "name": "dolphins",
+    "n": 62,
+    "vendored": false,
+    "sha256": "1ad619d33495fe5dc3c951469e6eae8b28ba788316b6183db86d45e50dfa1e5e",
+    "kind": "undirected-pattern",
+    "semiring": "boolean",
+    "source": "Lusseau et al. dolphin social network",
+    "url": "https://sparse.tamu.edu/Newman/dolphins"
+  },
+  "polbooks": {
+    "group": "Newman",
+    "name": "polbooks",
+    "n": 105,
+    "vendored": false,
+    "sha256": "a5a578d912363643b03a3f2c059df4501ea6007af5b02fc3f9c01a5665633198",
+    "kind": "undirected-pattern",
+    "semiring": "boolean",
+    "source": "Krebs political books",
+    "url": "https://sparse.tamu.edu/Newman/polbooks"
+  },
+  "football": {
+    "group": "Newman",
+    "name": "football",
+    "n": 115,
+    "vendored": false,
+    "sha256": "c00e4f6763846ee5bcf85d9284dcabb4e009b019fb6bb37c7b8b30e3ddd25ca3",
+    "kind": "undirected-pattern",
+    "semiring": "boolean",
+    "source": "Girvan-Newman college football",
+    "url": "https://sparse.tamu.edu/Newman/football"
+  },
+  "Ragusa16": {
+    "group": "Pajek",
+    "name": "Ragusa16",
+    "n": 24,
+    "vendored": false,
+    "sha256": "5bddc29a17f786903585080f9e2f2b8247e5d2acfffb38bd88d655759b59132e",
+    "kind": "directed-weighted",
+    "semiring": "weighted",
+    "source": "Pajek Ragusa16",
+    "url": "https://sparse.tamu.edu/Pajek/Ragusa16"
+  },
+  "Ragusa18": {
+    "group": "Pajek",
+    "name": "Ragusa18",
+    "n": 23,
+    "vendored": false,
+    "sha256": "3dbef4863a2c8f3af0057be8c23cf14ceff065ff3806ecd72bdf2c4aa3945f7e",
+    "kind": "directed-weighted",
+    "semiring": "weighted",
+    "source": "Pajek Ragusa18",
+    "url": "https://sparse.tamu.edu/Pajek/Ragusa18"
+  },
+  "GD96_b": {
+    "group": "Pajek",
+    "name": "GD96_b",
+    "n": 111,
+    "vendored": false,
+    "sha256": "6af1bfb90f2299ad8a6e3186e6eaaa47a9c7d94fac175734e0272fc65d128c46",
+    "kind": "directed",
+    "semiring": "directed",
+    "source": "Graph Drawing 1996 contest",
+    "url": "https://sparse.tamu.edu/Pajek/GD96_b"
+  },
+  "celegansneural": {
+    "group": "Newman",
+    "name": "celegansneural",
+    "n": 297,
+    "vendored": false,
+    "sha256": "5c670ed95f3d004e8eb87be594a9f832cda11560dc2f04490b8fdbeb74a221b8",
+    "kind": "directed-weighted",
+    "semiring": "weighted-directed",
+    "source": "C. elegans neural network",
+    "url": "https://sparse.tamu.edu/Newman/celegansneural"
+  }
+}

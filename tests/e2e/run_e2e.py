@@ -36,9 +36,25 @@ def run_test(test_dir, edgecc_bin):
             print(f"  FAIL {name}: edgecc failed: {result.stderr.strip()}")
             return False
 
+        # Optional argv override: an `args` file supplies positional input paths
+        # to the generated program. The token {DATA} resolves to the repo-root
+        # data/ directory, so tests can source graphs from data/suitesparse/.
+        extra_args = []
+        args_file = os.path.join(test_dir, "args")
+        if os.path.exists(args_file):
+            repo_root = os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__))))
+            data_dir = os.path.join(repo_root, "data")
+            with open(args_file) as f:
+                for tok in f.read().split():
+                    if "{DATA}" in tok and not os.path.isdir(data_dir):
+                        print(f"  FAIL {name}: cannot resolve {{DATA}} (no {data_dir})")
+                        return False
+                    extra_args.append(tok.replace("{DATA}", data_dir))
+
         result = subprocess.run(
-            [sys.executable, tmp_py],
-            capture_output=True, text=True, timeout=10, cwd=test_dir
+            [sys.executable, tmp_py, *extra_args],
+            capture_output=True, text=True, timeout=20, cwd=test_dir
         )
         if result.returncode != 0:
             print(f"  FAIL {name}: python failed: {result.stderr.strip()}")

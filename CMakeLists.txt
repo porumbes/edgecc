@@ -116,3 +116,9 @@ add_test(
     COMMAND ${CMAKE_COMMAND} -E env python3
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/viz/run_viz_tests.py
 )
+
+add_test(
+    NAME fetch_helper_tests
+    COMMAND ${CMAKE_COMMAND} -E env python3
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/tools/test_fetch_suitesparse.py
+)

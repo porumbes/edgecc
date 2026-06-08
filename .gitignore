@@ -5,8 +5,15 @@ build/
 __pycache__/
 output.py
 examples/*.py
+result.mtx
 .worktrees/
 editors/vscode/node_modules/
 editors/vscode/out/
 editors/vscode/*.vsix
 editors/vscode/.vscode-test/
+
+# SuiteSparse: ignore fetched graphs, but vendor the curated three
+data/suitesparse/*.mtx
+!data/suitesparse/karate.mtx
+!data/suitesparse/lesmis.mtx
+!data/suitesparse/GD98_a.mtx

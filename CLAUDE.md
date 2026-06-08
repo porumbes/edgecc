@@ -157,6 +157,25 @@ lazily imported only when used. The e2e harness skips `.mtx` tests when scipy is
 absent (mark such tests with a `needs_scipy` file). See the design spec:
 `docs/superpowers/specs/2026-06-07-edgecc-file-io-design.md`.
 
+**Real test graphs.** `data/suitesparse/` holds a curated set of small
+[SuiteSparse](https://sparse.tamu.edu) graphs. The three smallest
+(`karate.mtx` 34, `lesmis.mtx` 77 weighted, `GD98_a.mtx` 38 directed) are
+vendored; the rest are fetch-on-demand and gitignored. Download with
+`python3 tools/fetch_suitesparse.py <name>` (or `--all`); the script (stdlib
+only) reads `data/suitesparse/manifest.json`, pulls the Matrix Market tarball,
+extracts the `.mtx`, and verifies its sha256. E2e tests source these via the
+`{DATA}` token in a test's `args` file (resolved to repo-root `data/` and passed
+as positional argv to the generated program). The current tests use the
+diagonal-of-G² trick (`Z[i] = G[i,k].G[k,i]`) so output is a small,
+hand-verifiable length-N vector and no seed vector is needed; see
+`tests/e2e/load_karate_degree/`. Note a real semiring subtlety surfaced by the
+weighted case: the reduce accumulator seeds from the **output tensor's `empty`**,
+so for `reduce(min, ...)` the output must be declared `empty = inf` (the min
+identity) while a `load`-ed operand keeps `empty = 0.0` to match densified
+absents — see `tests/e2e/load_lesmis_minplus/`. Seed-vector loading (for BFS/SSSP
+on these graphs) and a one-kernel-over-many-graphs data-sweep runner are future
+work.
+
 ### Visualization (per-generation trace + renderer)
 
 Compile a **generational** kernel with `--emit-trace` to record a per-generation
