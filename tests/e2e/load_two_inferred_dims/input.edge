@@ -1,0 +1,9 @@
+// Two inferred dims (non-square): element-wise add of two loaded matrices.
+dim M = *;
+dim N = *;
+tensor A[R=M, C=N] : float, empty = 0.0;
+tensor B[R=M, C=N] : float, empty = 0.0;
+tensor Z[R=M, C=N] : float, empty = 0.0;
+init A = load("a.mtx");
+init B = load("a.mtx");
+Z[m,n] = A[m,n] . B[m,n] :: map(add, union) reduce(add, union);

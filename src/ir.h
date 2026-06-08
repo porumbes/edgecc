@@ -16,29 +16,36 @@ typedef enum {
     IR_REDUCE,
     IR_STORE,
     IR_GEN_LOOP_BEGIN,
-    IR_GEN_LOOP_END
+    IR_GEN_LOOP_END,
+    IR_SAVE
 } IRType;
 
 typedef struct {
     char *name;
     int size;
+    int is_inferred;   /* size unknown at compile time; derived in run() */
 } IRDimDef;
 
 typedef struct {
     char *name;
     int dim_sizes[8];
+    char *dim_names[8];   /* per-axis dim name (NULL if anonymous); owned */
     int ndims;
     double empty_val;
 } IRTensorAlloc;
 
 typedef struct {
     char *name;
-    LiteralData *data;  /* borrowed pointer, not owned */
+    LiteralData *data;  /* borrowed pointer, not owned (NULL when is_load) */
+    int is_load;        /* 1 if `load("path")` */
+    char *path;         /* owned; NULL when literal */
 } IRTensorInit;
 
 typedef struct {
     char *index_var;
     int range;
+    char *range_name;   /* dim name bounding this loop (owned); NULL if anonymous.
+                           Required for inferred dims, whose `range` is 0. */
 } IRLoopBegin;
 
 typedef struct {
@@ -86,6 +93,11 @@ typedef struct {
 } IRGenAlloc;
 
 typedef struct {
+    char *tensor_name;   /* owned */
+    char *path;          /* owned */
+} IRSave;
+
+typedef struct {
     IRGenAlloc cross_gens[8];         /* cross-generational tensors (each prev/next) */
     int num_cross_gens;
     char *watch;                      /* the stop-watched cross-gen tensor name (owned) */
@@ -106,6 +118,7 @@ typedef struct {
         IRReduce reduce;
         IRStore store;
         IRGenLoop gen_loop;
+        IRSave save;
     } data;
 } IRInstr;
 

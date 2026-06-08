@@ -187,6 +187,48 @@ TEST(test_parse_stop_stmt) {
     yy_delete_buffer(buf);
 }
 
+TEST(test_parse_inferred_dim) {
+    YY_BUFFER_STATE buf = yy_scan_string("dim N = *;\n");
+    ASSERT_INT_EQ(0, yyparse());
+    ASSERT_NOT_NULL(parse_result);
+    AstNode *dim = parse_result->data.program.statements[0];
+    ASSERT_INT_EQ(NODE_DIM_DECL, dim->type);
+    ASSERT_INT_EQ(1, dim->data.dim_decl.is_inferred);
+    ast_free(parse_result);
+    parse_result = NULL;
+    yy_delete_buffer(buf);
+}
+
+TEST(test_parse_init_load) {
+    YY_BUFFER_STATE buf = yy_scan_string(
+        "dim N = *;\n"
+        "tensor G[R=N, C=N] : float, empty = 0.0;\n"
+        "init G = load(\"graph.mtx\");\n");
+    ASSERT_INT_EQ(0, yyparse());
+    ASSERT_NOT_NULL(parse_result);
+    AstNode *prog = parse_result;
+    AstNode *init = prog->data.program.statements[2];
+    ASSERT_INT_EQ(NODE_INIT, init->type);
+    ASSERT_INT_EQ(1, init->data.init.is_load);
+    ASSERT_STR_EQ("graph.mtx", init->data.init.path);
+    ast_free(prog);
+    parse_result = NULL;
+    yy_delete_buffer(buf);
+}
+
+TEST(test_parse_save_directive) {
+    YY_BUFFER_STATE buf = yy_scan_string("save: Z -> \"out.mtx\";\n");
+    ASSERT_INT_EQ(0, yyparse());
+    ASSERT_NOT_NULL(parse_result);
+    AstNode *save = parse_result->data.program.statements[0];
+    ASSERT_INT_EQ(NODE_SAVE, save->type);
+    ASSERT_STR_EQ("Z", save->data.save.tensor_name);
+    ASSERT_STR_EQ("out.mtx", save->data.save.path);
+    ast_free(parse_result);
+    parse_result = NULL;
+    yy_delete_buffer(buf);
+}
+
 int main(void) {
     RUN_TEST(test_parse_dim_decl);
     RUN_TEST(test_parse_tensor_decl);
@@ -198,5 +240,8 @@ int main(void) {
     RUN_TEST(test_parse_generational_rank);
     RUN_TEST(test_parse_offset_coord);
     RUN_TEST(test_parse_stop_stmt);
+    RUN_TEST(test_parse_inferred_dim);
+    RUN_TEST(test_parse_init_load);
+    RUN_TEST(test_parse_save_directive);
     return test_report();
 }

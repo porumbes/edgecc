@@ -297,6 +297,80 @@ TEST(test_ir_two_cross_gen) {
     ast_free(ast);
 }
 
+static IRProgram *lower_source(const char *src) {
+    AstNode *ast = parse(src);
+    SemanticResult sem = semantic_analyze(ast);
+    if (sem.error_count > 0) return NULL;
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    semantic_result_free(&sem);
+    ast_free(ast);
+    return ir;
+}
+
+TEST(test_ir_load_init_carries_path) {
+    IRProgram *ir = lower_source(
+        "dim N = *;\n"
+        "tensor G[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor F[R=N] : float, empty = 0.0;\n"
+        "tensor Z[R=N] : float, empty = 0.0;\n"
+        "init G = load(\"g.mtx\");\n"
+        "init F = [1.0, 0.0, 0.0, 0.0];\n"
+        "Z[d] = G[s,d] . F[s] :: map(mul, intersect) reduce(add, union);\n");
+    ASSERT_NOT_NULL(ir);
+    int found = 0;
+    for (int i = 0; i < ir->count; i++) {
+        if (ir->instrs[i].type == IR_TENSOR_INIT &&
+            strcmp(ir->instrs[i].data.tensor_init.name, "G") == 0) {
+            ASSERT_INT_EQ(1, ir->instrs[i].data.tensor_init.is_load);
+            ASSERT_STR_EQ("g.mtx", ir->instrs[i].data.tensor_init.path);
+            found = 1;
+        }
+    }
+    ASSERT_TRUE(found);
+    ir_free(ir);
+}
+
+TEST(test_ir_inferred_dim_flag) {
+    IRProgram *ir = lower_source(
+        "dim N = *;\n"
+        "tensor G[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor F[R=N] : float, empty = 0.0;\n"
+        "tensor Z[R=N] : float, empty = 0.0;\n"
+        "init G = load(\"g.mtx\");\n"
+        "init F = [1.0, 0.0, 0.0, 0.0];\n"
+        "Z[d] = G[s,d] . F[s] :: map(mul, intersect) reduce(add, union);\n");
+    ASSERT_NOT_NULL(ir);
+    int seen = 0;
+    for (int i = 0; i < ir->count; i++)
+        if (ir->instrs[i].type == IR_DIM_DEF &&
+            strcmp(ir->instrs[i].data.dim_def.name, "N") == 0) {
+            ASSERT_INT_EQ(1, ir->instrs[i].data.dim_def.is_inferred);
+            seen = 1;
+        }
+    ASSERT_TRUE(seen);
+    ir_free(ir);
+}
+
+TEST(test_ir_save_instruction) {
+    IRProgram *ir = lower_source(
+        "dim N = 2;\n"
+        "tensor F[R=N] : float, empty = 0.0;\n"
+        "tensor Z[R=N] : float, empty = 0.0;\n"
+        "init F = [1.0, 0.0];\n"
+        "Z[d] = F[d] . F[d] :: map(add, union) reduce(add, union);\n"
+        "save: Z -> \"out.mtx\";\n");
+    ASSERT_NOT_NULL(ir);
+    int found = 0;
+    for (int i = 0; i < ir->count; i++)
+        if (ir->instrs[i].type == IR_SAVE) {
+            ASSERT_STR_EQ("Z", ir->instrs[i].data.save.tensor_name);
+            ASSERT_STR_EQ("out.mtx", ir->instrs[i].data.save.path);
+            found = 1;
+        }
+    ASSERT_TRUE(found);
+    ir_free(ir);
+}
+
 int main(void) {
     RUN_TEST(test_ir_gemm_structure);
     RUN_TEST(test_ir_loop_order);
@@ -305,5 +379,8 @@ int main(void) {
     RUN_TEST(test_ir_generational_structure);
     RUN_TEST(test_ir_cascade_structure);
     RUN_TEST(test_ir_two_cross_gen);
+    RUN_TEST(test_ir_load_init_carries_path);
+    RUN_TEST(test_ir_inferred_dim_flag);
+    RUN_TEST(test_ir_save_instruction);
     return test_report();
 }

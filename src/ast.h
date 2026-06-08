@@ -17,7 +17,8 @@ typedef enum {
     NODE_TENSOR_DECL,
     NODE_INIT,
     NODE_EINSUM,
-    NODE_STOP
+    NODE_STOP,
+    NODE_SAVE
 } NodeType;
 
 typedef enum {
@@ -86,6 +87,7 @@ struct LiteralData {
 typedef struct {
     char *name;
     int size;
+    int is_inferred;   /* 1 if declared `dim N = *;` (size from a loaded file) */
 } DimDeclData;
 
 typedef struct {
@@ -98,12 +100,19 @@ typedef struct {
 
 typedef struct {
     char *tensor_name;
-    LiteralData *data;
+    int is_load;          /* 1 if `init X = load("path");` */
+    LiteralData *data;    /* literal init (NULL when is_load) */
+    char *path;           /* file path (NULL when literal) */
 } InitData;
 
 typedef struct {
     char *watch_tensor;
 } StopData;
+
+typedef struct {
+    char *tensor_name;
+    char *path;
+} SaveData;
 
 typedef struct {
     TensorRef output;
@@ -130,6 +139,7 @@ struct AstNode {
         InitData init;
         EinsumData einsum;
         StopData stop;
+        SaveData save;
     } data;
 };
 
@@ -145,6 +155,9 @@ AstNode *ast_einsum_new(TensorRef output, TensorRef input1, TensorRef input2,
                          OperatorType map_op, MergeOp map_merge_op,
                          OperatorType reduce_op, MergeOp reduce_merge_op);
 AstNode *ast_stop_new(char *watch_tensor);
+AstNode *ast_init_load_new(char *tensor_name, char *path);
+AstNode *ast_dim_decl_inferred_new(char *name);
+AstNode *ast_save_new(char *tensor_name, char *path);
 
 TensorRef tensor_ref_new(char *name, char **rank_vars, int num_vars);
 

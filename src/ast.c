@@ -46,7 +46,36 @@ AstNode *ast_init_new(char *tensor_name, LiteralData *data) {
     AstNode *node = calloc(1, sizeof(AstNode));
     node->type = NODE_INIT;
     node->data.init.tensor_name = tensor_name;
+    node->data.init.is_load = 0;
     node->data.init.data = data;
+    node->data.init.path = NULL;
+    return node;
+}
+
+AstNode *ast_init_load_new(char *tensor_name, char *path) {
+    AstNode *node = calloc(1, sizeof(AstNode));
+    node->type = NODE_INIT;
+    node->data.init.tensor_name = tensor_name;
+    node->data.init.is_load = 1;
+    node->data.init.data = NULL;
+    node->data.init.path = path;
+    return node;
+}
+
+AstNode *ast_dim_decl_inferred_new(char *name) {
+    AstNode *node = calloc(1, sizeof(AstNode));
+    node->type = NODE_DIM_DECL;
+    node->data.dim_decl.name = name;
+    node->data.dim_decl.size = 0;
+    node->data.dim_decl.is_inferred = 1;
+    return node;
+}
+
+AstNode *ast_save_new(char *tensor_name, char *path) {
+    AstNode *node = calloc(1, sizeof(AstNode));
+    node->type = NODE_SAVE;
+    node->data.save.tensor_name = tensor_name;
+    node->data.save.path = path;
     return node;
 }
 
@@ -158,7 +187,8 @@ void ast_free(AstNode *node) {
             break;
         case NODE_INIT:
             free(node->data.init.tensor_name);
-            literal_data_free(node->data.init.data);
+            literal_data_free(node->data.init.data);   /* NULL-safe */
+            free(node->data.init.path);                 /* NULL-safe */
             break;
         case NODE_EINSUM:
             tensor_ref_free_contents(&node->data.einsum.output);
@@ -167,6 +197,10 @@ void ast_free(AstNode *node) {
             break;
         case NODE_STOP:
             free(node->data.stop.watch_tensor);
+            break;
+        case NODE_SAVE:
+            free(node->data.save.tensor_name);
+            free(node->data.save.path);
             break;
     }
     free(node);
