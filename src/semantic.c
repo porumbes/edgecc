@@ -177,6 +177,16 @@ static void analyze_init(SemanticResult *res, AstNode *node) {
     /* load("...") inits have no literal data; skip shape checking. */
     if (d->is_load) return;
 
+    /* seed(source=I, value=V) inits have no literal data; validate and skip
+       shape checking. The seed materializes a single scalar at index I. */
+    if (d->is_seed) {
+        if (te->num_ranks != 1)
+            add_error(res, "seed: tensor '%s' must be 1-D", d->tensor_name);
+        if (d->seed_source < 0)
+            add_error(res, "seed: source index must be non-negative");
+        return;
+    }
+
     /* Build spatial dim sizes (excluding the generational axis, if any),
        and a parallel flag marking which axes are inferred (`dim = *`). */
     int spatial_sizes[8];
