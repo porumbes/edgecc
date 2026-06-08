@@ -172,9 +172,13 @@ python3 tools/edgecc_viz.py kernel.trace.json --graph graph.mtx -o frames/
 warning is printed and ignored otherwise); without it the generated Python is
 byte-identical to before. Trace capture uses only the stdlib `json`. The trace
 (`edgecc-trace/1`) records every generational tensor's value per generation,
-plus a gen-0 seed snapshot; the schema is an ordered, tagged `steps` list so
-finer (per-scalar) tracing can be added later. The trace file is named after the
-source-file stem (`reachability_bfs.edge` → `reachability_bfs.trace.json`).
+plus a gen-0 seed snapshot and a per-tensor `empty` map (so the renderer tells
+"active" from empty across semirings — e.g. the min-plus source distance `0.0`
+is active even though its empty value is `inf`). The schema is an ordered, tagged
+`steps` list so finer (per-scalar) tracing can be added later. The trace file is
+named after the source-file stem (`reachability_bfs.edge` →
+`reachability_bfs.trace.json`). Note: `inf`-empty kernels write JSON `Infinity`
+(Python `json`'s non-strict extension); the renderer reads it back fine.
 
 `tools/edgecc_viz.py` reads `{trace.json + adjacency .mtx}` and emits one frame
 per generation: the graph (nodes colored by the watched tensor; **cyan "active"
