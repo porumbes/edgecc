@@ -99,6 +99,38 @@ TEST(test_map_reduce_keywords) {
     yy_delete_buffer(buf);
 }
 
+TEST(test_load_keyword) {
+    YY_BUFFER_STATE buf = yy_scan_string("load");
+    ASSERT_INT_EQ(TOK_LOAD, yylex());
+    yy_delete_buffer(buf);
+}
+
+TEST(test_save_keyword) {
+    YY_BUFFER_STATE buf = yy_scan_string("save");
+    ASSERT_INT_EQ(TOK_SAVE, yylex());
+    yy_delete_buffer(buf);
+}
+
+TEST(test_star_token) {
+    YY_BUFFER_STATE buf = yy_scan_string("*");
+    ASSERT_INT_EQ('*', yylex());
+    yy_delete_buffer(buf);
+}
+
+TEST(test_arrow_token) {
+    YY_BUFFER_STATE buf = yy_scan_string("->");
+    ASSERT_INT_EQ(TOK_ARROW, yylex());
+    yy_delete_buffer(buf);
+}
+
+TEST(test_string_literal) {
+    YY_BUFFER_STATE buf = yy_scan_string("\"graph.mtx\"");
+    ASSERT_INT_EQ(TOK_STRING_LIT, yylex());
+    ASSERT_STR_EQ("graph.mtx", yylval.str_val);
+    free(yylval.str_val);
+    yy_delete_buffer(buf);
+}
+
 int main(void) {
     RUN_TEST(test_dim_keyword);
     RUN_TEST(test_tensor_keyword);
@@ -113,5 +145,10 @@ int main(void) {
     RUN_TEST(test_full_token_sequence);
     RUN_TEST(test_comment_skipped);
     RUN_TEST(test_map_reduce_keywords);
+    RUN_TEST(test_load_keyword);
+    RUN_TEST(test_save_keyword);
+    RUN_TEST(test_star_token);
+    RUN_TEST(test_arrow_token);
+    RUN_TEST(test_string_literal);
     return test_report();
 }

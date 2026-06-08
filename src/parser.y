@@ -104,6 +104,8 @@ static void litlist_add(LitList *ll, LiteralData *lit) {
 %token <int_val> TOK_INT_LIT TOK_BOOL_LIT
 %token <float_val> TOK_FLOAT_LIT
 %token <str_val> TOK_IDENT
+%token TOK_LOAD TOK_SAVE TOK_ARROW
+%token <str_val> TOK_STRING_LIT
 
 %type <node> program stmt_list stmt dim_decl tensor_decl init_stmt einsum_stmt stop_stmt
 %type <ptr> rank_pair_list ident_list nested_literal lit_list tensor_ref
