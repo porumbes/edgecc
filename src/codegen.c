@@ -547,6 +547,14 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
         emit_trace = 0;
     }
 
+    /* Trace snapshot helper (deep-copies a tensor); only when capturing. */
+    if (emit_trace) {
+        cb_append(&cb,
+            "def _edgecc_snapshot(x):\n"
+            "    return [row[:] for row in x] if (x and isinstance(x[0], list)) else list(x)\n"
+            "\n");
+    }
+
     /* Cascade I/O: intermediates are neither parameters nor the return value;
        the returned tensor is the cross-generational one. */
     if (iterative) {
@@ -599,6 +607,7 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
         if (i > 0) cb_append(&cb, ", ");
         cb_append(&cb, inputs.names[i]);
     }
+    if (emit_trace) cb_append(&cb, ", _trace=None");
     cb_append(&cb, "):\n");
     cb.indent = 1;
 
@@ -670,6 +679,19 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
                                gloop->cross_gens[c].name, gloop->cross_gens[c].name);
                 }
                 cb_indent(&cb); cb_append(&cb, "_it = 0\n");
+                if (emit_trace) {
+                    cb_indent(&cb); cb_append(&cb, "if _trace is not None:\n");
+                    cb.indent++;
+                    cb_indent(&cb);
+                    cb_append(&cb, "_trace.append({\"kind\": \"generation\", \"gen\": 0, \"tensors\": {");
+                    for (int c = 0; c < gloop->num_cross_gens; c++) {
+                        if (c) cb_append(&cb, ", ");
+                        cb_appendf(&cb, "\"%s\": _edgecc_snapshot(%s_prev)",
+                                   gloop->cross_gens[c].name, gloop->cross_gens[c].name);
+                    }
+                    cb_append(&cb, "}})\n");
+                    cb.indent--;
+                }
                 cb_indent(&cb); cb_append(&cb, "while True:\n");
                 cb.indent++;
                 for (int c = 0; c < gloop->num_cross_gens; c++) {
@@ -697,6 +719,25 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
                 break;
             }
             case IR_GEN_LOOP_END: {
+                if (emit_trace) {
+                    cb_indent(&cb); cb_append(&cb, "if _trace is not None:\n");
+                    cb.indent++;
+                    cb_indent(&cb);
+                    cb_append(&cb, "_trace.append({\"kind\": \"generation\", \"gen\": _it + 1, \"tensors\": {");
+                    int _first = 1;
+                    for (int c = 0; c < num_cross_gens; c++) {
+                        if (!_first) cb_append(&cb, ", ");
+                        cb_appendf(&cb, "\"%s\": _edgecc_snapshot(%s_next)", cross_gens[c], cross_gens[c]);
+                        _first = 0;
+                    }
+                    for (int m = 0; m < num_intermediates; m++) {
+                        if (!_first) cb_append(&cb, ", ");
+                        cb_appendf(&cb, "\"%s\": _edgecc_snapshot(%s)", intermediates[m], intermediates[m]);
+                        _first = 0;
+                    }
+                    cb_append(&cb, "}})\n");
+                    cb.indent--;
+                }
                 if (num_cross_gens <= 1) {
                     const char *t = watch;
                     cb_indent(&cb);
@@ -874,15 +915,39 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
 
     /* Call run and print */
     if (output) {
+        if (emit_trace) { cb_indent(&cb); cb_append(&cb, "_tr = []\n"); }
         cb_indent(&cb);
         cb_appendf(&cb, "%s = run(", output);
         for (int i = 0; i < inputs.count; i++) {
             if (i > 0) cb_append(&cb, ", ");
             cb_append(&cb, inputs.names[i]);
         }
+        if (emit_trace) cb_append(&cb, ", _trace=_tr");
         cb_append(&cb, ")\n");
         cb_indent(&cb);
         cb_appendf(&cb, "print(%s)\n", output);
+        if (emit_trace) {
+            cb_indent(&cb); cb_append(&cb, "import json\n");
+            cb_indent(&cb);
+            cb_appendf(&cb,
+                "json.dump({\"schema\": \"edgecc-trace/1\", \"kernel\": \"%s\", "
+                "\"dims\": {\"N\": len(%s)}, \"gen_tensors\": [",
+                kernel_name, output);
+            {
+                int _first = 1;
+                for (int c = 0; c < num_cross_gens; c++) {
+                    if (!_first) cb_append(&cb, ", ");
+                    cb_appendf(&cb, "\"%s\"", cross_gens[c]); _first = 0;
+                }
+                for (int m = 0; m < num_intermediates; m++) {
+                    if (!_first) cb_append(&cb, ", ");
+                    cb_appendf(&cb, "\"%s\"", intermediates[m]); _first = 0;
+                }
+            }
+            cb_appendf(&cb,
+                "], \"watch\": \"%s\", \"steps\": _tr}, open(\"%s.trace.json\", \"w\"))\n",
+                watch ? watch : "", kernel_name);
+        }
     }
 
     /* Emit save calls after run+print. */
