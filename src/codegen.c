@@ -456,7 +456,12 @@ static void emit_inferred_dim_asserts(CodeBuf *cb, IRProgram *ir,
 }
 
 char *codegen_python(IRProgram *ir) {
+    return codegen_python_ex(ir, 0, NULL);
+}
+
+char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) {
     if (!ir) return NULL;
+    if (!kernel_name) kernel_name = "kernel";
     CodeBuf cb;
     cb_init(&cb);
 
@@ -532,6 +537,14 @@ char *codegen_python(IRProgram *ir) {
                 intermediates[j] = gl->intermediates[j].name;
             break;
         }
+    }
+
+    /* Trace capture is only meaningful for generational kernels. */
+    if (emit_trace && !iterative) {
+        fprintf(stderr,
+            "edgecc: --emit-trace ignored: '%s' is not a generational kernel\n",
+            kernel_name);
+        emit_trace = 0;
     }
 
     /* Cascade I/O: intermediates are neither parameters nor the return value;

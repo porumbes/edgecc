@@ -19,12 +19,15 @@ int main(int argc, char *argv[]) {
     const char *input_file = argv[1];
     const char *output_file = "output.py";
     int dump_ir = 0;
+    int emit_trace = 0;
 
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
             output_file = argv[++i];
         } else if (strcmp(argv[i], "--dump-ir") == 0) {
             dump_ir = 1;
+        } else if (strcmp(argv[i], "--emit-trace") == 0) {
+            emit_trace = 1;
         }
     }
 
@@ -63,7 +66,15 @@ int main(int argc, char *argv[]) {
         ir_dump(ir, stdout);
     }
 
-    char *code = codegen_python(ir);
+    /* kernel name = input basename without directory or .edge extension */
+    const char *slash = strrchr(input_file, '/');
+    const char *base = slash ? slash + 1 : input_file;
+    char kernel_name[256];
+    snprintf(kernel_name, sizeof(kernel_name), "%s", base);
+    char *dot = strstr(kernel_name, ".edge");
+    if (dot) *dot = '\0';
+
+    char *code = codegen_python_ex(ir, emit_trace, kernel_name);
 
     FILE *out = fopen(output_file, "w");
     if (!out) {
