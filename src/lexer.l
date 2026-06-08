@@ -23,6 +23,7 @@
 "stable"            { return TOK_STABLE; }
 "empty"             { return TOK_EMPTY; }
 "load"              { return TOK_LOAD; }
+"seed"              { return TOK_SEED; }
 "save"              { return TOK_SAVE; }
 "integer"           { return TOK_TYPE_INTEGER; }
 "float"             { return TOK_TYPE_FLOAT; }

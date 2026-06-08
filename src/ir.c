@@ -95,6 +95,9 @@ static void emit_tensor_inits(IRProgram *ir, AstNode *program) {
         instr->data.tensor_init.is_load = stmt->data.init.is_load;
         instr->data.tensor_init.path = stmt->data.init.is_load
                                      ? dup_str(stmt->data.init.path) : NULL;
+        instr->data.tensor_init.is_seed = stmt->data.init.is_seed;
+        instr->data.tensor_init.seed_source = stmt->data.init.seed_source;
+        instr->data.tensor_init.seed_value = stmt->data.init.seed_value;
     }
 }
 

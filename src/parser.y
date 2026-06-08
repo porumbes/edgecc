@@ -104,13 +104,13 @@ static void litlist_add(LitList *ll, LiteralData *lit) {
 %token <int_val> TOK_INT_LIT TOK_BOOL_LIT
 %token <float_val> TOK_FLOAT_LIT
 %token <str_val> TOK_IDENT
-%token TOK_LOAD TOK_SAVE TOK_ARROW
+%token TOK_LOAD TOK_SAVE TOK_ARROW TOK_SEED
 %token <str_val> TOK_STRING_LIT
 
 %type <node> program stmt_list stmt dim_decl tensor_decl init_stmt einsum_stmt stop_stmt save_stmt
 %type <ptr> rank_pair_list ident_list nested_literal lit_list tensor_ref
 %type <datatype> datatype
-%type <float_val> literal_value
+%type <float_val> literal_value seed_value
 %type <mergeop> merge_arg
 
 %%
@@ -241,6 +241,21 @@ init_stmt:
     {
         $$ = (void *)ast_init_load_new($2, $6);
     }
+    | TOK_INIT TOK_IDENT '=' TOK_SEED '(' TOK_IDENT '=' TOK_INT_LIT ',' TOK_IDENT '=' seed_value ')' ';'
+    {
+        if (strcmp($6, "source") != 0 || strcmp($10, "value") != 0) {
+            yyerror("seed expects seed(source=<int>, value=<number>)");
+            free($6); free($10); free($2);
+            YYERROR;
+        }
+        free($6); free($10);
+        $$ = (void *)ast_init_seed_new($2, $8, $12);
+    }
+    ;
+
+seed_value:
+      TOK_FLOAT_LIT { $$ = $1; }
+    | TOK_INT_LIT   { $$ = (double)$1; }
     ;
 
 nested_literal:

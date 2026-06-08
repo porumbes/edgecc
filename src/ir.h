@@ -36,9 +36,12 @@ typedef struct {
 
 typedef struct {
     char *name;
-    LiteralData *data;  /* borrowed pointer, not owned (NULL when is_load) */
+    LiteralData *data;  /* borrowed pointer, not owned (NULL when is_load/is_seed) */
     int is_load;        /* 1 if `load("path")` */
-    char *path;         /* owned; NULL when literal */
+    int is_seed;        /* 1 if `seed(source=, value=)` */
+    char *path;         /* owned; NULL unless is_load */
+    int seed_source;
+    double seed_value;
 } IRTensorInit;
 
 typedef struct {

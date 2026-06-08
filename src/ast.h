@@ -101,8 +101,11 @@ typedef struct {
 typedef struct {
     char *tensor_name;
     int is_load;          /* 1 if `init X = load("path");` */
-    LiteralData *data;    /* literal init (NULL when is_load) */
-    char *path;           /* file path (NULL when literal) */
+    int is_seed;          /* 1 if `init X = seed(source=I, value=V);` */
+    LiteralData *data;    /* literal init (NULL when is_load/is_seed) */
+    char *path;           /* file path (NULL unless is_load) */
+    int seed_source;      /* source index (valid when is_seed) */
+    double seed_value;    /* value at source (valid when is_seed) */
 } InitData;
 
 typedef struct {
@@ -156,6 +159,7 @@ AstNode *ast_einsum_new(TensorRef output, TensorRef input1, TensorRef input2,
                          OperatorType reduce_op, MergeOp reduce_merge_op);
 AstNode *ast_stop_new(char *watch_tensor);
 AstNode *ast_init_load_new(char *tensor_name, char *path);
+AstNode *ast_init_seed_new(char *tensor_name, int source, double value);
 AstNode *ast_dim_decl_inferred_new(char *name);
 AstNode *ast_save_new(char *tensor_name, char *path);
 

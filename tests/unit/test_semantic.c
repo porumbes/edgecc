@@ -422,6 +422,54 @@ TEST(test_semantic_save_unknown_tensor_errors) {
     semantic_result_free(&r);
 }
 
+TEST(test_semantic_seed_rank1_ok) {
+    AstNode *ast = parse(
+        "dim N = *;\n"
+        "tensor G[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor D[R=N]      : float, empty = inf;\n"
+        "init G = load(\"g.mtx\");\n"
+        "init D = seed(source=0, value=0.0);\n"
+        "D[d] = G[s,d] . D[s] :: map(add, intersect) reduce(min, union);\n"
+    );
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
+TEST(test_semantic_seed_2d_rejected) {
+    AstNode *ast = parse(
+        "dim N = *;\n"
+        "tensor G[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor D[R=N, C=N] : float, empty = inf;\n"
+        "init G = load(\"g.mtx\");\n"
+        "init D = seed(source=0, value=0.0);\n"
+        "D[a,b] = G[a,b] . G[a,b] :: map(add, intersect) reduce(min, union);\n"
+    );
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_TRUE(sem.error_count > 0);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
+/* A generational seed tensor D[gen I, R=N] is data-1-D (num_ranks==2 counting
+   the gen axis) and must be accepted. */
+TEST(test_semantic_seed_generational_ok) {
+    AstNode *ast = parse(
+        "dim N = *;\n"
+        "tensor W[R=N, C=N]   : float, empty = 0.0;\n"
+        "tensor D[gen I, R=N] : float, empty = inf;\n"
+        "init W = load(\"g.mtx\");\n"
+        "init D = seed(source=0, value=0.0);\n"
+        "D[i+1, d] = W[s,d] . D[i, s] :: map(add, intersect) reduce(min, union);\n"
+        "stop: stable(D);\n"
+    );
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
 int main(void) {
     RUN_TEST(test_valid_gemm);
     RUN_TEST(test_undeclared_dim);
@@ -454,5 +502,8 @@ int main(void) {
     RUN_TEST(test_semantic_literal_init_on_inferred_dim_ok);
     RUN_TEST(test_semantic_unpinned_inferred_dim_errors);
     RUN_TEST(test_semantic_save_unknown_tensor_errors);
+    RUN_TEST(test_semantic_seed_rank1_ok);
+    RUN_TEST(test_semantic_seed_2d_rejected);
+    RUN_TEST(test_semantic_seed_generational_ok);
     return test_report();
 }

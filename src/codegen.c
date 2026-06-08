@@ -403,6 +403,16 @@ static int name_in_list(const char *name, const char **list, int n) {
 
 /* For an inferred dim `dimname`, find the first INPUT tensor alloc that has it
    on some axis and emit `dimname = len(input)` (axis 0) or `len(input[0])`. */
+/* Runtime Python subscript depth of alloc dim `d`: a generational axis (dim_size
+   == -1 sentinel) is not a materialized Python dimension, so skip it. Returns 0
+   or 1 for edgecc's <=2 spatial dims. */
+static int python_axis_of(const IRTensorAlloc *a, int d) {
+    int axis = 0;
+    for (int j = 0; j < d; j++)
+        if (a->dim_sizes[j] != -1) axis++;
+    return axis;
+}
+
 static void emit_inferred_dim_derivation(CodeBuf *cb, IRProgram *ir,
                                          const char *dimname,
                                          TensorNameList *inputs) {
@@ -416,12 +426,91 @@ static void emit_inferred_dim_derivation(CodeBuf *cb, IRProgram *ir,
         for (int d = 0; d < a->ndims; d++) {
             if (a->dim_names[d] && strcmp(a->dim_names[d], dimname) == 0) {
                 cb_indent(cb);
-                if (d == 0) cb_appendf(cb, "%s = len(%s)\n", dimname, a->name);
-                else        cb_appendf(cb, "%s = len(%s[0])\n", dimname, a->name);
+                if (python_axis_of(a, d) == 0) cb_appendf(cb, "%s = len(%s)\n", dimname, a->name);
+                else                           cb_appendf(cb, "%s = len(%s[0])\n", dimname, a->name);
                 return;
             }
         }
     }
+}
+
+/* Materialize a seed(...) init in __main__: fill a length-N vector with the
+   tensor's empty value, then set the source index to the seed value. N comes
+   from the loaded tensor that pins the seed tensor's (single) dim, or from a
+   fixed dim's constant size. */
+static void emit_seed_init(CodeBuf *cb, IRProgram *ir, const char *name,
+                           int source, double value) {
+    double empty_val = 0.0;
+    const char *dimname = NULL;
+    for (int i = 0; i < ir->count; i++) {
+        if (ir->instrs[i].type != IR_TENSOR_ALLOC) continue;
+        if (strcmp(ir->instrs[i].data.tensor_alloc.name, name) != 0) continue;
+        IRTensorAlloc *sa = &ir->instrs[i].data.tensor_alloc;
+        empty_val = sa->empty_val;
+        /* Pick the spatial (data) dim, skipping a generational axis (dim_size
+           == -1 sentinel) so D[gen I, R=N] resolves to N, not the gen index. */
+        for (int d = 0; d < sa->ndims; d++) {
+            if (sa->dim_sizes[d] == -1) continue;
+            dimname = sa->dim_names[d];
+            break;
+        }
+        break;
+    }
+
+    int inferred = 0, dimsize = 0;
+    for (int i = 0; i < ir->count; i++) {
+        if (ir->instrs[i].type != IR_DIM_DEF) continue;
+        if (dimname && strcmp(ir->instrs[i].data.dim_def.name, dimname) == 0) {
+            inferred = ir->instrs[i].data.dim_def.is_inferred;
+            dimsize = ir->instrs[i].data.dim_def.size;
+            break;
+        }
+    }
+
+    char lenexpr[128];
+    snprintf(lenexpr, sizeof(lenexpr), "0");   /* unreachable: semantic.c guarantees
+                                                  an inferred seed dim is pinned by a load */
+    if (!inferred) {
+        snprintf(lenexpr, sizeof(lenexpr), "%d", dimsize);
+    } else {
+        int found = 0;
+        for (int i = 0; i < ir->count && !found; i++) {
+            if (ir->instrs[i].type != IR_TENSOR_INIT) continue;
+            if (!ir->instrs[i].data.tensor_init.is_load) continue;
+            const char *pin = ir->instrs[i].data.tensor_init.name;
+            for (int j = 0; j < ir->count && !found; j++) {
+                if (ir->instrs[j].type != IR_TENSOR_ALLOC) continue;
+                if (strcmp(ir->instrs[j].data.tensor_alloc.name, pin) != 0) continue;
+                IRTensorAlloc *pa = &ir->instrs[j].data.tensor_alloc;
+                for (int d = 0; d < pa->ndims; d++) {
+                    if (pa->dim_names[d] && dimname &&
+                        strcmp(pa->dim_names[d], dimname) == 0) {
+                        if (python_axis_of(pa, d) == 0) snprintf(lenexpr, sizeof(lenexpr), "len(%s)", pin);
+                        else                            snprintf(lenexpr, sizeof(lenexpr), "len(%s[0])", pin);
+                        found = 1;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    char *emptys = format_double_literal(empty_val);
+    char *vals = format_double_literal(value);
+    cb_indent(cb);
+    cb_appendf(cb, "%s = [%s] * %s\n", name, emptys, lenexpr);
+    cb_indent(cb);
+    cb_appendf(cb, "if not (0 <= %d < len(%s)):\n", source, name);
+    cb->indent++;
+    cb_indent(cb);
+    cb_appendf(cb,
+        "raise ValueError(\"edgecc: seed source %d out of range [0, %%d) for '%s'\" %% len(%s))\n",
+        source, name, name);
+    cb->indent--;
+    cb_indent(cb);
+    cb_appendf(cb, "%s[%d] = %s\n", name, source, vals);
+    free(emptys);
+    free(vals);
 }
 
 /* After `dimname` is derived from its first input, assert every OTHER input
@@ -437,10 +526,12 @@ static void emit_inferred_dim_asserts(CodeBuf *cb, IRProgram *ir,
         for (int j = 0; j < inputs->count; j++)
             if (strcmp(a->name, inputs->names[j]) == 0) { is_input = 1; break; }
         if (!is_input) continue;
-        int axis = -1;
+        int found = 0, axis = 0;
         for (int d = 0; d < a->ndims; d++)
-            if (a->dim_names[d] && strcmp(a->dim_names[d], dimname) == 0) { axis = d; break; }
-        if (axis < 0) continue;
+            if (a->dim_names[d] && strcmp(a->dim_names[d], dimname) == 0) {
+                axis = python_axis_of(a, d); found = 1; break;
+            }
+        if (!found) continue;
         if (!first) { first = a->name; continue; }   /* the source; skip */
         const char *suffix = (axis == 0) ? "" : "[0]";
         cb_indent(cb);
@@ -913,6 +1004,12 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
             if (strcmp(instr->data.tensor_init.name, inputs.names[j]) == 0) { is_input = 1; break; }
         }
         if (!is_input) continue;
+        if (instr->data.tensor_init.is_seed) {
+            emit_seed_init(&cb, ir, instr->data.tensor_init.name,
+                           instr->data.tensor_init.seed_source,
+                           instr->data.tensor_init.seed_value);
+            continue;
+        }
         cb_indent(&cb);
         cb_appendf(&cb, "%s = ", instr->data.tensor_init.name);
         emit_literal(&cb, instr->data.tensor_init.data);

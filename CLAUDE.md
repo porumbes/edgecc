@@ -172,9 +172,23 @@ hand-verifiable length-N vector and no seed vector is needed; see
 weighted case: the reduce accumulator seeds from the **output tensor's `empty`**,
 so for `reduce(min, ...)` the output must be declared `empty = inf` (the min
 identity) while a `load`-ed operand keeps `empty = 0.0` to match densified
-absents — see `tests/e2e/load_lesmis_minplus/`. Seed-vector loading (for BFS/SSSP
-on these graphs) and a one-kernel-over-many-graphs data-sweep runner are future
-work.
+absents — see `tests/e2e/load_lesmis_minplus/`. A one-kernel-over-many-graphs
+data-sweep runner is future work.
+
+**Seed/source vectors.** A 1-D tensor may be initialized with
+`init D = seed(source=I, value=V);` — it builds a length-N vector (N inferred
+from the loaded graph that pins the dim) filled with the tensor's own declared
+`empty` value, with 0-based index `I` set to `V`. Filling with `empty` makes one
+construct serve both families: SSSP uses `empty = inf` + `seed(source=0,
+value=0.0)`; BFS uses `empty = 0.0` + `seed(source=0, value=1.0)`. This unblocks
+BFS/SSSP on arbitrarily-sized loaded graphs (the source vector auto-sizes to the
+graph instead of being a fixed-length literal). The seed is materialized in the
+generated `__main__` and passed to `run()`; a runtime guard rejects an
+out-of-range source index. The seed tensor must be 1-D — a generational tensor
+`D[gen I, R=N]` counts as 1-D (the `gen` axis is not a data dimension) — and its
+dim must be pinned by a `load(...)`. Single-source only for now (the keyword
+syntax is reserved for a future multi-source form). See
+`tests/e2e/seed_sssp_karate/` (SSSP/BFS on loaded karate).
 
 ### Visualization (per-generation trace + renderer)
 
