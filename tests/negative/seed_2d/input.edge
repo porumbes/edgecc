@@ -1,0 +1,6 @@
+dim N = *;
+tensor G[R=N, C=N] : float, empty = 0.0;
+tensor D[R=N, C=N] : float, empty = inf;
+init G = load("g.mtx");
+init D = seed(source=0, value=0.0);
+D[a,b] = G[a,b] . G[a,b] :: map(add, intersect) reduce(min, union);
