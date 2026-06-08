@@ -5,6 +5,7 @@ build/
 __pycache__/
 output.py
 examples/*.py
+result.mtx
 .worktrees/
 editors/vscode/node_modules/
 editors/vscode/out/
