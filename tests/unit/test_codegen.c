@@ -326,6 +326,64 @@ TEST(test_codegen_shared_dim_assert) {
     ast_free(ast);
 }
 
+TEST(test_codegen_default_no_trace) {
+    AstNode *ast = parse(
+        "dim M = 2; dim K = 3; dim N = 2;\n"
+        "tensor Z[R=M, C=N] : float, empty = 0.0;\n"
+        "tensor A[R=K, C=M] : float, empty = 0.0;\n"
+        "tensor B[R=K, C=N] : float, empty = 0.0;\n"
+        "init A = [[1, 2], [3, 4], [5, 6]];\n"
+        "init B = [[7, 8], [9, 10], [11, 12]];\n"
+        "Z[m,n] = A[k,m] . B[k,n] :: map(mul) reduce(add);\n");
+    SemanticResult sem = semantic_analyze(ast);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    char *code = codegen_python_ex(ir, 0, "gemm");
+    ASSERT_TRUE(strstr(code, "_trace") == NULL);
+    free(code);
+    ir_free(ir); semantic_result_free(&sem); ast_free(ast);
+}
+
+TEST(test_codegen_trace_on_nongenerational_warns_no_scaffold) {
+    AstNode *ast = parse(
+        "dim M = 2; dim K = 3; dim N = 2;\n"
+        "tensor Z[R=M, C=N] : float, empty = 0.0;\n"
+        "tensor A[R=K, C=M] : float, empty = 0.0;\n"
+        "tensor B[R=K, C=N] : float, empty = 0.0;\n"
+        "init A = [[1, 2], [3, 4], [5, 6]];\n"
+        "init B = [[7, 8], [9, 10], [11, 12]];\n"
+        "Z[m,n] = A[k,m] . B[k,n] :: map(mul) reduce(add);\n");
+    SemanticResult sem = semantic_analyze(ast);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    char *code = codegen_python_ex(ir, 1, "gemm");
+    ASSERT_TRUE(strstr(code, "_trace") == NULL);
+    free(code);
+    ir_free(ir); semantic_result_free(&sem); ast_free(ast);
+}
+
+TEST(test_codegen_trace_scaffolding) {
+    AstNode *ast = parse(
+        "dim N = 4;\n"
+        "tensor G[R=N, C=N]   : float, empty = 0.0;\n"
+        "tensor F[gen I, R=N] : float, empty = 0.0;\n"
+        "tensor P[gen I, R=N] : float, empty = 0.0;\n"
+        "init G = [[0.0,1.0,0.0,0.0],[0.0,0.0,1.0,0.0],[0.0,0.0,0.0,1.0],[0.0,0.0,0.0,0.0]];\n"
+        "init F = [1.0, 0.0, 0.0, 0.0];\n"
+        "init P = [1.0, 0.0, 0.0, 0.0];\n"
+        "F[i+1, d] = G[s,d] . F[i,s]   :: map(and, intersect) reduce(or, union);\n"
+        "P[i+1, d] = P[i,d] . F[i+1,d] :: map(or, union) reduce(or, union);\n"
+        "stop: stable(P);\n");
+    SemanticResult sem = semantic_analyze(ast);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    char *code = codegen_python_ex(ir, 1, "reachability_bfs");
+    ASSERT_TRUE(strstr(code, "def _edgecc_snapshot(") != NULL);
+    ASSERT_TRUE(strstr(code, "_trace=None") != NULL);
+    ASSERT_TRUE(strstr(code, "\"kind\": \"generation\"") != NULL);
+    ASSERT_TRUE(strstr(code, "\"schema\": \"edgecc-trace/1\"") != NULL);
+    ASSERT_TRUE(strstr(code, ".trace.json") != NULL);
+    free(code);
+    ir_free(ir); semantic_result_free(&sem); ast_free(ast);
+}
+
 int main(void) {
     RUN_TEST(test_codegen_gemm);
     RUN_TEST(test_codegen_intersect_union);
@@ -338,5 +396,8 @@ int main(void) {
     RUN_TEST(test_codegen_inferred_dim_from_input_shape);
     RUN_TEST(test_codegen_emits_save);
     RUN_TEST(test_codegen_shared_dim_assert);
+    RUN_TEST(test_codegen_default_no_trace);
+    RUN_TEST(test_codegen_trace_on_nongenerational_warns_no_scaffold);
+    RUN_TEST(test_codegen_trace_scaffolding);
     return test_report();
 }

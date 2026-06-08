@@ -157,6 +157,39 @@ lazily imported only when used. The e2e harness skips `.mtx` tests when scipy is
 absent (mark such tests with a `needs_scipy` file). See the design spec:
 `docs/superpowers/specs/2026-06-07-edgecc-file-io-design.md`.
 
+### Visualization (per-generation trace + renderer)
+
+Compile a **generational** kernel with `--emit-trace` to record a per-generation
+JSON trace, then render it to PNG frames:
+
+```
+./build/edgecc kernel.edge -o kernel.py --emit-trace
+python3 kernel.py                       # writes <kernel-stem>.trace.json
+python3 tools/edgecc_viz.py kernel.trace.json --graph graph.mtx -o frames/
+```
+
+`--emit-trace` is **default-off and only affects generational kernels** (a clear
+warning is printed and ignored otherwise); without it the generated Python is
+byte-identical to before. Trace capture uses only the stdlib `json`. The trace
+(`edgecc-trace/1`) records every generational tensor's value per generation,
+plus a gen-0 seed snapshot and a per-tensor `empty` map (so the renderer tells
+"active" from empty across semirings — e.g. the min-plus source distance `0.0`
+is active even though its empty value is `inf`). The schema is an ordered, tagged
+`steps` list so finer (per-scalar) tracing can be added later. The trace file is
+named after the source-file stem (`reachability_bfs.edge` →
+`reachability_bfs.trace.json`). Note: `inf`-empty kernels write JSON `Infinity`
+(Python `json`'s non-strict extension); the renderer reads it back fine.
+
+`tools/edgecc_viz.py` reads `{trace.json + adjacency .mtx}` and emits one frame
+per generation: the graph (nodes colored by the watched tensor; **cyan "active"
+edges** that propagated this generation, computed as `adjacency ∧ source-active ∧
+dest-changed` from consecutive snapshots) beside a heatmap panel of the
+generational tensors. It lazily imports `matplotlib`, `networkx`, and `scipy`
+(`pip install matplotlib networkx scipy`). Only the `dark` theme ships; `--theme`
+is structured for print themes later. Tests: `trace_tests` (capture, no plotting
+deps) and `viz_tests` (pure functions always; rendering checks skip when deps are
+absent). See `docs/superpowers/specs/2026-06-08-edgecc-graphics-design.md`.
+
 ## Generated Python ABI
 
 ```python
@@ -226,4 +259,4 @@ Coverage is Tier 1 only — static dropdowns for compute / merge / type / empty-
 
 ## v2 Scope Limitations
 
-Not yet supported: multi-operation expressions with compute labels, the `<<` update compute operator, the remaining gaps for full 3-step BFS (unary `¬`, multi-output return, `ANY` compute, occupancy (`‖F‖≡0`) termination), and nested cascades / multiple generational ranks — single-Einsum generational ranks and cascades with one **or more** cross-generational tensors (e.g. Bellman-Ford; naive reachability BFS) are supported; see "Generational (iterative) ranks", anonymous tensors / parenthesized sub-expressions, unary functions, the 7 (No,No)→Yes merge operators (NOR, equivalence, NAND, ¬→, ¬←, ⇐, ⇒), sparse tensor storage, optimizations of any kind, user-defined compute operators. File-based init is now supported for Matrix Market (`.mtx`) via `load`/`save` (see "File input/output"); it **densifies on load** — sparse *compute* (CSR/CSC/COO iteration in the generated loops) remains part of the deferred sparse-tensor-storage work, as does loading non-`.mtx` formats and a proper EDGE-native CLI for input paths.
+Not yet supported: multi-operation expressions with compute labels, the `<<` update compute operator, the remaining gaps for full 3-step BFS (unary `¬`, multi-output return, `ANY` compute, occupancy (`‖F‖≡0`) termination), and nested cascades / multiple generational ranks — single-Einsum generational ranks and cascades with one **or more** cross-generational tensors (e.g. Bellman-Ford; naive reachability BFS) are supported; see "Generational (iterative) ranks", anonymous tensors / parenthesized sub-expressions, unary functions, the 7 (No,No)→Yes merge operators (NOR, equivalence, NAND, ¬→, ¬←, ⇐, ⇒), sparse tensor storage, optimizations of any kind, user-defined compute operators. File-based init is now supported for Matrix Market (`.mtx`) via `load`/`save` (see "File input/output"); it **densifies on load** — sparse *compute* (CSR/CSC/COO iteration in the generated loops) remains part of the deferred sparse-tensor-storage work, as does loading non-`.mtx` formats and a proper EDGE-native CLI for input paths. Per-generation visualization is available via `--emit-trace` + `tools/edgecc_viz.py` (generational kernels only; see "Visualization"); per-scalar (inner-loop) stepping, interactive scrubbing, animation export, contact-sheet/filmstrip, and print themes are deferred.

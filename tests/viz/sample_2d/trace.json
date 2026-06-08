@@ -1,0 +1,12 @@
+{
+  "schema": "edgecc-trace/1",
+  "kernel": "transitive_closure",
+  "dims": {"N": 3},
+  "gen_tensors": ["T"],
+  "empty": {"T": 0.0},
+  "watch": "T",
+  "steps": [
+    {"kind": "generation", "gen": 0, "tensors": {"T": [[1.0,0.0,0.0],[0.0,1.0,0.0],[0.0,0.0,1.0]]}},
+    {"kind": "generation", "gen": 1, "tensors": {"T": [[1.0,1.0,0.0],[0.0,1.0,1.0],[0.0,0.0,1.0]]}}
+  ]
+}

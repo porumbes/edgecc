@@ -103,3 +103,16 @@ add_test(
         --build-dir ${CMAKE_CURRENT_BINARY_DIR}
         --tests-dir ${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/iterative
 )
+
+add_test(
+    NAME trace_tests
+    COMMAND ${CMAKE_COMMAND} -E env python3
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/trace/run_trace_tests.py
+        $<TARGET_FILE:edgecc>
+)
+
+add_test(
+    NAME viz_tests
+    COMMAND ${CMAKE_COMMAND} -E env python3
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/viz/run_viz_tests.py
+)
