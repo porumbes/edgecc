@@ -944,6 +944,78 @@ for (int i = 0; i < ir->count; i++) {
 
 > v2 tensors are at most 2D, so axis 0 → `len(x)` and axis 1 → `len(x[0])` cover all cases. `emit_inferred_dim_derivation` must be declared/defined after `TensorNameList` (line 250) and after `collect_io`, but before `codegen_python` — place it just before `codegen_python` and forward-declare `TensorNameList` is unnecessary since it's defined earlier at line 250.
 
+- [ ] **Step 5b: Emit a friendly shared-dim shape assertion (Gap 1)**
+
+Each inferred dim is derived from the *first* input that uses it. Any *other* input
+sharing that dim must agree, or the compute would later raise an opaque `IndexError`.
+Emit, right after the derivation of dim `D` from input `first`, a check for every
+later input that also carries `D`, raising a `ValueError` that names both tensors.
+
+Add a helper next to `emit_inferred_dim_derivation`:
+
+```c
+/* After `dimname` is derived from its first input, assert every other input
+   that uses `dimname` agrees on the relevant axis length. */
+static void emit_inferred_dim_asserts(CodeBuf *cb, IRProgram *ir,
+                                      const char *dimname,
+                                      TensorNameList *inputs) {
+    const char *first = NULL;     /* the input the dim was derived from */
+    for (int i = 0; i < ir->count; i++) {
+        if (ir->instrs[i].type != IR_TENSOR_ALLOC) continue;
+        IRTensorAlloc *a = &ir->instrs[i].data.tensor_alloc;
+        int is_input = 0;
+        for (int j = 0; j < inputs->count; j++)
+            if (strcmp(a->name, inputs->names[j]) == 0) { is_input = 1; break; }
+        if (!is_input) continue;
+        int axis = -1;
+        for (int d = 0; d < a->ndims; d++)
+            if (a->dim_names[d] && strcmp(a->dim_names[d], dimname) == 0) { axis = d; break; }
+        if (axis < 0) continue;
+        const char *len_expr_open = (axis == 0) ? "len(" : "len(";
+        const char *len_suffix    = (axis == 0) ? ")"    : "[0])";
+        if (!first) { first = a->name; continue; }   /* this is the source; skip */
+        cb_indent(cb);
+        cb_appendf(cb, "if %s%s%s != %s:\n", len_expr_open, a->name, len_suffix, dimname);
+        cb->indent++;
+        cb_indent(cb);
+        cb_appendf(cb,
+            "raise ValueError(\"edgecc: input '%s' has size %%d on dim %s "
+            "but '%s' pins it to %%d\" %% (%s%s%s, %s))\n",
+            a->name, dimname, first, len_expr_open, a->name, len_suffix, dimname);
+        cb->indent--;
+    }
+}
+```
+
+Call it immediately after the derivation loop (after the `emit_inferred_dim_derivation`
+call added in Step 5), iterating the same inferred dims:
+
+```c
+for (int i = 0; i < ir->count; i++) {
+    if (ir->instrs[i].type == IR_DIM_DEF &&
+        ir->instrs[i].data.dim_def.is_inferred) {
+        emit_inferred_dim_asserts(&cb, ir, ir->instrs[i].data.dim_def.name, &inputs);
+    }
+}
+```
+
+Add a unit test to `tests/unit/test_codegen.c` (register in `main()`):
+
+```c
+TEST(test_codegen_shared_dim_assert) {
+    char *py = generate_source(
+        "dim N = *;\n"
+        "tensor G[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor F[R=N]      : float, empty = 0.0;\n"
+        "init G = load(\"g.mtx\");\n"
+        "init F = load(\"f.mtx\");\n"
+        "Z[d] = G[s,d] . F[s] :: map(mul, intersect) reduce(add, union);\n");
+    /* F shares dim N with G and must be asserted to agree */
+    ASSERT_TRUE(strstr(py, "raise ValueError(\"edgecc: input 'F'") != NULL);
+    free(py);
+}
+```
+
 - [ ] **Step 6: Make emit_alloc prefer dim names**
 
 In `emit_alloc` (`codegen.c:125`), before the size-matching block, prefer `alloc->dim_names[d]` when non-NULL. Replace the per-axis name resolution so that a present `dim_names[d]` wins:
@@ -1420,7 +1492,7 @@ git status   # should be clean
 - Generic, extension-dispatch loader → Task 6 Step 3 (`_edgecc_load` dispatches on `.endswith(".mtx")`). ✓
 - `load`/`save` naming → throughout. ✓
 - Inferred dims (`dim N = *`) → Tasks 1–6 (derive in `run()`, Task 6 Step 5). ✓
-- Shared-dim disagreement = runtime error → emergent from `len()`-derived dims + dense indexing raising `IndexError`; **note:** the spec wanted a *clear* `ValueError`. See Gap 1 below.
+- Shared-dim disagreement → clear runtime `ValueError` naming both tensors, emitted at the top of `run()` (Task 6 Step 5b). ✓
 - `save:` directive → Tasks 1–6. ✓
 - argv override of file-backed inputs, `-h`, count validation → Task 6 Step 7. ✓
 - Errors (compile vs runtime) → Task 4 (compile), Task 6 helpers (runtime ImportError/ValueError). ✓
@@ -1428,7 +1500,7 @@ git status   # should be clean
 - Sparse-compute deferral note in CLAUDE.md → Task 10 Step 3. ✓
 - VS Code / build-system dep management / non-mtx formats → deferred (spec §Deferred); intentionally no tasks.
 
-**Gap 1 (surface to user):** The spec's "two loads disagree on a shared dim → clear `ValueError` naming both tensors" is only partially met — inferred dims are each derived from the *first* input that uses them, so a second input of the wrong size would surface as a Python `IndexError` deep in the loop, not a friendly message. A clean fix is a runtime shape-assert emitted at the top of `run()` for every input sharing an inferred dim. This is a small added sub-step in Task 6 if desired; flagged for the execution decision rather than silently dropped.
+**Gap 1 (resolved):** The spec's "two loads disagree on a shared dim → clear `ValueError` naming both tensors" is met by Task 6 Step 5b, which emits a runtime shape-assert at the top of `run()` for every input sharing an inferred dim.
 
 **Placeholder scan:** No TBD/TODO; all code blocks concrete. Test fixtures include exact expected outputs with the reasoning to verify them. ✓
 
