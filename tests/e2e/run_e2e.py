@@ -5,12 +5,23 @@ import subprocess
 import sys
 import tempfile
 
+try:
+    import scipy  # noqa: F401
+    HAVE_SCIPY = True
+except ImportError:
+    HAVE_SCIPY = False
+
 def run_test(test_dir, edgecc_bin):
     name = os.path.basename(test_dir)
     input_file = os.path.join(test_dir, "input.edge")
     expected_output = os.path.join(test_dir, "expected_output.txt")
 
     if not os.path.exists(input_file) or not os.path.exists(expected_output):
+        return None
+
+    # Tests that load/save .mtx files require scipy; skip cleanly if absent.
+    if os.path.exists(os.path.join(test_dir, "needs_scipy")) and not HAVE_SCIPY:
+        print(f"  SKIP {name}: scipy not installed")
         return None
 
     with tempfile.NamedTemporaryFile(suffix=".py", delete=False) as tmp:
@@ -27,7 +38,7 @@ def run_test(test_dir, edgecc_bin):
 
         result = subprocess.run(
             [sys.executable, tmp_py],
-            capture_output=True, text=True, timeout=10
+            capture_output=True, text=True, timeout=10, cwd=test_dir
         )
         if result.returncode != 0:
             print(f"  FAIL {name}: python failed: {result.stderr.strip()}")
