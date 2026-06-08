@@ -188,7 +188,9 @@ generational tensors. It lazily imports `matplotlib`, `networkx`, and `scipy`
 (`pip install matplotlib networkx scipy`). Only the `dark` theme ships; `--theme`
 is structured for print themes later. Tests: `trace_tests` (capture, no plotting
 deps) and `viz_tests` (pure functions always; rendering checks skip when deps are
-absent). See `docs/superpowers/specs/2026-06-08-edgecc-graphics-design.md`.
+absent). See `docs/superpowers/specs/2026-06-08-edgecc-graphics-design.md`. For a
+runnable quickstart with Bellman-Ford and reachability-BFS recipes plus flag notes,
+see `docs/visualization.md`.
 
 ## Generated Python ABI
 
