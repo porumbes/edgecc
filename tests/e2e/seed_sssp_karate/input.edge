@@ -1,0 +1,16 @@
+// Single-source shortest paths (Bellman-Ford) over a LOADED graph with a
+// seed(...) source vector. karate is a pattern matrix (weights 1.0), so this
+// computes BFS hop-distance from node 0 to every node. Validates seed-vector
+// sizing to a loaded graph end-to-end.
+//
+// W keeps empty=0.0 (load densifies absent->0.0 so the intersect map excludes
+// non-edges). T/D use empty=inf (the min reduce identity). D is seeded.
+dim N = *;
+tensor W[R=N, C=N]   : float, empty = 0.0;
+tensor T[gen I, R=N] : float, empty = inf;
+tensor D[gen I, R=N] : float, empty = inf;
+init W = load("graph.mtx");
+init D = seed(source=0, value=0.0);
+T[i, d]   = W[s,d] . D[i, s] :: map(add, intersect) reduce(min, union);
+D[i+1, d] = D[i, d] . T[i, d] :: map(min, union) reduce(min, union);
+stop: stable(D);
