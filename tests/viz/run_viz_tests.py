@@ -161,6 +161,74 @@ def test_render_shell_layout():
     check("shell render produced 4 frames", len(frames) == 4)
     check("shell frames non-empty", all(os.path.getsize(f) > 0 for f in frames))
 
+def test_first_reached_basic():
+    steps = [
+        {"gen": 0, "tensors": {"D": [0.0, 99.0, 99.0, 99.0]}},
+        {"gen": 1, "tensors": {"D": [0.0,  1.0,  1.0, 99.0]}},
+        {"gen": 2, "tensors": {"D": [0.0,  1.0,  1.0, 99.0]}},
+    ]
+    check("_first_reached per-node gens", viz._first_reached(steps, "D", 99.0, 4) == [0, 1, 1, None])
+
+def test_render_more_layouts():
+    try:
+        import matplotlib, networkx, scipy  # noqa: F401
+    except ImportError:
+        print("  SKIP test_render_more_layouts: deps not installed")
+        return
+    import tempfile, glob
+    for kind in ("kamada_kawai", "spectral", "multipartite"):
+        out = tempfile.mkdtemp()
+        viz.main([os.path.join(HERE, "sample", "trace.json"),
+                  "--graph", os.path.join(HERE, "sample", "graph.mtx"),
+                  "--layout", kind, "-o", out])
+        frames = sorted(glob.glob(os.path.join(out, "gen_*.png")))
+        check(f"{kind} render produced 4 frames", len(frames) == 4)
+
+def test_layout_disconnected_ok():
+    # kamada_kawai on a disconnected graph (node 0 isolated): networkx may handle
+    # it (no raise) or raise -> fall back; either way the render must succeed.
+    try:
+        import matplotlib, networkx, scipy  # noqa: F401
+    except ImportError:
+        print("  SKIP test_layout_disconnected_ok: deps not installed")
+        return
+    import tempfile, glob
+    g = tempfile.NamedTemporaryFile("w", suffix=".mtx", delete=False)
+    g.write("%%MatrixMarket matrix coordinate real general\n4 4 2\n2 3 1.0\n3 4 1.0\n")
+    g.close()
+    out = tempfile.mkdtemp()
+    viz.main([os.path.join(HERE, "sample", "trace.json"),
+              "--graph", g.name, "--layout", "kamada_kawai", "-o", out])
+    frames = sorted(glob.glob(os.path.join(out, "gen_*.png")))
+    check("disconnected render still succeeds", len(frames) == 4)
+
+def test_layout_fallback_on_error():
+    # Deterministically exercise the fallback wrapper: force the chosen layout to
+    # raise (independent of networkx's version-specific disconnected handling) and
+    # assert the render still succeeds via spring, with a stderr warning.
+    try:
+        import matplotlib, networkx as nx, scipy  # noqa: F401
+    except ImportError:
+        print("  SKIP test_layout_fallback_on_error: deps not installed")
+        return
+    import tempfile, glob, io, contextlib
+    def boom(*a, **k):
+        raise RuntimeError("forced layout failure")
+    orig = nx.kamada_kawai_layout
+    nx.kamada_kawai_layout = boom
+    try:
+        out = tempfile.mkdtemp()
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            viz.main([os.path.join(HERE, "sample", "trace.json"),
+                      "--graph", os.path.join(HERE, "sample", "graph.mtx"),
+                      "--layout", "kamada_kawai", "-o", out])
+    finally:
+        nx.kamada_kawai_layout = orig
+    frames = sorted(glob.glob(os.path.join(out, "gen_*.png")))
+    check("fallback render produced 4 frames", len(frames) == 4)
+    check("fallback warning emitted", "falling back to spring" in err.getvalue())
+
 test_load_trace()
 test_active_edges()
 test_bad_schema()
@@ -175,6 +243,10 @@ test_shell_nlist_basic()
 test_shell_nlist_unreached()
 test_shell_nlist_sample_reachability()
 test_render_shell_layout()
+test_first_reached_basic()
+test_render_more_layouts()
+test_layout_disconnected_ok()
+test_layout_fallback_on_error()
 
 print(f"\n{sum(results)}/{len(results)} viz checks passed")
 sys.exit(1 if not all(results) else 0)

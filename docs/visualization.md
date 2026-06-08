@@ -41,6 +41,13 @@ generation) beside a heatmap panel of the generational tensors.
   BFS/SSSP wavefront reads as expanding rings — much clearer than `spring` for
   graphs past ~60 nodes. Works on any generational trace with a 1-D watched/
   `--color` tensor.
+- More layouts (all networkx, no extra deps; any that fails on a disconnected
+  graph falls back to `spring` with a stderr warning):
+  - `--layout multipartite` — layered columns by first-reached generation (the
+    layered cousin of `shell`; the wavefront marches left→right).
+  - `--layout kamada_kawai` — stress-based force layout, usually cleaner than
+    `spring` for medium graphs.
+  - `--layout spectral` — Laplacian layout that separates communities.
 - `--theme dark` — only the `dark` theme ships today; the flag is structured for
   print themes later.
 

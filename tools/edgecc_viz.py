@@ -3,7 +3,7 @@
 
 Usage:
     python tools/edgecc_viz.py TRACE.json --graph ADJ.mtx -o FRAMES_DIR \
-        [--color TENSOR] [--layout spring|circular|shell] [--theme dark]
+        [--color TENSOR] [--layout spring|circular|shell|multipartite|kamada_kawai|spectral] [--theme dark]
 
 matplotlib / networkx are imported lazily inside the render functions, so the
 pure helpers below (load_trace, validate_trace, active_edges) are importable and
@@ -112,10 +112,10 @@ def _finite_range(vals):
     return lo, hi
 
 
-def shell_nlist(steps, color, empty, n):
-    """Ring assignment for the shell layout: shell k = node indices whose `color`
-    tensor first became non-empty at generation index k (walking `steps` in order);
-    a trailing ring holds nodes never reached. Pure (no networkx/matplotlib)."""
+def _first_reached(steps, color, empty, n):
+    """Per-node first-reached generation index, or None if never reached: the
+    generation at which `color`'s value first left `empty`, walking `steps` in
+    order. Pure (no networkx/matplotlib)."""
     first = [None] * n
     for gi, step in enumerate(steps):
         vals = step.get("tensors", {}).get(color)
@@ -124,6 +124,14 @@ def shell_nlist(steps, color, empty, n):
         for node in range(min(n, len(vals))):
             if first[node] is None and vals[node] != empty:
                 first[node] = gi
+    return first
+
+
+def shell_nlist(steps, color, empty, n):
+    """Ring assignment for the shell layout: shell k = node indices whose `color`
+    tensor first became non-empty at generation index k; a trailing ring holds
+    nodes never reached. Pure (no networkx/matplotlib)."""
+    first = _first_reached(steps, color, empty, n)
     buckets, unreached = {}, []
     for node in range(n):
         if first[node] is None:
@@ -136,7 +144,8 @@ def shell_nlist(steps, color, empty, n):
     return shells
 
 
-def _layout(adj, kind, seed=1, nlist=None):
+def _layout(adj, kind, seed=1, nlist=None, first=None):
+    import sys
     import networkx as nx
     n = len(adj)
     directed = any(adj[i][j] != adj[j][i] for i in range(n) for j in range(n))
@@ -146,13 +155,31 @@ def _layout(adj, kind, seed=1, nlist=None):
         for j in range(n):
             if adj[i][j] != 0.0:
                 G.add_edge(i, j)
-    if kind == "shell":
-        pos = nx.shell_layout(G, nlist=nlist)
-    elif kind == "spring":
-        pos = nx.spring_layout(G, seed=seed)
-    else:
-        pos = nx.circular_layout(G)
-    return G, pos
+    if kind == "spring":
+        return G, nx.spring_layout(G, seed=seed)
+    try:
+        if kind == "circular":
+            pos = nx.circular_layout(G)
+        elif kind == "shell":
+            pos = nx.shell_layout(G, nlist=nlist)
+        elif kind == "kamada_kawai":
+            pos = nx.kamada_kawai_layout(G)
+        elif kind == "spectral":
+            pos = nx.spectral_layout(G)
+        elif kind == "multipartite":
+            reached = [g for g in (first or []) if g is not None]
+            outer = (max(reached) + 1) if reached else 0
+            for node in range(n):
+                fr = first[node] if first else None
+                G.nodes[node]["layer"] = fr if fr is not None else outer
+            pos = nx.multipartite_layout(G, subset_key="layer")
+        else:
+            pos = nx.circular_layout(G)
+        return G, pos
+    except Exception as e:                       # disconnected graph, etc.
+        print(f"edgecc_viz: {kind} layout failed ({e.__class__.__name__}: {e}), "
+              f"falling back to spring", file=sys.stderr)
+        return G, nx.spring_layout(G, seed=seed)
 
 
 def render_all(tr, adj, color, out_dir, theme, layout_kind, empty=0.0):
@@ -164,7 +191,9 @@ def render_all(tr, adj, color, out_dir, theme, layout_kind, empty=0.0):
     os.makedirs(out_dir, exist_ok=True)
     nlist = (shell_nlist(tr["steps"], color, empty, len(adj))
              if layout_kind == "shell" else None)
-    G, pos = _layout(adj, layout_kind, nlist=nlist)
+    first = (_first_reached(tr["steps"], color, empty, len(adj))
+             if layout_kind == "multipartite" else None)
+    G, pos = _layout(adj, layout_kind, nlist=nlist, first=first)
     steps = tr["steps"]
     gen_tensors = tr.get("gen_tensors", [])
     empties = tr.get("empty", {})
@@ -224,7 +253,9 @@ def parse_args(argv=None):
     p.add_argument("--graph", required=True)
     p.add_argument("-o", "--out", default="frames")
     p.add_argument("--color", default=None, help="tensor to color nodes by (default: watch)")
-    p.add_argument("--layout", default="spring", choices=["spring", "circular", "shell"])
+    p.add_argument("--layout", default="spring",
+                   choices=["spring", "circular", "shell",
+                            "multipartite", "kamada_kawai", "spectral"])
     p.add_argument("--theme", default="dark")
     return p.parse_args(argv)
 
