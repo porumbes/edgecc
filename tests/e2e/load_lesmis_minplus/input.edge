@@ -1,0 +1,15 @@
+// Weighted min-plus over the lesmis graph: Z[i] = min_k (W[i,k] + W[k,i]).
+// Exercises the (add, min) semiring on real edge weights. NOTE: lesmis weights
+// are co-appearance counts, so min-plus here is semantically arbitrary -- this
+// test validates the loader + weighted dense-compute path, not graph meaning.
+//
+// W keeps empty=0.0 because load() densifies absent entries to 0.0, so the
+// intersect map's existence check (val != 0.0) correctly excludes non-edges.
+// Z uses empty=inf because the reduce accumulator seeds from the output empty,
+// which must equal the reduce operator's identity (inf for min). See the
+// Bellman-Ford pattern in tests/trace/bellman_ford/input.edge.
+dim N = *;
+tensor W[R=N, C=N] : float, empty = 0.0;
+tensor Z[R=N]      : float, empty = inf;
+init W = load("graph.mtx");
+Z[i] = W[i,k] . W[k,i] :: map(add, intersect) reduce(min, union);
