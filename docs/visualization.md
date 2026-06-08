@@ -35,7 +35,12 @@ generation) beside a heatmap panel of the generational tensors.
 ### Useful flags
 
 - `--color F` — color nodes by a different tensor (default: the `stop:`-watched one).
-- `--layout circular` — node layout (default: `spring`).
+- `--layout circular` / `--layout shell` — node layout (default: `spring`).
+  `shell` places nodes in concentric rings by the generation each was first
+  reached (source at the center, unreached nodes in a dim outer ring), so a
+  BFS/SSSP wavefront reads as expanding rings — much clearer than `spring` for
+  graphs past ~60 nodes. Works on any generational trace with a 1-D watched/
+  `--color` tensor.
 - `--theme dark` — only the `dark` theme ships today; the flag is structured for
   print themes later.
 

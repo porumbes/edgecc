@@ -124,6 +124,43 @@ def test_render_2d_color_raises():
     except ValueError:
         check("2-D --color raises cleanly", True)
 
+def test_shell_nlist_basic():
+    steps = [
+        {"gen": 0, "tensors": {"D": [0.0, 99.0, 99.0, 99.0]}},
+        {"gen": 1, "tensors": {"D": [0.0,  1.0,  1.0, 99.0]}},
+        {"gen": 2, "tensors": {"D": [0.0,  1.0,  1.0,  2.0]}},
+    ]
+    nlist = viz.shell_nlist(steps, "D", 99.0, 4)
+    check("shell_nlist groups by first-reached gen", nlist == [[0], [1, 2], [3]])
+
+def test_shell_nlist_unreached():
+    steps = [
+        {"gen": 0, "tensors": {"D": [0.0, 99.0, 99.0, 99.0]}},
+        {"gen": 1, "tensors": {"D": [0.0,  1.0, 99.0, 99.0]}},
+    ]
+    nlist = viz.shell_nlist(steps, "D", 99.0, 4)
+    check("shell_nlist puts unreached in outer ring", nlist == [[0], [1], [2, 3]])
+
+def test_shell_nlist_sample_reachability():
+    tr = viz.load_trace(os.path.join(HERE, "sample", "trace.json"))
+    nlist = viz.shell_nlist(tr["steps"], "P", 0.0, 4)
+    check("shell_nlist on sample P", nlist == [[0], [1], [2], [3]])
+
+def test_render_shell_layout():
+    try:
+        import matplotlib, networkx, scipy  # noqa: F401
+    except ImportError:
+        print("  SKIP test_render_shell_layout: deps not installed")
+        return
+    import tempfile, glob
+    out = tempfile.mkdtemp()
+    viz.main([os.path.join(HERE, "sample", "trace.json"),
+              "--graph", os.path.join(HERE, "sample", "graph.mtx"),
+              "--layout", "shell", "-o", out])
+    frames = sorted(glob.glob(os.path.join(out, "gen_*.png")))
+    check("shell render produced 4 frames", len(frames) == 4)
+    check("shell frames non-empty", all(os.path.getsize(f) > 0 for f in frames))
+
 test_load_trace()
 test_active_edges()
 test_bad_schema()
@@ -134,6 +171,10 @@ test_active_edges_weighted()
 test_active_edges_2d_guard()
 test_render_weighted_with_intermediate()
 test_render_2d_color_raises()
+test_shell_nlist_basic()
+test_shell_nlist_unreached()
+test_shell_nlist_sample_reachability()
+test_render_shell_layout()
 
 print(f"\n{sum(results)}/{len(results)} viz checks passed")
 sys.exit(1 if not all(results) else 0)
