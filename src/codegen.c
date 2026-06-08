@@ -485,8 +485,8 @@ static void emit_seed_init(CodeBuf *cb, IRProgram *ir, const char *name,
                 for (int d = 0; d < pa->ndims; d++) {
                     if (pa->dim_names[d] && dimname &&
                         strcmp(pa->dim_names[d], dimname) == 0) {
-                        if (d == 0) snprintf(lenexpr, sizeof(lenexpr), "len(%s)", pin);
-                        else        snprintf(lenexpr, sizeof(lenexpr), "len(%s[0])", pin);
+                        if (python_axis_of(pa, d) == 0) snprintf(lenexpr, sizeof(lenexpr), "len(%s)", pin);
+                        else                            snprintf(lenexpr, sizeof(lenexpr), "len(%s[0])", pin);
                         found = 1;
                         break;
                     }
