@@ -237,6 +237,95 @@ TEST(test_codegen_take_left_map) {
     ast_free(ast);
 }
 
+TEST(test_codegen_emits_load_helper) {
+    AstNode *ast = parse(
+        "dim N = *;\n"
+        "tensor G[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor F[R=N] : float, empty = 0.0;\n"
+        "tensor Z[R=N] : float, empty = 0.0;\n"
+        "init G = load(\"g.mtx\");\n"
+        "init F = [1.0, 0.0, 0.0, 0.0];\n"
+        "Z[d] = G[s,d] . F[s] :: map(mul, intersect) reduce(add, union);\n"
+    );
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    char *code = codegen_python(ir);
+    ASSERT_NOT_NULL(code);
+    ASSERT_TRUE(strstr(code, "def _edgecc_load(") != NULL);
+    ASSERT_TRUE(strstr(code, "_edgecc_load(\"g.mtx\")") != NULL);
+    free(code);
+    ir_free(ir);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
+TEST(test_codegen_inferred_dim_from_input_shape) {
+    AstNode *ast = parse(
+        "dim N = *;\n"
+        "tensor G[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor F[R=N] : float, empty = 0.0;\n"
+        "tensor Z[R=N] : float, empty = 0.0;\n"
+        "init G = load(\"g.mtx\");\n"
+        "init F = [1.0, 0.0, 0.0, 0.0];\n"
+        "Z[d] = G[s,d] . F[s] :: map(mul, intersect) reduce(add, union);\n"
+    );
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    char *code = codegen_python(ir);
+    ASSERT_NOT_NULL(code);
+    ASSERT_TRUE(strstr(code, "N = len(") != NULL);
+    free(code);
+    ir_free(ir);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
+TEST(test_codegen_emits_save) {
+    AstNode *ast = parse(
+        "dim N = 2;\n"
+        "tensor F[R=N] : float, empty = 0.0;\n"
+        "tensor Z[R=N] : float, empty = 0.0;\n"
+        "init F = [1.0, 0.0];\n"
+        "Z[d] = F[d] . F[d] :: map(add, union) reduce(add, union);\n"
+        "save: Z -> \"out.mtx\";\n"
+    );
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    char *code = codegen_python(ir);
+    ASSERT_NOT_NULL(code);
+    ASSERT_TRUE(strstr(code, "def _edgecc_save(") != NULL);
+    ASSERT_TRUE(strstr(code, "_edgecc_save(Z, \"out.mtx\")") != NULL);
+    free(code);
+    ir_free(ir);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
+TEST(test_codegen_shared_dim_assert) {
+    AstNode *ast = parse(
+        "dim N = *;\n"
+        "tensor G[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor F[R=N]      : float, empty = 0.0;\n"
+        "tensor Z[R=N]      : float, empty = 0.0;\n"
+        "init G = load(\"g.mtx\");\n"
+        "init F = load(\"f.mtx\");\n"
+        "Z[d] = G[s,d] . F[s] :: map(mul, intersect) reduce(add, union);\n"
+    );
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    char *code = codegen_python(ir);
+    ASSERT_NOT_NULL(code);
+    ASSERT_TRUE(strstr(code, "raise ValueError(\"edgecc: input 'F'") != NULL);
+    free(code);
+    ir_free(ir);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
 int main(void) {
     RUN_TEST(test_codegen_gemm);
     RUN_TEST(test_codegen_intersect_union);
@@ -245,5 +334,9 @@ int main(void) {
     RUN_TEST(test_codegen_two_cross_gen);
     RUN_TEST(test_codegen_independent_cross_gen);
     RUN_TEST(test_codegen_take_left_map);
+    RUN_TEST(test_codegen_emits_load_helper);
+    RUN_TEST(test_codegen_inferred_dim_from_input_shape);
+    RUN_TEST(test_codegen_emits_save);
+    RUN_TEST(test_codegen_shared_dim_assert);
     return test_report();
 }
