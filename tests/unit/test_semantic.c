@@ -18,6 +18,13 @@ static AstNode *parse(const char *src) {
     return result;
 }
 
+static SemanticResult analyze_source(const char *src) {
+    AstNode *ast = parse(src);
+    SemanticResult res = semantic_analyze(ast);
+    ast_free(ast);
+    return res;
+}
+
 TEST(test_valid_gemm) {
     AstNode *ast = parse(
         "dim M = 2; dim K = 3; dim N = 2;\n"
@@ -366,6 +373,55 @@ TEST(test_take_left_reduce_is_error) {
     ast_free(ast);
 }
 
+TEST(test_semantic_records_inferred_dim) {
+    SemanticResult r = analyze_source(
+        "dim N = *;\n"
+        "tensor G[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor F[R=N] : float, empty = 0.0;\n"
+        "tensor Z[R=N] : float, empty = 0.0;\n"
+        "init G = load(\"g.mtx\");\n"
+        "init F = load(\"f.mtx\");\n"
+        "Z[d] = G[s,d] . F[s] :: map(mul, intersect) reduce(add, union);\n");
+    ASSERT_INT_EQ(0, r.error_count);
+    semantic_result_free(&r);
+}
+
+TEST(test_semantic_literal_init_on_inferred_dim_ok) {
+    /* A literal init on a tensor whose dim is inferred must NOT be shape-checked
+       at compile time (size is only known at runtime from the loaded tensor). */
+    SemanticResult r = analyze_source(
+        "dim N = *;\n"
+        "tensor G[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor F[R=N] : float, empty = 0.0;\n"
+        "tensor Z[R=N] : float, empty = 0.0;\n"
+        "init G = load(\"g.mtx\");\n"
+        "init F = [1.0, 0.0, 0.0, 0.0];\n"
+        "Z[d] = G[s,d] . F[s] :: map(mul, intersect) reduce(add, union);\n");
+    ASSERT_INT_EQ(0, r.error_count);
+    semantic_result_free(&r);
+}
+
+TEST(test_semantic_unpinned_inferred_dim_errors) {
+    SemanticResult r = analyze_source(
+        "dim N = *;\n"
+        "tensor F[R=N] : float, empty = 0.0;\n"
+        "init F = [1.0, 0.0];\n"
+        "Z[d] = F[d] . F[d] :: map(add, union) reduce(add, union);\n");
+    ASSERT_TRUE(r.error_count > 0);
+    semantic_result_free(&r);
+}
+
+TEST(test_semantic_save_unknown_tensor_errors) {
+    SemanticResult r = analyze_source(
+        "dim N = 2;\n"
+        "tensor F[R=N] : float, empty = 0.0;\n"
+        "init F = [1.0, 0.0];\n"
+        "Z[d] = F[d] . F[d] :: map(add, union) reduce(add, union);\n"
+        "save: Q -> \"out.mtx\";\n");
+    ASSERT_TRUE(r.error_count > 0);
+    semantic_result_free(&r);
+}
+
 int main(void) {
     RUN_TEST(test_valid_gemm);
     RUN_TEST(test_undeclared_dim);
@@ -394,5 +450,9 @@ int main(void) {
     RUN_TEST(test_cascade_cross_gen_not_read);
     RUN_TEST(test_take_left_map_valid);
     RUN_TEST(test_take_left_reduce_is_error);
+    RUN_TEST(test_semantic_records_inferred_dim);
+    RUN_TEST(test_semantic_literal_init_on_inferred_dim_ok);
+    RUN_TEST(test_semantic_unpinned_inferred_dim_errors);
+    RUN_TEST(test_semantic_save_unknown_tensor_errors);
     return test_report();
 }

@@ -12,6 +12,7 @@
 typedef struct {
     char *name;
     int size;
+    int is_inferred;   /* `dim N = *;` — size resolved at runtime from a load */
 } DimEntry;
 
 typedef struct {
@@ -22,7 +23,8 @@ typedef struct {
     double empty_val;
     int dim_sizes[8];
     int gen_axis;   /* index of generational rank, or -1 */
-    int has_init;   /* 1 if an `init` statement provides this tensor's values */
+    int has_init;            /* 1 if an `init` statement provides this tensor's values */
+    int loaded_from_file;    /* 1 if init is `load("...")` */
 } TensorEntry;
 
 typedef struct {
@@ -63,6 +65,8 @@ typedef struct {
     /* Intra-generation intermediate tensors (gen-rank, written at offset i). */
     char *intermediates[MAX_TENSORS];   /* borrowed names */
     int num_intermediates;
+    char *save_tensor;   /* tensor named in `save: X -> "..."` (borrowed), or NULL */
+    char *save_path;     /* path in the save directive (borrowed), or NULL */
 } SymbolTable;
 
 typedef struct {

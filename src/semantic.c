@@ -62,6 +62,7 @@ static void analyze_dim_decl(SemanticResult *res, AstNode *node) {
     }
     st->dims[st->num_dims].name = d->name;
     st->dims[st->num_dims].size = d->size;
+    st->dims[st->num_dims].is_inferred = d->is_inferred;
     st->num_dims++;
 }
 
@@ -120,7 +121,7 @@ static void analyze_tensor_decl(SemanticResult *res, AstNode *node) {
    Returns 1 on success, 0 on failure (error already added). */
 static int check_init_shape(SemanticResult *res, LiteralData *data,
                              int depth, int num_ranks, int *dim_sizes,
-                             const char *tensor_name) {
+                             int *dim_inferred, const char *tensor_name) {
     if (depth == num_ranks) {
         /* expect a scalar here */
         if (data->is_list) {
@@ -141,7 +142,9 @@ static int check_init_shape(SemanticResult *res, LiteralData *data,
 
     int expected = dim_sizes[depth];
     int actual = data->data.list.count;
-    if (actual != expected) {
+    /* Inferred dims have no compile-time size; a literal init's length is only
+       checked against the loaded shape at runtime (see codegen shape assert). */
+    if (!dim_inferred[depth] && actual != expected) {
         add_error(res,
                   "init for tensor '%s': at depth %d expected %d elements, got %d",
                   tensor_name, depth, expected, actual);
@@ -151,7 +154,8 @@ static int check_init_shape(SemanticResult *res, LiteralData *data,
     int ok = 1;
     for (int i = 0; i < actual; i++) {
         if (!check_init_shape(res, data->data.list.items[i],
-                              depth + 1, num_ranks, dim_sizes, tensor_name)) {
+                              depth + 1, num_ranks, dim_sizes, dim_inferred,
+                              tensor_name)) {
             ok = 0;
         }
     }
@@ -168,17 +172,35 @@ static void analyze_init(SemanticResult *res, AstNode *node) {
         return;
     }
     te->has_init = 1;
+    te->loaded_from_file = d->is_load;
 
-    /* Build spatial dim sizes (excluding the generational axis, if any). */
+    /* load("...") inits have no literal data; skip shape checking. */
+    if (d->is_load) return;
+
+    /* Build spatial dim sizes (excluding the generational axis, if any),
+       and a parallel flag marking which axes are inferred (`dim = *`). */
     int spatial_sizes[8];
+    int spatial_inferred[8];
     int spatial_ranks = 0;
     for (int i = 0; i < te->num_ranks; i++) {
         if (i == te->gen_axis) continue;
-        spatial_sizes[spatial_ranks++] = te->dim_sizes[i];
+        spatial_sizes[spatial_ranks] = te->dim_sizes[i];
+        int inferred = 0;
+        const char *dn = te->ranks[i].dim_name;
+        if (dn) {
+            for (int k = 0; k < st->num_dims; k++) {
+                if (strcmp(st->dims[k].name, dn) == 0) {
+                    inferred = st->dims[k].is_inferred;
+                    break;
+                }
+            }
+        }
+        spatial_inferred[spatial_ranks] = inferred;
+        spatial_ranks++;
     }
 
     check_init_shape(res, d->data, 0, spatial_ranks, spatial_sizes,
-                     d->tensor_name);
+                     spatial_inferred, d->tensor_name);
 }
 
 /* ---- Index tracking for einsum ---- */
@@ -594,6 +616,35 @@ SemanticResult semantic_analyze(AstNode *program) {
                 "cross-generational tensor '%s' must be read at generation i "
                 "somewhere in the cascade", gt);
         }
+    }
+
+    /* Save directive: target must be a declared tensor. */
+    for (int i = 0; i < pd->count; i++) {
+        AstNode *s = pd->statements[i];
+        if (s->type != NODE_SAVE) continue;
+        if (!symtab_find_tensor(st, s->data.save.tensor_name)) {
+            add_error(&res, "save: unknown tensor '%s'", s->data.save.tensor_name);
+            continue;
+        }
+        st->save_tensor = s->data.save.tensor_name;  /* borrowed */
+        st->save_path   = s->data.save.path;          /* borrowed */
+    }
+
+    /* Every inferred dim must be pinned by a loaded tensor. */
+    for (int d = 0; d < st->num_dims; d++) {
+        if (!st->dims[d].is_inferred) continue;
+        int pinned = 0;
+        for (int t = 0; t < st->num_tensors && !pinned; t++) {
+            if (!st->tensors[t].loaded_from_file) continue;
+            for (int k = 0; k < st->tensors[t].num_ranks; k++) {
+                const char *dn = st->tensors[t].ranks[k].dim_name;
+                if (dn && strcmp(dn, st->dims[d].name) == 0) { pinned = 1; break; }
+            }
+        }
+        if (!pinned)
+            add_error(&res,
+                      "inferred dim '%s' is not pinned by any load(...) tensor",
+                      st->dims[d].name);
     }
 
     return res;
