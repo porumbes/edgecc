@@ -125,6 +125,38 @@ See `docs/superpowers/specs/2026-06-02-edgecc-multi-cross-gen-tensors-c1-design.
 
 Rank variables in expressions bind to declared rank names by position. Built-in compute operators: `add`, `sub`, `mul`, `min`, `max`, `and`, `or`, `take_left` (map-only — emits its left operand verbatim; pair with the `take_left_only` or `intersect` merge for a value-preserving mask; using it as a `reduce` operator is an error). Built-in merge operators (optional second arg, default `passthrough`): `passthrough`, `nopass`, `intersect`, `take_left`, `take_left_only`, `take_right`, `take_right_only`, `xor`, `union`. Omitting the merge argument preserves v1 source-program semantics.
 
+### File input/output
+
+A tensor may be initialized from a file instead of inline literals, and the
+output may be written to a file:
+
+```
+dim N = *;                                  // dimension inferred from the loaded file
+tensor G[R=N, C=N] : float, empty = 0.0;
+tensor F[R=N]      : float, empty = 0.0;
+tensor Z[R=N]      : float, empty = 0.0;
+init G = load("graph.mtx");                 // dense-materialized from Matrix Market
+init F = [1.0, 0.0, 0.0, 0.0];              // inline literals still work
+Z[d] = G[s,d] . F[s] :: map(mul, intersect) reduce(add, union);
+save: Z -> "result.mtx";                    // written after run()
+```
+
+`load("path")` reads a Matrix Market (`.mtx`) file and **densifies** it into the
+normal nested-list representation (the compute stays dense). `dim N = *;` infers
+the size from a loaded tensor at runtime; an inferred dim must be pinned by at
+least one `load(...)` tensor (else a compile-time error). A literal init on an
+inferred-dim tensor is not shape-checked at compile time; its length is verified
+against the loaded shape at runtime. `save: T -> "path";` writes tensor `T` after
+`run()` (1-D results are stored as a column). Generated programs accept
+positional argv overrides for the file-backed inputs (in
+`__edgecc_meta__["file_inputs"]` order); run with `-h` for usage. See
+`examples/load_push.edge`.
+
+**Runtime dependency:** `load`/`save` require `scipy` (`pip install scipy`),
+lazily imported only when used. The e2e harness skips `.mtx` tests when scipy is
+absent (mark such tests with a `needs_scipy` file). See the design spec:
+`docs/superpowers/specs/2026-06-07-edgecc-file-io-design.md`.
+
 ## Generated Python ABI
 
 ```python
@@ -149,6 +181,8 @@ if __name__ == "__main__":
 ```
 
 The `if __name__ == "__main__"` block constructs inputs from `init` declarations and prints the output. Iterative drivers import the module and call `run()` repeatedly with feedback applied between iterations (see `tests/e2e/iterative/run_iterative.py`).
+
+When a program uses `load`/`save`, the module also defines `_edgecc_load`/`_edgecc_save` helpers (scipy, lazily imported), `__edgecc_meta__` gains a `"file_inputs"` list, and inferred dims (`dim N = *`) are derived inside `run()` from the input shapes (e.g. `N = len(G)`) rather than emitted as module constants.
 
 ## Iterative Tests
 
@@ -192,4 +226,4 @@ Coverage is Tier 1 only — static dropdowns for compute / merge / type / empty-
 
 ## v2 Scope Limitations
 
-Not yet supported: multi-operation expressions with compute labels, the `<<` update compute operator, the remaining gaps for full 3-step BFS (unary `¬`, multi-output return, `ANY` compute, occupancy (`‖F‖≡0`) termination), and nested cascades / multiple generational ranks — single-Einsum generational ranks and cascades with one **or more** cross-generational tensors (e.g. Bellman-Ford; naive reachability BFS) are supported; see "Generational (iterative) ranks", anonymous tensors / parenthesized sub-expressions, unary functions, the 7 (No,No)→Yes merge operators (NOR, equivalence, NAND, ¬→, ¬←, ⇐, ⇒), file-based init, sparse tensor storage, optimizations of any kind, user-defined compute operators.
+Not yet supported: multi-operation expressions with compute labels, the `<<` update compute operator, the remaining gaps for full 3-step BFS (unary `¬`, multi-output return, `ANY` compute, occupancy (`‖F‖≡0`) termination), and nested cascades / multiple generational ranks — single-Einsum generational ranks and cascades with one **or more** cross-generational tensors (e.g. Bellman-Ford; naive reachability BFS) are supported; see "Generational (iterative) ranks", anonymous tensors / parenthesized sub-expressions, unary functions, the 7 (No,No)→Yes merge operators (NOR, equivalence, NAND, ¬→, ¬←, ⇐, ⇒), sparse tensor storage, optimizations of any kind, user-defined compute operators. File-based init is now supported for Matrix Market (`.mtx`) via `load`/`save` (see "File input/output"); it **densifies on load** — sparse *compute* (CSR/CSC/COO iteration in the generated loops) remains part of the deferred sparse-tensor-storage work, as does loading non-`.mtx` formats and a proper EDGE-native CLI for input paths.

@@ -1,0 +1,9 @@
+// One dense push step over a graph loaded from Matrix Market.
+dim N = *;
+tensor G[R=N, C=N] : float, empty = 0.0;
+tensor F[R=N]      : float, empty = 0.0;
+tensor Z[R=N]      : float, empty = 0.0;
+init G = load("load_push.mtx");
+init F = [1.0, 0.0, 0.0, 0.0];
+Z[d] = G[s,d] . F[s] :: map(mul, intersect) reduce(add, union);
+save: Z -> "load_push_out.mtx";
