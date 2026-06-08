@@ -61,8 +61,8 @@ break**.
 
 ## Architecture
 
-The change spans three well-bounded layers; the einsum/loop lowering and the `run()` body
-are untouched.
+The change threads a new init kind through the pipeline (lex/parse/AST → semantic → IR →
+codegen `__main__`); the einsum/loop lowering and the `run()` body are untouched.
 
 ### 1. Surface → AST (`src/lexer.l`, `src/parser.y`, `src/ast.h/c`)
 
@@ -107,8 +107,14 @@ D = run(W, D)
 
 ### 4. IR (`src/ir.h/c`)
 
-No change. `seed` only affects how the init *input* is constructed in `__main__`; the IR
-lowering of the einsum is identical, and `--dump-ir` output is unaffected.
+Inits flow through the IR as `IR_TENSOR_INIT` (codegen reads the init from the IR, not the
+AST), so `IRTensorInit` gains the seed fields (`is_seed`, `seed_source`, `seed_value`) and
+`emit_tensor_inits` copies them from the AST — mirroring how it already copies `is_load`/
+`path`. The **einsum/loop lowering is unchanged** (no new loop, load, map, reduce, or store
+instructions), and `--dump-ir` is otherwise unaffected. To keep the diff small and avoid
+touching every existing `is_load` read site, the new kind is an **additive `is_seed` flag**
+(a literal init is `is_load == 0 && is_seed == 0`) rather than replacing `is_load` with an
+enum.
 
 ## Testing strategy
 
