@@ -111,6 +111,12 @@ TEST(test_save_keyword) {
     yy_delete_buffer(buf);
 }
 
+TEST(test_lex_seed_keyword) {
+    YY_BUFFER_STATE buf = yy_scan_string("seed");
+    ASSERT_INT_EQ(TOK_SEED, yylex());
+    yy_delete_buffer(buf);
+}
+
 TEST(test_star_token) {
     YY_BUFFER_STATE buf = yy_scan_string("*");
     ASSERT_INT_EQ('*', yylex());
@@ -147,6 +153,7 @@ int main(void) {
     RUN_TEST(test_map_reduce_keywords);
     RUN_TEST(test_load_keyword);
     RUN_TEST(test_save_keyword);
+    RUN_TEST(test_lex_seed_keyword);
     RUN_TEST(test_star_token);
     RUN_TEST(test_arrow_token);
     RUN_TEST(test_string_literal);

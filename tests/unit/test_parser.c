@@ -216,6 +216,22 @@ TEST(test_parse_init_load) {
     yy_delete_buffer(buf);
 }
 
+TEST(test_parse_init_seed) {
+    YY_BUFFER_STATE buf = yy_scan_string("init D = seed(source=2, value=0.0);");
+    ASSERT_INT_EQ(0, yyparse());
+    ASSERT_NOT_NULL(parse_result);
+    AstNode *init = parse_result->data.program.statements[0];
+    ASSERT_INT_EQ(NODE_INIT, init->type);
+    ASSERT_STR_EQ("D", init->data.init.tensor_name);
+    ASSERT_INT_EQ(0, init->data.init.is_load);
+    ASSERT_INT_EQ(1, init->data.init.is_seed);
+    ASSERT_INT_EQ(2, init->data.init.seed_source);
+    ASSERT_TRUE(init->data.init.seed_value == 0.0);
+    ast_free(parse_result);
+    parse_result = NULL;
+    yy_delete_buffer(buf);
+}
+
 TEST(test_parse_save_directive) {
     YY_BUFFER_STATE buf = yy_scan_string("save: Z -> \"out.mtx\";\n");
     ASSERT_INT_EQ(0, yyparse());
@@ -242,6 +258,7 @@ int main(void) {
     RUN_TEST(test_parse_stop_stmt);
     RUN_TEST(test_parse_inferred_dim);
     RUN_TEST(test_parse_init_load);
+    RUN_TEST(test_parse_init_seed);
     RUN_TEST(test_parse_save_directive);
     return test_report();
 }

@@ -62,6 +62,19 @@ AstNode *ast_init_load_new(char *tensor_name, char *path) {
     return node;
 }
 
+AstNode *ast_init_seed_new(char *tensor_name, int source, double value) {
+    AstNode *node = calloc(1, sizeof(AstNode));
+    node->type = NODE_INIT;
+    node->data.init.tensor_name = tensor_name;
+    node->data.init.is_load = 0;
+    node->data.init.is_seed = 1;
+    node->data.init.data = NULL;
+    node->data.init.path = NULL;
+    node->data.init.seed_source = source;
+    node->data.init.seed_value = value;
+    return node;
+}
+
 AstNode *ast_dim_decl_inferred_new(char *name) {
     AstNode *node = calloc(1, sizeof(AstNode));
     node->type = NODE_DIM_DECL;
