@@ -541,6 +541,9 @@ SemanticResult semantic_analyze(AstNode *program) {
             case NODE_STOP:
                 analyze_stop(&res, stmt);
                 break;
+            case NODE_SAVE:
+                /* Validated in a dedicated pass below (needs all tensors). */
+                break;
             default:
                 add_error(&res, "unknown statement type %d", stmt->type);
                 break;
