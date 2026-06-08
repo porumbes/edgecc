@@ -48,12 +48,30 @@ def run_test(test_dir, edgecc_bin):
             expected = f.read().strip()
         actual = result.stdout.strip()
 
-        if actual == expected:
-            print(f"  PASS {name}")
-            return True
-        else:
+        if actual != expected:
             print(f"  FAIL {name}: expected '{expected}', got '{actual}'")
             return False
+
+        # Round-trip check: re-read a saved .mtx and compare to expected values.
+        rt = os.path.join(test_dir, "roundtrip_check")
+        if os.path.exists(rt) and HAVE_SCIPY:
+            from scipy.io import mmread
+            saved = os.path.join(test_dir, "result.mtx")
+            if not os.path.exists(saved):
+                print(f"  FAIL {name}: expected saved result.mtx not found")
+                return False
+            m = mmread(saved)
+            arr = m.toarray() if hasattr(m, "toarray") else m
+            vals = arr.flatten().tolist()
+            with open(rt) as f:
+                want = [float(x) for x in f.read().split()]
+            os.unlink(saved)
+            if vals != want:
+                print(f"  FAIL {name}: round-tripped {vals} != expected {want}")
+                return False
+
+        print(f"  PASS {name}")
+        return True
     finally:
         os.unlink(tmp_py)
 

@@ -1,0 +1,9 @@
+// Load a graph, run one push step, save the result, then re-read it (runner).
+dim N = *;
+tensor G[R=N, C=N] : float, empty = 0.0;
+tensor F[R=N]      : float, empty = 0.0;
+tensor Z[R=N]      : float, empty = 0.0;
+init G = load("graph.mtx");
+init F = [1.0, 0.0, 0.0, 0.0];
+Z[d] = G[s,d] . F[s] :: map(mul, intersect) reduce(add, union);
+save: Z -> "result.mtx";
