@@ -521,20 +521,26 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
     /* Detect generational mode and capture the gen-loop metadata. */
     int iterative = 0;
     const char *cross_gens[8]; int num_cross_gens = 0;
+    double cross_gen_empty[8];
     const char *watch = NULL;
     const char *intermediates[8];
+    double intermediate_empty[8];
     int num_intermediates = 0;
     for (int i = 0; i < ir->count; i++) {
         if (ir->instrs[i].type == IR_GEN_LOOP_BEGIN) {
             IRGenLoop *gl = &ir->instrs[i].data.gen_loop;
             iterative = 1;
             num_cross_gens = gl->num_cross_gens;
-            for (int j = 0; j < num_cross_gens && j < 8; j++)
+            for (int j = 0; j < num_cross_gens && j < 8; j++) {
                 cross_gens[j] = gl->cross_gens[j].name;
+                cross_gen_empty[j] = gl->cross_gens[j].empty_val;
+            }
             watch = gl->watch;
             num_intermediates = gl->num_intermediates;
-            for (int j = 0; j < num_intermediates && j < 8; j++)
+            for (int j = 0; j < num_intermediates && j < 8; j++) {
                 intermediates[j] = gl->intermediates[j].name;
+                intermediate_empty[j] = gl->intermediates[j].empty_val;
+            }
             break;
         }
     }
@@ -944,8 +950,26 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
                     cb_appendf(&cb, "\"%s\"", intermediates[m]); _first = 0;
                 }
             }
+            /* Per-tensor empty value so the renderer can tell "active" (non-empty)
+               from empty regardless of semiring (e.g. min-plus source dist 0.0). */
+            cb_append(&cb, "], \"empty\": {");
+            {
+                int _first = 1;
+                for (int c = 0; c < num_cross_gens; c++) {
+                    char *ev = format_double_literal(cross_gen_empty[c]);
+                    if (!_first) cb_append(&cb, ", ");
+                    cb_appendf(&cb, "\"%s\": %s", cross_gens[c], ev);
+                    free(ev); _first = 0;
+                }
+                for (int m = 0; m < num_intermediates; m++) {
+                    char *ev = format_double_literal(intermediate_empty[m]);
+                    if (!_first) cb_append(&cb, ", ");
+                    cb_appendf(&cb, "\"%s\": %s", intermediates[m], ev);
+                    free(ev); _first = 0;
+                }
+            }
             cb_appendf(&cb,
-                "], \"watch\": \"%s\", \"steps\": _tr}, open(\"%s.trace.json\", \"w\"))\n",
+                "}, \"watch\": \"%s\", \"steps\": _tr}, open(\"%s.trace.json\", \"w\"))\n",
                 watch ? watch : "", kernel_name);
         }
     }

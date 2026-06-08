@@ -1,0 +1,14 @@
+{
+  "schema": "edgecc-trace/1",
+  "kernel": "bellman_ford",
+  "dims": {"N": 4},
+  "gen_tensors": ["D", "T"],
+  "empty": {"D": 999.0, "T": 999.0},
+  "watch": "D",
+  "steps": [
+    {"kind": "generation", "gen": 0, "tensors": {"D": [0.0, 999.0, 999.0, 999.0]}},
+    {"kind": "generation", "gen": 1, "tensors": {"D": [0.0, 1.0, 4.0, 999.0], "T": [999.0, 1.0, 4.0, 999.0]}},
+    {"kind": "generation", "gen": 2, "tensors": {"D": [0.0, 1.0, 3.0, 6.0], "T": [999.0, 1.0, 3.0, 6.0]}},
+    {"kind": "generation", "gen": 3, "tensors": {"D": [0.0, 1.0, 3.0, 6.0], "T": [999.0, 1.0, 3.0, 6.0]}}
+  ]
+}

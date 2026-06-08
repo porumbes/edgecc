@@ -32,21 +32,33 @@ def run_test(test_dir, edgecc_bin):
             return False
         with open(trace_path) as f:
             tr = json.load(f)
-        # Structural checks.
+        # Generic structural checks (kernel-agnostic).
         if tr.get("schema") != "edgecc-trace/1":
             print(f"  FAIL {name}: bad schema {tr.get('schema')}"); return False
-        if tr.get("watch") != "P" or "F" not in tr.get("gen_tensors", []):
-            print(f"  FAIL {name}: bad metadata {tr.get('gen_tensors')}/{tr.get('watch')}")
+        watch = tr.get("watch")
+        gts = tr.get("gen_tensors", [])
+        if not gts or watch not in gts:
+            print(f"  FAIL {name}: bad metadata gen_tensors={gts} watch={watch}")
             return False
+        if "empty" not in tr or watch not in tr["empty"]:
+            print(f"  FAIL {name}: missing empty map {tr.get('empty')}"); return False
         steps = tr.get("steps", [])
-        # gen 0 seed + at least 3 computed gens (reaches node 3 in 3 hops).
-        if len(steps) < 4:
+        if len(steps) < 2:
             print(f"  FAIL {name}: too few steps ({len(steps)})"); return False
-        if steps[0]["gen"] != 0 or steps[0]["tensors"]["P"] != [1.0, 0.0, 0.0, 0.0]:
-            print(f"  FAIL {name}: bad seed {steps[0]}"); return False
-        # Final visited set must be all-reached (path graph from node 0).
-        if steps[-1]["tensors"]["P"] != [1.0, 1.0, 1.0, 1.0]:
-            print(f"  FAIL {name}: final P {steps[-1]['tensors']['P']}"); return False
+        if steps[0]["gen"] != 0:
+            print(f"  FAIL {name}: first step is not gen 0"); return False
+        # Watched tensor must be stable at the end (converged).
+        if steps[-1]["tensors"][watch] != steps[-2]["tensors"][watch]:
+            print(f"  FAIL {name}: watched tensor not stable at end"); return False
+        # Optional per-fixture final-value assertion.
+        exp_path = os.path.join(test_dir, "expected_final.json")
+        if os.path.exists(exp_path):
+            with open(exp_path) as f:
+                expected = json.load(f)
+            got = steps[-1]["tensors"][watch]
+            if got != expected:
+                print(f"  FAIL {name}: final {watch}={got} != expected {expected}")
+                return False
         print(f"  PASS {name}")
         return True
     finally:

@@ -78,12 +78,62 @@ def test_bad_color():
     except ImportError:
         print("  SKIP test_bad_color: scipy not installed")
 
+def test_active_edges_weighted():
+    # min-plus: empty=999; source node 0 holds real distance 0.0 and IS active.
+    adj = [[0, 1, 4, 0], [0, 0, 2, 6], [0, 0, 0, 3], [0, 0, 0, 0]]
+    prev = {"D": [0.0, 999.0, 999.0, 999.0]}
+    curr = {"D": [0.0, 1.0, 4.0, 999.0]}
+    edges = viz.active_edges(adj, prev, curr, "D", empty=999.0)
+    check("weighted active_edges lights source 0->1", (0, 1) in edges)
+    check("weighted active_edges lights source 0->2", (0, 2) in edges)
+    # Same with the wrong empty (0.0) would treat the source as inactive:
+    edges0 = viz.active_edges(adj, prev, curr, "D", empty=0.0)
+    check("empty=0.0 misses the source", (0, 1) not in edges0)
+
+def test_active_edges_2d_guard():
+    adj = [[0, 1], [0, 0]]
+    prev = {"T": [[1.0, 0.0], [0.0, 1.0]]}
+    curr = {"T": [[1.0, 1.0], [0.0, 1.0]]}
+    check("active_edges returns empty for 2-D", viz.active_edges(adj, prev, curr, "T") == set())
+
+def test_render_weighted_with_intermediate():
+    try:
+        import matplotlib, networkx, scipy  # noqa: F401
+    except ImportError:
+        print("  SKIP test_render_weighted_with_intermediate: deps not installed")
+        return
+    import tempfile, glob
+    out = tempfile.mkdtemp()
+    # Bellman-Ford-style: intermediate T absent at gen 0; weighted distances; empty=999.
+    viz.main([os.path.join(HERE, "sample_bf", "trace.json"),
+              "--graph", os.path.join(HERE, "sample_bf", "graph.mtx"), "-o", out])
+    frames = sorted(glob.glob(os.path.join(out, "gen_*.png")))
+    check("BF render produced 4 frames", len(frames) == 4)
+    check("BF frames non-empty", all(os.path.getsize(f) > 0 for f in frames))
+
+def test_render_2d_color_raises():
+    try:
+        import scipy  # noqa: F401
+    except ImportError:
+        print("  SKIP test_render_2d_color_raises: scipy not installed")
+        return
+    try:
+        viz.main([os.path.join(HERE, "sample_2d", "trace.json"),
+                  "--graph", os.path.join(HERE, "sample_2d", "graph.mtx"), "-o", "/tmp/x2d"])
+        check("2-D --color raises cleanly", False)
+    except ValueError:
+        check("2-D --color raises cleanly", True)
+
 test_load_trace()
 test_active_edges()
 test_bad_schema()
 test_render_frames()
 test_size_mismatch()
 test_bad_color()
+test_active_edges_weighted()
+test_active_edges_2d_guard()
+test_render_weighted_with_intermediate()
+test_render_2d_color_raises()
 
 print(f"\n{sum(results)}/{len(results)} viz checks passed")
 sys.exit(1 if not all(results) else 0)
