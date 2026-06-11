@@ -57,6 +57,7 @@ typedef struct {
     char **coords;
     int ncoords;
     int gen_read;   /* 0: not cross-gen; 1: read at i (-> _prev); 2: read at i+1 (-> _next) */
+    int negate;    /* 1 if this operand carried a unary `!` (existence complement) */
 } IRLoad;
 
 typedef struct {

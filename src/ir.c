@@ -172,6 +172,7 @@ static void emit_einsum(IRProgram *ir, AstNode *einsum_node, SymbolTable *symtab
         instr->data.load.coords = dup_coords_strip(e->input1.rank_vars,
             e->input1.num_vars, in1_te->gen_axis, &instr->data.load.ncoords);
         instr->data.load.gen_read = gen_read_kind(symtab, &e->input1, in1_te);
+        instr->data.load.negate = e->input1.negate;
     }
     /* LOAD input2 -> reg 1 */
     {
@@ -181,6 +182,7 @@ static void emit_einsum(IRProgram *ir, AstNode *einsum_node, SymbolTable *symtab
         instr->data.load.coords = dup_coords_strip(e->input2.rank_vars,
             e->input2.num_vars, in2_te->gen_axis, &instr->data.load.ncoords);
         instr->data.load.gen_read = gen_read_kind(symtab, &e->input2, in2_te);
+        instr->data.load.negate = e->input2.negate;
     }
 
     /* MAP: reg 2 = map_op(reg 0, reg 1) */
@@ -392,8 +394,9 @@ void ir_dump(IRProgram *ir, FILE *out) {
                 fprintf(out, "LOOP_END\n");
                 break;
             case IR_LOAD:
-                fprintf(out, "LOAD(r%d, %s%s, ", instr->data.load.reg,
+                fprintf(out, "LOAD(r%d, %s%s%s, ", instr->data.load.reg,
                         instr->data.load.tensor_name,
+                        instr->data.load.negate ? " [neg]" : "",
                         instr->data.load.gen_read ? " [gen_read]" : "");
                 dump_coords(out, instr->data.load.coords, instr->data.load.ncoords);
                 fprintf(out, ")\n");

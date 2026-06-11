@@ -67,6 +67,31 @@ TEST(test_ir_gemm_structure) {
     ast_free(ast);
 }
 
+TEST(test_ir_load_carries_negate) {
+    AstNode *ast = parse(
+        "dim N = 3;\n"
+        "tensor Z[R=N] : float, empty = 0.0;\n"
+        "tensor A[R=N] : float, empty = 0.0;\n"
+        "tensor B[R=N] : float, empty = 0.0;\n"
+        "init A = [1.0, 0.0, 1.0];\n"
+        "init B = [0.0, 1.0, 0.0];\n"
+        "Z[d] = A[d] . !B[d] :: map(take_left, intersect) reduce(or, union);\n"
+    );
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    ASSERT_NOT_NULL(ir);
+    int saw_neg = 0, saw_plain = 0;
+    for (int i = 0; i < ir->count; i++) {
+        if (ir->instrs[i].type != IR_LOAD) continue;
+        if (ir->instrs[i].data.load.negate) saw_neg = 1;
+        else saw_plain = 1;
+    }
+    ASSERT_INT_EQ(1, saw_neg);
+    ASSERT_INT_EQ(1, saw_plain);
+    ast_free(ast);
+}
+
 TEST(test_ir_loop_order) {
     AstNode *ast = parse(
         "dim M = 2; dim K = 3; dim N = 2;\n"
@@ -373,6 +398,7 @@ TEST(test_ir_save_instruction) {
 
 int main(void) {
     RUN_TEST(test_ir_gemm_structure);
+    RUN_TEST(test_ir_load_carries_negate);
     RUN_TEST(test_ir_loop_order);
     RUN_TEST(test_ir_carries_merge_and_identity);
     RUN_TEST(test_ir_default_merge_is_passthrough);
