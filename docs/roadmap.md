@@ -12,8 +12,9 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 | Einsum expressions with Map / Reduce semirings | ✅ |
 | Compute ops — `add` `sub` `mul` `min` `max` `and` `or` `take_left` | ✅ |
 | Merge ops — 9 of 16 (`passthrough` `nopass` `intersect` `take_left[_only]` `take_right[_only]` `xor` `union`) | 🚧 |
+| Unary complement `!` (the paper's `¬`) — per-operand existence complement | ✅ |
 | `<<` update op · compute labels · multi-operation expressions | ❌ |
-| Anonymous tensors / sub-expressions · unary funcs · user-defined ops | ❌ |
+| Anonymous tensors / sub-expressions · user-defined unary funcs · user-defined ops | ❌ |
 | **Iteration** | |
 | Generational ranks (`gen`, `stop: stable`) | ✅ |
 | Cascades with ≥1 cross-generational tensor | ✅ |
@@ -21,7 +22,7 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 | **Graph algorithms** | |
 | SSSP / Bellman–Ford (min-plus) | ✅ |
 | Reachability BFS | ✅ |
-| Paper-faithful 3-step BFS (`¬`, multi-action, `ANY`/parent, occupancy stop) | 🚧 |
+| Paper-faithful 3-step BFS (multi-action, `ANY`/parent, occupancy stop; unary `¬`=`!` done ✅) | 🚧 |
 | **Data & I/O** | |
 | Inline `init` literals | ✅ |
 | Matrix Market `load` / `save` (densify-on-load) | ✅ |
@@ -51,6 +52,7 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 ### Implemented ✅
 - **Pipeline:** `.edge` → Lexer → Parser → AST → Semantic → IR → Python codegen (pure nested loops).
 - **Semirings:** `map(compute, merge) reduce(compute, merge)` over the 8 compute ops and 9 merge ops above.
+- **Unary complement `!`** (the paper's `¬`): per-operand existence complement; paper-faithful BFS masking `A . !B :: map(take_left, intersect)`, equivalent to the `take_left_only` encoding (`examples/push_bfs_neg.edge`).
 - **Generational ranks** (`gen`) with `stop: stable(T)`; internal double-buffered loop in `run()`.
 - **Cascades:** multiple Einsums per generation, one or more cross-generational tensors plus intra-generation intermediates (Bellman–Ford, reachability BFS).
 - **File I/O:** Matrix Market `load`/`save`, inferred dims `dim N = *`, argv path overrides; densify-on-load (compute stays dense).
@@ -61,7 +63,7 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 
 ### Partial 🚧
 - **Merge ops:** 9 of 16 shipped; the 7 `(No,No)→Yes` operators (NOR, equivalence, NAND, ¬→, ¬←, ⇐, ⇒) are not implemented.
-- **BFS (paper-faithful):** masking / pruned / depth BFS work; the full 3-step formulation still needs unary `¬`, multi-action Einsums, multi-output return, `ANY`/parent-pointer, and occupancy (`‖F‖≡0`) termination.
+- **BFS (paper-faithful):** masking / pruned / depth BFS work, and unary `¬` (as `!`) now expresses the mask directly (`A . !B :: map(take_left, intersect)`); the full 3-step formulation still needs multi-action Einsums, multi-output return, `ANY`/parent-pointer, and occupancy (`‖F‖≡0`) termination.
 
 ### Planned ❌ (by area)
 - **Language:** `<<` update op; compute labels & multi-operation expressions; nested cascades / multiple generational ranks; anonymous tensors & parenthesized sub-expressions; unary functions; user-defined compute ops; the 7 remaining merge ops.
