@@ -89,6 +89,8 @@ TEST(test_ir_load_carries_negate) {
     }
     ASSERT_INT_EQ(1, saw_neg);
     ASSERT_INT_EQ(1, saw_plain);
+    ir_free(ir);
+    semantic_result_free(&sem);
     ast_free(ast);
 }
 

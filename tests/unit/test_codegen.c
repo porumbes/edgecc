@@ -72,6 +72,8 @@ TEST(test_codegen_negated_operand) {
     ASSERT_TRUE(strstr(code, "b_exists = b_val == 0.0") != NULL);
     ASSERT_TRUE(strstr(code, "b_op = 1.0 if b_exists else 0.0") != NULL);
     free(code);
+    ir_free(ir);
+    semantic_result_free(&sem);
     ast_free(ast);
 }
 
