@@ -48,7 +48,7 @@
 
 [a-zA-Z_][a-zA-Z0-9_]* { yylval.str_val = strdup(yytext); return TOK_IDENT; }
 
-[=\.\,\;\:\[\]\(\)+*]  { return yytext[0]; }
+[=\.\,\;\:\[\]\(\)+*!]  { return yytext[0]; }
 
 .                   { fprintf(stderr, "lexer error: unexpected character '%c'\n", yytext[0]); }
 

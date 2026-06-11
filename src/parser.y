@@ -108,7 +108,7 @@ static void litlist_add(LitList *ll, LiteralData *lit) {
 %token <str_val> TOK_STRING_LIT
 
 %type <node> program stmt_list stmt dim_decl tensor_decl init_stmt einsum_stmt stop_stmt save_stmt
-%type <ptr> rank_pair_list ident_list nested_literal lit_list tensor_ref
+%type <ptr> rank_pair_list ident_list nested_literal lit_list tensor_ref map_operand
 %type <datatype> datatype
 %type <float_val> literal_value seed_value
 %type <mergeop> merge_arg
@@ -295,7 +295,7 @@ lit_list:
     ;
 
 einsum_stmt:
-    tensor_ref '=' tensor_ref '.' tensor_ref TOK_DOUBLE_COLON
+    tensor_ref '=' map_operand '.' map_operand TOK_DOUBLE_COLON
         TOK_MAP '(' TOK_IDENT merge_arg ')'
         TOK_REDUCE '(' TOK_IDENT merge_arg ')' ';'
     {
@@ -314,6 +314,21 @@ einsum_stmt:
         free(out);
         free(in1);
         free(in2);
+    }
+    ;
+
+/* A map operand is a tensor ref, optionally prefixed with `!` (unary
+   complement). `!` is only valid here, not on the einsum output (LHS). */
+map_operand:
+    tensor_ref
+    {
+        $$ = $1;
+    }
+    | '!' tensor_ref
+    {
+        TensorRef *r = (TensorRef *)$2;
+        r->negate = 1;
+        $$ = (void *)r;
     }
     ;
 

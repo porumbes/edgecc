@@ -54,6 +54,29 @@ TEST(test_codegen_gemm) {
     ast_free(ast);
 }
 
+TEST(test_codegen_negated_operand) {
+    AstNode *ast = parse(
+        "dim N = 3;\n"
+        "tensor Z[R=N] : float, empty = 0.0;\n"
+        "tensor A[R=N] : float, empty = 0.0;\n"
+        "tensor B[R=N] : float, empty = 0.0;\n"
+        "init A = [1.0, 0.0, 1.0];\n"
+        "init B = [0.0, 1.0, 0.0];\n"
+        "Z[d] = A[d] . !B[d] :: map(take_left, intersect) reduce(or, union);\n"
+    );
+    SemanticResult sem = semantic_analyze(ast);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    char *code = codegen_python(ir);
+    ASSERT_NOT_NULL(code);
+    ASSERT_TRUE(strstr(code, "a_exists = a_val != 0.0") != NULL);
+    ASSERT_TRUE(strstr(code, "b_exists = b_val == 0.0") != NULL);
+    ASSERT_TRUE(strstr(code, "b_op = 1.0 if b_exists else 0.0") != NULL);
+    free(code);
+    ir_free(ir);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
 TEST(test_codegen_intersect_union) {
     AstNode *ast = parse(
         "dim S = 2; dim D = 2;\n"
@@ -434,6 +457,7 @@ TEST(test_codegen_seed_generational) {
 
 int main(void) {
     RUN_TEST(test_codegen_gemm);
+    RUN_TEST(test_codegen_negated_operand);
     RUN_TEST(test_codegen_intersect_union);
     RUN_TEST(test_codegen_generational);
     RUN_TEST(test_codegen_cascade_bellman_ford);

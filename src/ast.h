@@ -64,6 +64,7 @@ struct TensorRef {
     int num_vars;
     int gen_axis;    /* index of the coord written as `var + N`, else -1 */
     int gen_offset;  /* the N in `var + N` (0 when gen_axis == -1) */
+    int negate;      /* 1 if operand carries a unary `!` (existence complement) */
 };
 
 struct LiteralData {

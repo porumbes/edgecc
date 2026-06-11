@@ -1,0 +1,24 @@
+// Paper-faithful pruned push-BFS: the frontier is masked by the visited set
+// using the unary complement `!P` and intersection -- exactly the paper's
+// (G·F)·¬P gather/mask. Same graph and result as push_bfs.edge, which uses the
+// equivalent map(take_left, take_left_only) encoding.
+dim N = 6;
+
+tensor G[R=N, C=N]   : float, empty = 0.0;
+tensor C[gen I, R=N] : float, empty = 0.0;   // gathered candidates (intermediate, offset i)
+tensor F[gen I, R=N] : float, empty = 0.0;   // frontier (cross-generational)
+tensor P[gen I, R=N] : float, empty = 0.0;   // visited  (cross-generational)
+
+init G = [[0.0,1.0,1.0,0.0,0.0,0.0],
+          [0.0,0.0,0.0,1.0,0.0,0.0],
+          [0.0,0.0,0.0,1.0,1.0,0.0],
+          [0.0,0.0,0.0,0.0,0.0,1.0],
+          [0.0,0.0,0.0,0.0,0.0,1.0],
+          [0.0,0.0,0.0,0.0,0.0,0.0]];
+init F = [1.0,0.0,0.0,0.0,0.0,0.0];
+init P = [1.0,0.0,0.0,0.0,0.0,0.0];
+
+C[i, d]   = G[s,d] . F[i,s]   :: map(and, intersect) reduce(or, union);
+F[i+1, d] = C[i,d] . !P[i,d]  :: map(take_left, intersect) reduce(or, union);
+P[i+1, d] = P[i,d] . F[i+1,d] :: map(or, union) reduce(or, union);
+stop: stable(P);

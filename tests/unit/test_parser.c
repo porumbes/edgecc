@@ -75,6 +75,33 @@ TEST(test_parse_einsum) {
     yy_delete_buffer(buf);
 }
 
+TEST(test_parse_einsum_negated_operand) {
+    YY_BUFFER_STATE buf = yy_scan_string(
+        "Z[d] = A[d] . !B[d] :: map(take_left, intersect) reduce(or, union);");
+    ASSERT_INT_EQ(0, yyparse());
+    ASSERT_NOT_NULL(parse_result);
+    AstNode *es = parse_result->data.program.statements[0];
+    ASSERT_INT_EQ(NODE_EINSUM, es->type);
+    ASSERT_INT_EQ(0, es->data.einsum.input1.negate);
+    ASSERT_INT_EQ(1, es->data.einsum.input2.negate);
+    ast_free(parse_result);
+    parse_result = NULL;
+    yy_delete_buffer(buf);
+}
+
+TEST(test_parse_einsum_negated_left_operand) {
+    YY_BUFFER_STATE buf = yy_scan_string(
+        "Z[d] = !A[d] . B[d] :: map(and, intersect) reduce(or, union);");
+    ASSERT_INT_EQ(0, yyparse());
+    ASSERT_NOT_NULL(parse_result);
+    AstNode *es = parse_result->data.program.statements[0];
+    ASSERT_INT_EQ(1, es->data.einsum.input1.negate);
+    ASSERT_INT_EQ(0, es->data.einsum.input2.negate);
+    ast_free(parse_result);
+    parse_result = NULL;
+    yy_delete_buffer(buf);
+}
+
 TEST(test_parse_full_program) {
     const char *src =
         "dim M = 2;\n"
@@ -250,6 +277,8 @@ int main(void) {
     RUN_TEST(test_parse_tensor_decl);
     RUN_TEST(test_parse_init);
     RUN_TEST(test_parse_einsum);
+    RUN_TEST(test_parse_einsum_negated_operand);
+    RUN_TEST(test_parse_einsum_negated_left_operand);
     RUN_TEST(test_parse_full_program);
     RUN_TEST(test_parse_einsum_with_merge);
     RUN_TEST(test_parse_einsum_default_merge);

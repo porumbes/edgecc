@@ -73,6 +73,12 @@ TEST(test_plus_token) {
     yy_delete_buffer(buf);
 }
 
+TEST(test_bang_token) {
+    YY_BUFFER_STATE buf = yy_scan_string("!");
+    ASSERT_INT_EQ('!', yylex());
+    yy_delete_buffer(buf);
+}
+
 TEST(test_full_token_sequence) {
     YY_BUFFER_STATE buf = yy_scan_string("dim M = 4;");
     ASSERT_INT_EQ(TOK_DIM, yylex());
@@ -148,6 +154,7 @@ int main(void) {
     RUN_TEST(test_stop_keyword);
     RUN_TEST(test_stable_keyword);
     RUN_TEST(test_plus_token);
+    RUN_TEST(test_bang_token);
     RUN_TEST(test_full_token_sequence);
     RUN_TEST(test_comment_skipped);
     RUN_TEST(test_map_reduce_keywords);

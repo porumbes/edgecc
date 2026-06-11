@@ -338,16 +338,25 @@ static void emit_general_skeleton(CodeBuf *cb,
                        load2->data.load.coords, load2->data.load.ncoords);
     cb_append(cb, "\n");
 
-    /* MAP existence */
-    cb_indent(cb); cb_appendf(cb, "a_exists = a_val != %s\n", eA);
-    cb_indent(cb); cb_appendf(cb, "b_exists = b_val != %s\n", eB);
+    /* MAP existence. A negated operand (`!X`) is present exactly where X is
+       empty, so its existence test flips to `== empty`. */
+    cb_indent(cb);
+    cb_appendf(cb, "a_exists = a_val %s %s\n",
+               load1->data.load.negate ? "==" : "!=", eA);
+    cb_indent(cb);
+    cb_appendf(cb, "b_exists = b_val %s %s\n",
+               load2->data.load.negate ? "==" : "!=", eB);
 
     cb_indent(cb); cb_append(cb, "if ");
     emit_merge_guard(cb, map_i->data.map.merge_op, "a_exists", "b_exists");
     cb_append(cb, ":\n");
     cb->indent++;
-    cb_indent(cb); cb_appendf(cb, "a_op = a_val if a_exists else %s\n", eA);
-    cb_indent(cb); cb_appendf(cb, "b_op = b_val if b_exists else %s\n", eB);
+    cb_indent(cb);
+    cb_appendf(cb, "a_op = %s if a_exists else %s\n",
+               load1->data.load.negate ? "1.0" : "a_val", eA);
+    cb_indent(cb);
+    cb_appendf(cb, "b_op = %s if b_exists else %s\n",
+               load2->data.load.negate ? "1.0" : "b_val", eB);
 
     char compute_buf[256];
     cb_indent(cb); cb_append(cb, "map_val = ");

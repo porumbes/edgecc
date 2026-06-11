@@ -1,0 +1,7 @@
+dim N = 3;
+tensor Z[R=N] : float, empty = 0.0;
+tensor A[R=N] : float, empty = 0.0;
+tensor B[R=N] : float, empty = 0.0;
+init A = [1.0, 0.0, 1.0];
+init B = [0.0, 1.0, 0.0];
+!Z[d] = A[d] . B[d] :: map(or, union) reduce(or, union);
