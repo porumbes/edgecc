@@ -1,0 +1,22 @@
+// Push-BFS fused, with the fused reduce written using an explicit over= rank.
+// Round-trips the over= form against the implicit form (push_bfs_fused.edge);
+// same graph/result as push_bfs_neg.edge.
+dim N = 6;
+
+tensor G[R=N, C=N]   : float, empty = 0.0;
+tensor F[gen I, R=N] : float, empty = 0.0;   // frontier (cross-generational)
+tensor P[gen I, R=N] : float, empty = 0.0;   // visited  (cross-generational)
+
+init G = [[0.0,1.0,1.0,0.0,0.0,0.0],
+          [0.0,0.0,0.0,1.0,0.0,0.0],
+          [0.0,0.0,0.0,1.0,1.0,0.0],
+          [0.0,0.0,0.0,0.0,0.0,1.0],
+          [0.0,0.0,0.0,0.0,0.0,1.0],
+          [0.0,0.0,0.0,0.0,0.0,0.0]];
+init F = [1.0,0.0,0.0,0.0,0.0,0.0];
+init P = [1.0,0.0,0.0,0.0,0.0,0.0];
+
+F[i+1, d] = (G[s,d] .1 F[i,s]) .2 !P[i,d]
+  :: map.1(and,intersect) reduce.1(or,union, over=s) map.2(take_left,intersect);
+P[i+1, d] = P[i,d] . F[i+1,d] :: map(or,union) reduce(or,union);
+stop: stable(P);
