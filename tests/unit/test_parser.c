@@ -150,6 +150,28 @@ TEST(test_parse_fused_pull_paren_right) {
     ast_free(parse_result); parse_result = NULL; yy_delete_buffer(buf);
 }
 
+TEST(test_parse_fused_missing_map_fails) {
+    YY_BUFFER_STATE buf = yy_scan_string(
+        "F[d] = (G[s,d] .1 F[s]) .2 P[d] :: reduce.1(or,union) map.2(take_left,intersect);");
+    ASSERT_INT_EQ(1, yyparse());            /* no map.1 -> parse error */
+    if (parse_result) { ast_free(parse_result); parse_result = NULL; }
+    yy_delete_buffer(buf);
+}
+TEST(test_parse_fused_bad_action_label_fails) {
+    YY_BUFFER_STATE buf = yy_scan_string(
+        "F[d] = (G[s,d] .1 F[s]) .2 P[d] :: map.1(and,intersect) map.3(take_left,intersect);");
+    ASSERT_INT_EQ(1, yyparse());            /* map.3 invalid label */
+    if (parse_result) { ast_free(parse_result); parse_result = NULL; }
+    yy_delete_buffer(buf);
+}
+TEST(test_parse_fused_duplicate_map_fails) {
+    YY_BUFFER_STATE buf = yy_scan_string(
+        "F[d] = (G[s,d] .1 F[s]) .2 P[d] :: map.1(and,intersect) map.1(or,intersect) map.2(take_left,intersect);");
+    ASSERT_INT_EQ(1, yyparse());            /* duplicate map.1 */
+    if (parse_result) { ast_free(parse_result); parse_result = NULL; }
+    yy_delete_buffer(buf);
+}
+
 TEST(test_parse_full_program) {
     const char *src =
         "dim M = 2;\n"
@@ -330,6 +352,9 @@ int main(void) {
     RUN_TEST(test_parse_single_reduce_over);
     RUN_TEST(test_parse_fused_push);
     RUN_TEST(test_parse_fused_pull_paren_right);
+    RUN_TEST(test_parse_fused_missing_map_fails);
+    RUN_TEST(test_parse_fused_bad_action_label_fails);
+    RUN_TEST(test_parse_fused_duplicate_map_fails);
     RUN_TEST(test_parse_full_program);
     RUN_TEST(test_parse_einsum_with_merge);
     RUN_TEST(test_parse_einsum_default_merge);

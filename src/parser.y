@@ -88,9 +88,9 @@ typedef struct { int kind;   /* 0=map, 1=reduce */
                  char *op;   /* compute op name (owned) */
                  int merge;  /* MergeOp */
                  char *over; /* rank name or NULL (owned) */ } FAct;
-typedef struct { FAct items[4]; int n; } FActList;
-static FActList *factlist_new(void){ FActList *l=malloc(sizeof(FActList)); l->n=0; return l; }
-static void factlist_add(FActList *l, FAct a){ if(l->n<4) l->items[l->n++]=a; }
+typedef struct { FAct items[8]; int n; int overflow; } FActList;
+static FActList *factlist_new(void){ FActList *l=malloc(sizeof(FActList)); l->n=0; l->overflow=0; return l; }
+static void factlist_add(FActList *l, FAct a){ if(l->n<8) l->items[l->n++]=a; else l->overflow=1; }
 
 /* reduce(...) trailing args: optional merge keyword and optional `over=IDENT`. */
 typedef struct { int merge; char *over; } ReduceArgs;
@@ -339,17 +339,19 @@ einsum_stmt:
         f->output = *(TensorRef *)$1;
         f->a1_has_reduce = 0; f->a2_has_reduce = 0;
         f->over1 = NULL; f->over2 = NULL;
-        int have_map1 = 0, have_map2 = 0;
+        int seen_map1=0, seen_map2=0, seen_r1=0, seen_r2=0;
+        if (acts->overflow) { yyerror("fused einsum: too many action specs"); free($1); free($3); free(acts); YYERROR; }
         for (int i = 0; i < acts->n; i++) {
             FAct *a = &acts->items[i];
+            if (a->label != 1 && a->label != 2) { yyerror("fused einsum: action label must be .1 or .2"); free(a->op); free(a->over); free($1); free($3); free(acts); YYERROR; }
             OperatorType op = operator_from_str(a->op);
-            if (a->kind == 0 && a->label == 1) { f->map1_op = op; f->map1_merge = a->merge; have_map1 = 1; }
-            else if (a->kind == 0 && a->label == 2) { f->map2_op = op; f->map2_merge = a->merge; have_map2 = 1; }
-            else if (a->kind == 1 && a->label == 1) { f->reduce1_op = op; f->reduce1_merge = a->merge; f->a1_has_reduce = 1; f->over1 = a->over; }
-            else if (a->kind == 1 && a->label == 2) { f->reduce2_op = op; f->reduce2_merge = a->merge; f->a2_has_reduce = 1; f->over2 = a->over; }
+            if (a->kind == 0 && a->label == 1) { if (seen_map1) { yyerror("fused einsum: duplicate map.1"); free(a->op); free(a->over); free($1); free($3); free(acts); YYERROR; } seen_map1=1; f->map1_op=op; f->map1_merge=a->merge; }
+            else if (a->kind == 0 && a->label == 2) { if (seen_map2) { yyerror("fused einsum: duplicate map.2"); free(a->op); free(a->over); free($1); free($3); free(acts); YYERROR; } seen_map2=1; f->map2_op=op; f->map2_merge=a->merge; }
+            else if (a->kind == 1 && a->label == 1) { if (seen_r1) { yyerror("fused einsum: duplicate reduce.1"); free(a->op); free(a->over); free($1); free($3); free(acts); YYERROR; } seen_r1=1; f->reduce1_op=op; f->reduce1_merge=a->merge; f->a1_has_reduce=1; f->over1=a->over; }
+            else { if (seen_r2) { yyerror("fused einsum: duplicate reduce.2"); free(a->op); free(a->over); free($1); free($3); free(acts); YYERROR; } seen_r2=1; f->reduce2_op=op; f->reduce2_merge=a->merge; f->a2_has_reduce=1; f->over2=a->over; }
             free(a->op);
         }
-        if (!have_map1 || !have_map2) { yyerror("fused einsum requires map.1 and map.2"); YYERROR; }
+        if (!seen_map1 || !seen_map2) { yyerror("fused einsum requires map.1 and map.2"); free($1); free($3); free(acts); YYERROR; }
         AstNode *node = ast_einsum_fused_new(*f);
         free($1); free($3); free(acts);
         $$ = (void *)node;
