@@ -227,9 +227,10 @@ single-action lowering and emitter are untouched.
 
 ### AST / parser / lexer
 
-- **Lexer:** no new tokens strictly required — `.1` is `.`+`1`; `over` is a soft
-  keyword (a plain identifier checked in the parser action), so it does not
-  reserve `over` as a name.
+- **Lexer:** `.1` needs no new token (`.`+`1`). `over` is a **reserved keyword**
+  (`TOK_OVER`): a soft keyword creates an LALR(1) conflict distinguishing the
+  optional merge arg (`, IDENT`) from the over tag (`, over = IDENT`), so we
+  reserve `over` (it can no longer be a tensor/rank name — an acceptable cost).
 - **AST:** extend the Einsum node (or add a sibling fused-einsum node) to hold
   two operators with labels, three operands, and two action specs each with
   optional reduce + optional `over` rank. Single-action construction is
@@ -275,8 +276,9 @@ a multi-action operator, a `.N` spec with no matching operator, malformed
 - One paren group, two actions, three operands; paren on either outer side.
 - `over=` optional + validated on any reduce; maps untagged.
 - Intermediate inherits the output's empty value (uniform semiring).
-- Both-actions-reduce (matrix-chain `(A·B)·C` contracting twice) falls out of the
-  same emitter; we add one bonus test, but push/pull BFS are the guaranteed
+- Both-actions-reduce (matrix-chain `(A·B)·C` contracting twice) is **not yet
+  supported** — it raises a clear semantic error. The nested-reduction loop nest
+  is deferred with general N-ary nesting; push/pull BFS (one reduce each) are the
   targets.
 - No general N-ary nesting, no loop-order mapping choices, no map rank tags.
 
