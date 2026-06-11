@@ -22,7 +22,7 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 | **Graph algorithms** | |
 | SSSP / Bellman–Ford (min-plus) | ✅ |
 | Reachability BFS | ✅ |
-| Paper-faithful 3-step BFS (multi-action, `ANY`/parent, occupancy stop; unary `¬`=`!` done ✅) | 🚧 |
+| Paper-faithful 3-step BFS (`ANY`/parent, occupancy stop; unary `¬`=`!` ✅, multi-action fusion ✅) | 🚧 |
 | **Data & I/O** | |
 | Inline `init` literals | ✅ |
 | Matrix Market `load` / `save` (densify-on-load) | ✅ |
@@ -53,6 +53,7 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 - **Pipeline:** `.edge` → Lexer → Parser → AST → Semantic → IR → Python codegen (pure nested loops).
 - **Semirings:** `map(compute, merge) reduce(compute, merge)` over the 8 compute ops and 9 merge ops above.
 - **Unary complement `!`** (the paper's `¬`): per-operand existence complement; paper-faithful BFS masking `A . !B :: map(take_left, intersect)`, equivalent to the `take_left_only` encoding (`examples/push_bfs_neg.edge`).
+- **Multi-action (fused) Einsums** `(A .1 B) .2 C`: paper-faithful one-line BFS gather/mask (`examples/push_bfs_fused.edge`, `pull_bfs_fused.edge`); transient-scalar intermediate, optional `over=` rank tags.
 - **Generational ranks** (`gen`) with `stop: stable(T)`; internal double-buffered loop in `run()`.
 - **Cascades:** multiple Einsums per generation, one or more cross-generational tensors plus intra-generation intermediates (Bellman–Ford, reachability BFS).
 - **File I/O:** Matrix Market `load`/`save`, inferred dims `dim N = *`, argv path overrides; densify-on-load (compute stays dense).
@@ -63,10 +64,10 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 
 ### Partial 🚧
 - **Merge ops:** 9 of 16 shipped; the 7 `(No,No)→Yes` operators (NOR, equivalence, NAND, ¬→, ¬←, ⇐, ⇒) are not implemented.
-- **BFS (paper-faithful):** masking / pruned / depth BFS work, and unary `¬` (as `!`) now expresses the mask directly (`A . !B :: map(take_left, intersect)`); the full 3-step formulation still needs multi-action Einsums, multi-output return, `ANY`/parent-pointer, and occupancy (`‖F‖≡0`) termination.
+- **BFS (paper-faithful):** masking / pruned / depth BFS work, and unary `¬` (as `!`) now expresses the mask directly (`A . !B :: map(take_left, intersect)`); the full 3-step formulation still needs multi-output return, `ANY`/parent-pointer, and occupancy (`‖F‖≡0`) termination.
 
 ### Planned ❌ (by area)
-- **Language:** `<<` update op; compute labels & multi-operation expressions; nested cascades / multiple generational ranks; anonymous tensors & parenthesized sub-expressions; unary functions; user-defined compute ops; the 7 remaining merge ops.
+- **Language:** `<<` update op; compute labels; general N-ary nesting & matrix-chain (both-actions-reduce) beyond the two-action fused form; nested cascades / multiple generational ranks; anonymous tensors; unary functions; user-defined compute ops; the 7 remaining merge ops.
 - **Seeding & data:** multi-source `seed` (keyword syntax already extensible); 1-D vector `.mtx` loading; diagonal/reflexive-adjacency (`+I`) preprocessing; iterative-driver graph loading; one-kernel-over-many-graphs sweep runner; expanded committed SuiteSparse test set.
 - **File I/O:** sparse tensor storage + sparse compute (CSR/CSC/COO); non-`.mtx` formats; EDGE-native input-path CLI.
 - **Visualization:** `--active-edges-only` edge filter (highest-value next addition for dense graphs); `arf` layout; within-ring/layer crossing minimization; per-scalar (inner-loop) stepping; interactive scrubbing; animation export (GIF/MP4); contact-sheet/filmstrip; light/print themes; non-generational-kernel viz.
