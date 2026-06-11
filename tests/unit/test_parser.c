@@ -102,6 +102,54 @@ TEST(test_parse_einsum_negated_left_operand) {
     yy_delete_buffer(buf);
 }
 
+TEST(test_parse_single_reduce_over) {
+    YY_BUFFER_STATE buf = yy_scan_string(
+        "Z[d] = G[s,d] . F[s] :: map(mul,intersect) reduce(add,union, over=s);");
+    ASSERT_INT_EQ(0, yyparse());
+    AstNode *es = parse_result->data.program.statements[0];
+    ASSERT_INT_EQ(NODE_EINSUM, es->type);
+    ASSERT_NOT_NULL(es->data.einsum.reduce_over);
+    ASSERT_STR_EQ("s", es->data.einsum.reduce_over);
+    ast_free(parse_result); parse_result = NULL; yy_delete_buffer(buf);
+}
+
+TEST(test_parse_fused_push) {
+    YY_BUFFER_STATE buf = yy_scan_string(
+        "F[d] = (G[s,d] .1 F[s]) .2 P[d] "
+        ":: map.1(and,intersect) reduce.1(or,union) map.2(take_left,intersect);");
+    ASSERT_INT_EQ(0, yyparse());
+    AstNode *es = parse_result->data.program.statements[0];
+    ASSERT_INT_EQ(NODE_EINSUM_FUSED, es->type);
+    EinsumFusedData *f = &es->data.einsum_fused;
+    ASSERT_STR_EQ("F", f->output.tensor_name);
+    ASSERT_STR_EQ("G", f->inner1.tensor_name);
+    ASSERT_STR_EQ("F", f->inner2.tensor_name);
+    ASSERT_STR_EQ("P", f->outer.tensor_name);
+    ASSERT_INT_EQ(1, f->inter_is_left2);
+    ASSERT_INT_EQ(OP_AND, f->map1_op);
+    ASSERT_INT_EQ(MERGE_INTERSECT, f->map1_merge);
+    ASSERT_INT_EQ(1, f->a1_has_reduce);
+    ASSERT_INT_EQ(OP_OR, f->reduce1_op);
+    ASSERT_INT_EQ(OP_TAKE_LEFT, f->map2_op);
+    ASSERT_INT_EQ(0, f->a2_has_reduce);
+    ast_free(parse_result); parse_result = NULL; yy_delete_buffer(buf);
+}
+
+TEST(test_parse_fused_pull_paren_right) {
+    YY_BUFFER_STATE buf = yy_scan_string(
+        "F[d] = P[d] .2 (G[s,d] .1 F[s]) "
+        ":: map.1(and,intersect) map.2(and,intersect) reduce.2(or,union, over=s);");
+    ASSERT_INT_EQ(0, yyparse());
+    AstNode *es = parse_result->data.program.statements[0];
+    ASSERT_INT_EQ(NODE_EINSUM_FUSED, es->type);
+    EinsumFusedData *f = &es->data.einsum_fused;
+    ASSERT_INT_EQ(0, f->inter_is_left2);
+    ASSERT_INT_EQ(0, f->a1_has_reduce);
+    ASSERT_INT_EQ(1, f->a2_has_reduce);
+    ASSERT_STR_EQ("s", f->over2);
+    ast_free(parse_result); parse_result = NULL; yy_delete_buffer(buf);
+}
+
 TEST(test_parse_full_program) {
     const char *src =
         "dim M = 2;\n"
@@ -279,6 +327,9 @@ int main(void) {
     RUN_TEST(test_parse_einsum);
     RUN_TEST(test_parse_einsum_negated_operand);
     RUN_TEST(test_parse_einsum_negated_left_operand);
+    RUN_TEST(test_parse_single_reduce_over);
+    RUN_TEST(test_parse_fused_push);
+    RUN_TEST(test_parse_fused_pull_paren_right);
     RUN_TEST(test_parse_full_program);
     RUN_TEST(test_parse_einsum_with_merge);
     RUN_TEST(test_parse_einsum_default_merge);

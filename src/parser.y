@@ -82,6 +82,19 @@ static void litlist_add(LitList *ll, LiteralData *lit) {
     ll->items[ll->count++] = lit;
 }
 
+/* Fused-einsum action-spec accumulator (map.N / reduce.N entries). */
+typedef struct { int kind;   /* 0=map, 1=reduce */
+                 int label;  /* 1 or 2 */
+                 char *op;   /* compute op name (owned) */
+                 int merge;  /* MergeOp */
+                 char *over; /* rank name or NULL (owned) */ } FAct;
+typedef struct { FAct items[4]; int n; } FActList;
+static FActList *factlist_new(void){ FActList *l=malloc(sizeof(FActList)); l->n=0; return l; }
+static void factlist_add(FActList *l, FAct a){ if(l->n<4) l->items[l->n++]=a; }
+
+/* reduce(...) trailing args: optional merge keyword and optional `over=IDENT`. */
+typedef struct { int merge; char *over; } ReduceArgs;
+
 %}
 
 %error-verbose
@@ -112,6 +125,7 @@ static void litlist_add(LitList *ll, LiteralData *lit) {
 %type <datatype> datatype
 %type <float_val> literal_value seed_value
 %type <mergeop> merge_arg
+%type <ptr> reduce_args fused_rhs fused_action_list fused_action
 
 %%
 
@@ -297,23 +311,95 @@ lit_list:
 einsum_stmt:
     tensor_ref '=' map_operand '.' map_operand TOK_DOUBLE_COLON
         TOK_MAP '(' TOK_IDENT merge_arg ')'
-        TOK_REDUCE '(' TOK_IDENT merge_arg ')' ';'
+        TOK_REDUCE '(' TOK_IDENT reduce_args ')' ';'
     {
         TensorRef *out = (TensorRef *)$1;
         TensorRef *in1 = (TensorRef *)$3;
         TensorRef *in2 = (TensorRef *)$5;
+        ReduceArgs *ra = (ReduceArgs *)$15;
         OperatorType map_op    = operator_from_str($9);
         MergeOp     map_merge  = (MergeOp)$10;
         OperatorType reduce_op = operator_from_str($14);
-        MergeOp     red_merge  = (MergeOp)$15;
-        $$ = (void *)ast_einsum_new(*out, *in1, *in2,
-                                    map_op, map_merge,
-                                    reduce_op, red_merge);
+        MergeOp     red_merge  = (MergeOp)ra->merge;
+        AstNode *en = ast_einsum_new(*out, *in1, *in2,
+                                     map_op, map_merge, reduce_op, red_merge);
+        en->data.einsum.reduce_over = ra->over;   /* NULL when absent */
+        $$ = (void *)en;
+        free(ra);
         free($9);
         free($14);
         free(out);
         free(in1);
         free(in2);
+    }
+    | tensor_ref '=' fused_rhs TOK_DOUBLE_COLON fused_action_list ';'
+    {
+        EinsumFusedData *f = (EinsumFusedData *)$3;
+        FActList *acts = (FActList *)$5;
+        f->output = *(TensorRef *)$1;
+        f->a1_has_reduce = 0; f->a2_has_reduce = 0;
+        f->over1 = NULL; f->over2 = NULL;
+        int have_map1 = 0, have_map2 = 0;
+        for (int i = 0; i < acts->n; i++) {
+            FAct *a = &acts->items[i];
+            OperatorType op = operator_from_str(a->op);
+            if (a->kind == 0 && a->label == 1) { f->map1_op = op; f->map1_merge = a->merge; have_map1 = 1; }
+            else if (a->kind == 0 && a->label == 2) { f->map2_op = op; f->map2_merge = a->merge; have_map2 = 1; }
+            else if (a->kind == 1 && a->label == 1) { f->reduce1_op = op; f->reduce1_merge = a->merge; f->a1_has_reduce = 1; f->over1 = a->over; }
+            else if (a->kind == 1 && a->label == 2) { f->reduce2_op = op; f->reduce2_merge = a->merge; f->a2_has_reduce = 1; f->over2 = a->over; }
+            free(a->op);
+        }
+        if (!have_map1 || !have_map2) { yyerror("fused einsum requires map.1 and map.2"); YYERROR; }
+        AstNode *node = ast_einsum_fused_new(*f);
+        free($1); free($3); free(acts);
+        $$ = (void *)node;
+    }
+    ;
+
+fused_rhs:
+    '(' map_operand '.' TOK_INT_LIT map_operand ')' '.' TOK_INT_LIT map_operand
+    {
+        if ($4 != 1 || $8 != 2) { yyerror("fused operators must be labeled .1 (inner) and .2 (outer)"); YYERROR; }
+        EinsumFusedData *f = calloc(1, sizeof(EinsumFusedData));
+        f->inner1 = *(TensorRef *)$2;
+        f->inner2 = *(TensorRef *)$5;
+        f->outer  = *(TensorRef *)$9;
+        f->inter_is_left2 = 1;
+        free($2); free($5); free($9);
+        $$ = (void *)f;
+    }
+    | map_operand '.' TOK_INT_LIT '(' map_operand '.' TOK_INT_LIT map_operand ')'
+    {
+        if ($3 != 2 || $7 != 1) { yyerror("fused operators must be labeled .1 (inner) and .2 (outer)"); YYERROR; }
+        EinsumFusedData *f = calloc(1, sizeof(EinsumFusedData));
+        f->outer  = *(TensorRef *)$1;
+        f->inner1 = *(TensorRef *)$5;
+        f->inner2 = *(TensorRef *)$8;
+        f->inter_is_left2 = 0;
+        free($1); free($5); free($8);
+        $$ = (void *)f;
+    }
+    ;
+
+fused_action_list:
+    fused_action                     { FActList *l = factlist_new(); factlist_add(l, *(FAct *)$1); free($1); $$ = (void *)l; }
+    | fused_action_list fused_action { FActList *l = (FActList *)$1; factlist_add(l, *(FAct *)$2); free($2); $$ = (void *)l; }
+    ;
+
+fused_action:
+    TOK_MAP '.' TOK_INT_LIT '(' TOK_IDENT merge_arg ')'
+    {
+        FAct *a = malloc(sizeof(FAct));
+        a->kind = 0; a->label = $3; a->op = $5; a->merge = $6; a->over = NULL;
+        $$ = (void *)a;
+    }
+    | TOK_REDUCE '.' TOK_INT_LIT '(' TOK_IDENT reduce_args ')'
+    {
+        ReduceArgs *ra = (ReduceArgs *)$6;
+        FAct *a = malloc(sizeof(FAct));
+        a->kind = 1; a->label = $3; a->op = $5; a->merge = ra->merge; a->over = ra->over;
+        free(ra);
+        $$ = (void *)a;
     }
     ;
 
@@ -352,6 +438,60 @@ merge_arg:
         }
         free($2);
         $$ = m;
+    }
+    ;
+
+/* reduce(...) trailing args: optional merge keyword then optional `over=IDENT`.
+   Folded into one rule so the comma-prefixed forms stay LALR(1)-unambiguous
+   (after the first ',' the token TOK_IDENT vs TOK_OVER disambiguates). */
+reduce_args:
+    /* empty */
+    {
+        ReduceArgs *r = malloc(sizeof(ReduceArgs));
+        r->merge = MERGE_PASSTHROUGH; r->over = NULL;
+        $$ = (void *)r;
+    }
+    | ',' TOK_IDENT
+    {
+        MergeOp m = merge_op_from_str($2);
+        if ((int)m == -1) {
+            char buf[256];
+            snprintf(buf, sizeof(buf),
+                     "unknown merge operator '%s' (expected one of: "
+                     "passthrough, nopass, intersect, take_left, "
+                     "take_left_only, take_right, take_right_only, xor, union)",
+                     $2);
+            yyerror(buf);
+            YYERROR;
+        }
+        free($2);
+        ReduceArgs *r = malloc(sizeof(ReduceArgs));
+        r->merge = m; r->over = NULL;
+        $$ = (void *)r;
+    }
+    | ',' TOK_IDENT ',' TOK_OVER '=' TOK_IDENT
+    {
+        MergeOp m = merge_op_from_str($2);
+        if ((int)m == -1) {
+            char buf[256];
+            snprintf(buf, sizeof(buf),
+                     "unknown merge operator '%s' (expected one of: "
+                     "passthrough, nopass, intersect, take_left, "
+                     "take_left_only, take_right, take_right_only, xor, union)",
+                     $2);
+            yyerror(buf);
+            YYERROR;
+        }
+        free($2);
+        ReduceArgs *r = malloc(sizeof(ReduceArgs));
+        r->merge = m; r->over = $6;
+        $$ = (void *)r;
+    }
+    | ',' TOK_OVER '=' TOK_IDENT
+    {
+        ReduceArgs *r = malloc(sizeof(ReduceArgs));
+        r->merge = MERGE_PASSTHROUGH; r->over = $4;
+        $$ = (void *)r;
     }
     ;
 
