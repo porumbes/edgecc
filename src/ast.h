@@ -17,6 +17,7 @@ typedef enum {
     NODE_TENSOR_DECL,
     NODE_INIT,
     NODE_EINSUM,
+    NODE_EINSUM_FUSED,
     NODE_STOP,
     NODE_SAVE
 } NodeType;
@@ -126,7 +127,26 @@ typedef struct {
     MergeOp      map_merge_op;       /* defaults to MERGE_PASSTHROUGH */
     OperatorType reduce_op;
     MergeOp      reduce_merge_op;    /* defaults to MERGE_PASSTHROUGH */
+    char        *reduce_over;        /* optional `over=` rank for single-action reduce; NULL if none */
 } EinsumData;
+
+typedef struct {
+    TensorRef output;
+    TensorRef inner1;        /* paren left operand  (action 1 left) */
+    TensorRef inner2;        /* paren right operand (action 1 right) */
+    TensorRef outer;         /* the non-paren outer operand */
+    int       inter_is_left2;/* 1 if the intermediate is action 2's LEFT operand */
+    /* action 1 (inner, label .1) */
+    OperatorType map1_op;    MergeOp map1_merge;
+    int          a1_has_reduce;
+    OperatorType reduce1_op; MergeOp reduce1_merge;
+    char        *over1;      /* optional `over=` rank, else NULL */
+    /* action 2 (outer, label .2) */
+    OperatorType map2_op;    MergeOp map2_merge;
+    int          a2_has_reduce;
+    OperatorType reduce2_op; MergeOp reduce2_merge;
+    char        *over2;      /* optional `over=` rank, else NULL */
+} EinsumFusedData;
 
 typedef struct {
     AstNode **statements;
@@ -142,6 +162,7 @@ struct AstNode {
         TensorDeclData tensor_decl;
         InitData init;
         EinsumData einsum;
+        EinsumFusedData einsum_fused;
         StopData stop;
         SaveData save;
     } data;
@@ -158,6 +179,7 @@ AstNode *ast_init_new(char *tensor_name, LiteralData *data);
 AstNode *ast_einsum_new(TensorRef output, TensorRef input1, TensorRef input2,
                          OperatorType map_op, MergeOp map_merge_op,
                          OperatorType reduce_op, MergeOp reduce_merge_op);
+AstNode *ast_einsum_fused_new(EinsumFusedData data);
 AstNode *ast_stop_new(char *watch_tensor);
 AstNode *ast_init_load_new(char *tensor_name, char *path);
 AstNode *ast_init_seed_new(char *tensor_name, int source, double value);
