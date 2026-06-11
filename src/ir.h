@@ -17,7 +17,8 @@ typedef enum {
     IR_STORE,
     IR_GEN_LOOP_BEGIN,
     IR_GEN_LOOP_END,
-    IR_SAVE
+    IR_SAVE,
+    IR_FUSED
 } IRType;
 
 typedef struct {
@@ -111,6 +112,23 @@ typedef struct {
 } IRGenLoop;
 
 typedef struct {
+    char *name; char **coords; int ncoords; double empty; int negate; int gen_read;
+} IRFusedOperand;
+
+typedef struct {
+    char *out_name; char **out_coords; int out_ncoords; double empty_z; int gen_write;
+    IRFusedOperand inner1, inner2, outer;
+    int inter_is_left2;
+    OperatorType map1_op; MergeOp map1_merge;
+    int a1_has_reduce; OperatorType reduce1_op; MergeOp reduce1_merge; double reduce1_identity;
+    OperatorType map2_op; MergeOp map2_merge;
+    int a2_has_reduce; OperatorType reduce2_op; MergeOp reduce2_merge; double reduce2_identity;
+    char *free_names[8]; int free_sizes[8]; char *free_dimnames[8]; int num_free;
+    char *red_names[8];  int red_sizes[8];  char *red_dimnames[8];  int num_red;
+    int reduce_on_action;   /* 1 if action 1 reduces, 2 if action 2 reduces, 0 if neither */
+} IRFused;
+
+typedef struct {
     IRType type;
     union {
         IRDimDef dim_def;
@@ -123,6 +141,7 @@ typedef struct {
         IRStore store;
         IRGenLoop gen_loop;
         IRSave save;
+        IRFused fused;
     } data;
 } IRInstr;
 

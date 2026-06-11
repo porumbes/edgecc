@@ -900,6 +900,13 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
             case IR_SAVE:
                 /* Save happens in __main__, not inside run(). */
                 break;
+            case IR_FUSED:
+                /* Codegen for fused einsums is a later task; emit a clear
+                   marker so an un-wired path can't silently produce wrong
+                   output. */
+                cb_indent(&cb);
+                cb_append(&cb, "raise NotImplementedError(\"fused einsum codegen not yet implemented\")\n");
+                break;
         }
     }
 
