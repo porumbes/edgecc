@@ -121,6 +121,7 @@ TensorRef tensor_ref_new(char *name, char **rank_vars, int num_vars) {
     ref.num_vars = num_vars;
     ref.gen_axis = -1;
     ref.gen_offset = 0;
+    ref.negate = 0;
     return ref;
 }
 
