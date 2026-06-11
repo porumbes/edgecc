@@ -255,6 +255,19 @@ static void analyze_einsum_fused(SemanticResult *res, AstNode *node, int eidx) {
     TensorEntry *ou_te  = symtab_find_tensor(st, f->outer.tensor_name);
     if (!out_te || !i1_te || !i2_te || !ou_te) { add_error(res, "fused einsum: unknown tensor"); return; }
 
+    /* validate each ref's index count matches its tensor's declared rank count
+       (mirror the single-action arity check) */
+    {
+        TensorRef *frefs[4] = { &f->output, &f->inner1, &f->inner2, &f->outer };
+        TensorEntry *ftes[4] = { out_te, i1_te, i2_te, ou_te };
+        for (int k = 0; k < 4; k++) {
+            if (frefs[k]->num_vars != ftes[k]->num_ranks)
+                add_error(res,
+                          "fused einsum: tensor '%s' has %d ranks but %d index vars given",
+                          ftes[k]->name, ftes[k]->num_ranks, frefs[k]->num_vars);
+        }
+    }
+
     /* generational metadata (mirror analyze_einsum over the four fused refs) */
     {
         TensorEntry *tes[4]  = { out_te, i1_te, i2_te, ou_te };
@@ -294,12 +307,29 @@ static void analyze_einsum_fused(SemanticResult *res, AstNode *node, int eidx) {
         }
     }
 
-    char *iname1[8]; int isz1[8]; int n1 = ref_spatial_indices(&f->inner1, i1_te, iname1, isz1);
-    char *iname2[8]; int isz2[8]; int n2 = ref_spatial_indices(&f->inner2, i2_te, iname2, isz2);
-    char *onm[8];    int osz[8];  int no = ref_spatial_indices(&f->outer,  ou_te, onm,    osz);
-    char *znm[8];    int zsz[8];  int nz = ref_spatial_indices(&f->output, out_te, znm,    zsz);
+    char *iname1[MAX_INDICES]; int isz1[MAX_INDICES]; int n1 = ref_spatial_indices(&f->inner1, i1_te, iname1, isz1);
+    char *iname2[MAX_INDICES]; int isz2[MAX_INDICES]; int n2 = ref_spatial_indices(&f->inner2, i2_te, iname2, isz2);
+    char *onm[MAX_INDICES];    int osz[MAX_INDICES];  int no = ref_spatial_indices(&f->outer,  ou_te, onm,    osz);
+    char *znm[MAX_INDICES];    int zsz[MAX_INDICES];  int nz = ref_spatial_indices(&f->output, out_te, znm,    zsz);
 
-    char *inner[16]; int innersz[16]; int ni = 0;
+    /* a rank name shared across operands must resolve to a single size */
+    {
+        char *seen_n[4 * MAX_INDICES]; int seen_s[4 * MAX_INDICES]; int seen_c = 0;
+        char *all_n[4 * MAX_INDICES]; int all_s[4 * MAX_INDICES]; int all_c = 0;
+        for (int i = 0; i < n1; i++) { all_n[all_c]=iname1[i]; all_s[all_c]=isz1[i]; all_c++; }
+        for (int i = 0; i < n2; i++) { all_n[all_c]=iname2[i]; all_s[all_c]=isz2[i]; all_c++; }
+        for (int i = 0; i < no; i++) { all_n[all_c]=onm[i];    all_s[all_c]=osz[i];  all_c++; }
+        for (int i = 0; i < nz; i++) { all_n[all_c]=znm[i];    all_s[all_c]=zsz[i];  all_c++; }
+        for (int i = 0; i < all_c; i++) {
+            int found = -1;
+            for (int j = 0; j < seen_c; j++) if (strcmp(seen_n[j], all_n[i])==0) found = j;
+            if (found < 0) { seen_n[seen_c]=all_n[i]; seen_s[seen_c]=all_s[i]; seen_c++; }
+            else if (seen_s[found] != all_s[i])
+                add_error(res, "fused einsum: index '%s' bound to size %d and size %d", all_n[i], seen_s[found], all_s[i]);
+        }
+    }
+
+    char *inner[2 * MAX_INDICES]; int innersz[2 * MAX_INDICES]; int ni = 0;
     for (int i = 0; i < n1; i++) if (!name_present(inner, ni, iname1[i])) { inner[ni]=iname1[i]; innersz[ni]=isz1[i]; ni++; }
     for (int i = 0; i < n2; i++) if (!name_present(inner, ni, iname2[i])) { inner[ni]=iname2[i]; innersz[ni]=isz2[i]; ni++; }
 
@@ -322,13 +352,13 @@ static void analyze_einsum_fused(SemanticResult *res, AstNode *node, int eidx) {
             ec->num_a1_reduce++;
         }
     }
-    char *inter[16]; int intersz[16]; int nint = 0;
+    char *inter[2 * MAX_INDICES]; int intersz[2 * MAX_INDICES]; int nint = 0;
     for (int i = 0; i < ni; i++) {
         int reduced = 0;
         for (int j = 0; j < ec->num_a1_reduce; j++) if (strcmp(ec->a1_reduce[j].name, inner[i])==0) reduced = 1;
         if (!reduced) { inter[nint]=inner[i]; intersz[nint]=innersz[i]; nint++; }
     }
-    char *a2in[16]; int a2sz[16]; int na2 = 0;
+    char *a2in[2 * MAX_INDICES]; int a2sz[2 * MAX_INDICES]; int na2 = 0;
     for (int i = 0; i < nint; i++) if (!name_present(a2in, na2, inter[i])) { a2in[na2]=inter[i]; a2sz[na2]=intersz[i]; na2++; }
     for (int i = 0; i < no;   i++) if (!name_present(a2in, na2, onm[i]))   { a2in[na2]=onm[i];   a2sz[na2]=osz[i];   na2++; }
     for (int i = 0; i < na2; i++) {
