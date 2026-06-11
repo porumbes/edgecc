@@ -230,6 +230,100 @@ static int find_index(IndexInfo *arr, int count, const char *name) {
     return -1;
 }
 
+/* Collect a ref's spatial index names (skipping its gen axis); returns count. */
+static int ref_spatial_indices(TensorRef *r, TensorEntry *te, char *names[], int *sizes) {
+    int n = 0;
+    for (int a = 0; a < r->num_vars && a < te->num_ranks; a++) {
+        if (a == te->gen_axis) continue;
+        names[n] = r->rank_vars[a];
+        sizes[n] = te->dim_sizes[a];
+        n++;
+    }
+    return n;
+}
+static int name_present(char *const names[], int n, const char *x) {
+    for (int i = 0; i < n; i++) if (strcmp(names[i], x) == 0) return 1;
+    return 0;
+}
+
+static void analyze_einsum_fused(SemanticResult *res, AstNode *node, int eidx) {
+    SymbolTable *st = res->symtab;
+    EinsumFusedData *f = &node->data.einsum_fused;
+    TensorEntry *out_te = symtab_find_tensor(st, f->output.tensor_name);
+    TensorEntry *i1_te  = symtab_find_tensor(st, f->inner1.tensor_name);
+    TensorEntry *i2_te  = symtab_find_tensor(st, f->inner2.tensor_name);
+    TensorEntry *ou_te  = symtab_find_tensor(st, f->outer.tensor_name);
+    if (!out_te || !i1_te || !i2_te || !ou_te) { add_error(res, "fused einsum: unknown tensor"); return; }
+
+    char *iname1[8]; int isz1[8]; int n1 = ref_spatial_indices(&f->inner1, i1_te, iname1, isz1);
+    char *iname2[8]; int isz2[8]; int n2 = ref_spatial_indices(&f->inner2, i2_te, iname2, isz2);
+    char *onm[8];    int osz[8];  int no = ref_spatial_indices(&f->outer,  ou_te, onm,    osz);
+    char *znm[8];    int zsz[8];  int nz = ref_spatial_indices(&f->output, out_te, znm,    zsz);
+
+    char *inner[16]; int innersz[16]; int ni = 0;
+    for (int i = 0; i < n1; i++) if (!name_present(inner, ni, iname1[i])) { inner[ni]=iname1[i]; innersz[ni]=isz1[i]; ni++; }
+    for (int i = 0; i < n2; i++) if (!name_present(inner, ni, iname2[i])) { inner[ni]=iname2[i]; innersz[ni]=isz2[i]; ni++; }
+
+    EinsumClass *ec = &st->einsum_class[eidx];
+    memset(ec, 0, sizeof(*ec));
+    ec->is_fused = 1;
+    ec->inter_is_left2 = f->inter_is_left2;
+
+    for (int i = 0; i < nz; i++) {
+        ec->free_indices[ec->num_free_indices].name = znm[i];
+        ec->free_indices[ec->num_free_indices].size = zsz[i];
+        ec->free_indices[ec->num_free_indices].is_free = 1;
+        ec->num_free_indices++;
+    }
+    for (int i = 0; i < ni; i++) {
+        int downstream = name_present(onm, no, inner[i]) || name_present(znm, nz, inner[i]);
+        if (!downstream) {
+            ec->a1_reduce[ec->num_a1_reduce].name = inner[i];
+            ec->a1_reduce[ec->num_a1_reduce].size = innersz[i];
+            ec->num_a1_reduce++;
+        }
+    }
+    char *inter[16]; int intersz[16]; int nint = 0;
+    for (int i = 0; i < ni; i++) {
+        int reduced = 0;
+        for (int j = 0; j < ec->num_a1_reduce; j++) if (strcmp(ec->a1_reduce[j].name, inner[i])==0) reduced = 1;
+        if (!reduced) { inter[nint]=inner[i]; intersz[nint]=innersz[i]; nint++; }
+    }
+    char *a2in[16]; int a2sz[16]; int na2 = 0;
+    for (int i = 0; i < nint; i++) if (!name_present(a2in, na2, inter[i])) { a2in[na2]=inter[i]; a2sz[na2]=intersz[i]; na2++; }
+    for (int i = 0; i < no;   i++) if (!name_present(a2in, na2, onm[i]))   { a2in[na2]=onm[i];   a2sz[na2]=osz[i];   na2++; }
+    for (int i = 0; i < na2; i++) {
+        if (!name_present(znm, nz, a2in[i])) {
+            ec->a2_reduce[ec->num_a2_reduce].name = a2in[i];
+            ec->a2_reduce[ec->num_a2_reduce].size = a2sz[i];
+            ec->num_a2_reduce++;
+        }
+    }
+
+    if (ec->num_a1_reduce > 0 && !f->a1_has_reduce)
+        add_error(res, "fused einsum: action 1 reduces an index but has no reduce.1");
+    if (ec->num_a1_reduce == 0 && f->a1_has_reduce)
+        add_error(res, "fused einsum: reduce.1 given but action 1 reduces nothing");
+    if (ec->num_a2_reduce > 0 && !f->a2_has_reduce)
+        add_error(res, "fused einsum: action 2 reduces an index but has no reduce.2");
+    if (ec->num_a2_reduce == 0 && f->a2_has_reduce)
+        add_error(res, "fused einsum: reduce.2 given but action 2 reduces nothing");
+    if (ec->num_a1_reduce > 0 && ec->num_a2_reduce > 0)
+        add_error(res, "fused einsum: reductions on both actions (matrix-chain) are not yet supported");
+    if (f->over1) {
+        int ok = 0; for (int j=0;j<ec->num_a1_reduce;j++) if (strcmp(ec->a1_reduce[j].name,f->over1)==0) ok=1;
+        if (!ok) add_error(res, "fused einsum: reduce.1 over= names a rank not reduced by action 1");
+    }
+    if (f->over2) {
+        int ok = 0; for (int j=0;j<ec->num_a2_reduce;j++) if (strcmp(ec->a2_reduce[j].name,f->over2)==0) ok=1;
+        if (!ok) add_error(res, "fused einsum: reduce.2 over= names a rank not reduced by action 2");
+    }
+    if (f->a1_has_reduce && f->reduce1_op == OP_TAKE_LEFT) add_error(res, "fused einsum: take_left cannot be a reduce operator");
+    if (f->a2_has_reduce && f->reduce2_op == OP_TAKE_LEFT) add_error(res, "fused einsum: take_left cannot be a reduce operator");
+
+    if (eidx + 1 > st->num_einsums) st->num_einsums = eidx + 1;
+}
+
 static void analyze_einsum(SemanticResult *res, AstNode *node, int eidx) {
     EinsumData *d = &node->data.einsum;
     if (d->reduce_op == OP_TAKE_LEFT) {
@@ -433,6 +527,15 @@ static void analyze_einsum(SemanticResult *res, AstNode *node, int eidx) {
         }
     }
 
+    /* Single-action reduce over= must name one of the reduction indices. */
+    if (d->reduce_over != NULL) {
+        int ok = 0;
+        for (int i = 0; i < st->num_reduction_indices; i++)
+            if (strcmp(st->reduction_indices[i].name, d->reduce_over) == 0) ok = 1;
+        if (!ok)
+            add_error(res, "reduce over= names a rank that is not reduced");
+    }
+
     /* Copy this Einsum's classification into the per-Einsum slot (cascade support).
        The global free/reduction fields remain populated for the single-Einsum path. */
     if (eidx >= 0 && eidx < MAX_EINSUMS) {
@@ -550,6 +653,9 @@ SemanticResult semantic_analyze(AstNode *program) {
                 break;
             case NODE_EINSUM:
                 analyze_einsum(&res, stmt, einsum_index++);
+                break;
+            case NODE_EINSUM_FUSED:
+                analyze_einsum_fused(&res, stmt, einsum_index++);
                 break;
             case NODE_STOP:
                 analyze_stop(&res, stmt);
