@@ -255,6 +255,45 @@ static void analyze_einsum_fused(SemanticResult *res, AstNode *node, int eidx) {
     TensorEntry *ou_te  = symtab_find_tensor(st, f->outer.tensor_name);
     if (!out_te || !i1_te || !i2_te || !ou_te) { add_error(res, "fused einsum: unknown tensor"); return; }
 
+    /* generational metadata (mirror analyze_einsum over the four fused refs) */
+    {
+        TensorEntry *tes[4]  = { out_te, i1_te, i2_te, ou_te };
+        TensorRef   *refs[4] = { &f->output, &f->inner1, &f->inner2, &f->outer };
+        for (int k = 0; k < 4; k++) {
+            if (tes[k]->gen_axis >= 0 && tes[k]->gen_axis < refs[k]->num_vars) {
+                st->is_iterative = 1;
+                char *v = refs[k]->rank_vars[tes[k]->gen_axis];
+                if (st->gen_rank_var == NULL) st->gen_rank_var = v;
+                else if (strcmp(st->gen_rank_var, v) != 0)
+                    add_error(res, "generational rank variable mismatch: '%s' vs '%s'", st->gen_rank_var, v);
+            }
+        }
+        if (out_te->gen_axis >= 0) {
+            if (f->output.gen_axis >= 0 && f->output.gen_axis != out_te->gen_axis) {
+                add_error(res, "generational tensor '%s' written with an offset on the wrong axis", out_te->name);
+            } else {
+                int eff_off = (f->output.gen_axis == out_te->gen_axis) ? f->output.gen_offset : 0;
+                if (eff_off == 1) {
+                    int seen = 0;
+                    for (int m = 0; m < st->num_gen_tensors; m++)
+                        if (strcmp(st->gen_tensors[m], out_te->name) == 0) seen = 1;
+                    if (!seen && st->num_gen_tensors < MAX_TENSORS) {
+                        st->gen_tensors[st->num_gen_tensors++] = out_te->name;
+                        if (st->gen_tensor == NULL) st->gen_tensor = out_te->name;
+                    }
+                } else if (eff_off == 0) {
+                    int seen = 0;
+                    for (int m = 0; m < st->num_intermediates; m++)
+                        if (strcmp(st->intermediates[m], out_te->name) == 0) seen = 1;
+                    if (!seen && st->num_intermediates < MAX_TENSORS)
+                        st->intermediates[st->num_intermediates++] = out_te->name;
+                } else {
+                    add_error(res, "generational tensor '%s' written at unsupported offset +%d (only i and i+1 are allowed)", out_te->name, eff_off);
+                }
+            }
+        }
+    }
+
     char *iname1[8]; int isz1[8]; int n1 = ref_spatial_indices(&f->inner1, i1_te, iname1, isz1);
     char *iname2[8]; int isz2[8]; int n2 = ref_spatial_indices(&f->inner2, i2_te, iname2, isz2);
     char *onm[8];    int osz[8];  int no = ref_spatial_indices(&f->outer,  ou_te, onm,    osz);
@@ -579,11 +618,19 @@ static void validate_cascade_ordering(SemanticResult *res, AstNode *program) {
     ProgramData *pd = &program->data.program;
     for (int i = 0; i < pd->count; i++) {
         AstNode *stmt = pd->statements[i];
-        if (stmt->type != NODE_EINSUM) continue;
-        EinsumData *e = &stmt->data.einsum;
+        TensorRef *ins[3]; int nins = 0; const char *onm = NULL;
+        if (stmt->type == NODE_EINSUM) {
+            ins[0] = &stmt->data.einsum.input1; ins[1] = &stmt->data.einsum.input2; nins = 2;
+            onm = stmt->data.einsum.output.tensor_name;
+        } else if (stmt->type == NODE_EINSUM_FUSED) {
+            ins[0] = &stmt->data.einsum_fused.inner1;
+            ins[1] = &stmt->data.einsum_fused.inner2;
+            ins[2] = &stmt->data.einsum_fused.outer;
+            nins = 3;
+            onm = stmt->data.einsum_fused.output.tensor_name;
+        } else continue;
 
-        TensorRef *ins[2] = { &e->input1, &e->input2 };
-        for (int k = 0; k < 2; k++) {
+        for (int k = 0; k < nins; k++) {
             const char *nm = ins[k]->tensor_name;
             /* (1) intermediate read-before-write */
             int is_inter = 0;
@@ -610,7 +657,6 @@ static void validate_cascade_ordering(SemanticResult *res, AstNode *program) {
         }
 
         /* record this Einsum's output */
-        const char *onm = e->output.tensor_name;
         for (int m = 0; m < st->num_intermediates; m++) {
             if (strcmp(st->intermediates[m], onm) == 0) {
                 written[nwritten++] = st->intermediates[m]; break;
@@ -720,17 +766,21 @@ SemanticResult semantic_analyze(AstNode *program) {
     for (int m = 0; st->is_iterative && m < st->num_gen_tensors; m++) {
         const char *gt = st->gen_tensors[m];
         int read_at_i = 0;
-        for (int i = 0; i < pd->count; i++) {
+        for (int i = 0; i < pd->count && !read_at_i; i++) {
             AstNode *s = pd->statements[i];
-            if (s->type != NODE_EINSUM) continue;
-            EinsumData *e = &s->data.einsum;
-            TensorEntry *t1 = symtab_find_tensor(st, e->input1.tensor_name);
-            TensorEntry *t2 = symtab_find_tensor(st, e->input2.tensor_name);
-            int eff1 = (t1 && e->input1.gen_axis == t1->gen_axis) ? e->input1.gen_offset : 0;
-            int eff2 = (t2 && e->input2.gen_axis == t2->gen_axis) ? e->input2.gen_offset : 0;
-            if ((strcmp(e->input1.tensor_name, gt) == 0 && eff1 == 0) ||
-                (strcmp(e->input2.tensor_name, gt) == 0 && eff2 == 0)) {
-                read_at_i = 1; break;
+            TensorRef *ins[3]; int nins = 0;
+            if (s->type == NODE_EINSUM) {
+                ins[0] = &s->data.einsum.input1; ins[1] = &s->data.einsum.input2; nins = 2;
+            } else if (s->type == NODE_EINSUM_FUSED) {
+                ins[0] = &s->data.einsum_fused.inner1;
+                ins[1] = &s->data.einsum_fused.inner2;
+                ins[2] = &s->data.einsum_fused.outer;
+                nins = 3;
+            } else continue;
+            for (int k = 0; k < nins; k++) {
+                TensorEntry *t = symtab_find_tensor(st, ins[k]->tensor_name);
+                int eff = (t && ins[k]->gen_axis == t->gen_axis) ? ins[k]->gen_offset : 0;
+                if (strcmp(ins[k]->tensor_name, gt) == 0 && eff == 0) { read_at_i = 1; break; }
             }
         }
         if (!read_at_i) {
