@@ -494,10 +494,61 @@ static void emit_fused_reduce_step(CodeBuf *cb, OperatorType op, MergeOp merge,
     cb->indent--;
 }
 
+/* Emit action 2: combine the scalar intermediate (_inter, existence in
+   inter_flag) with the outer operand. Produces `_m2`. Operand order follows
+   fu->inter_is_left2.
+   want_emit != 0: also produce `_m2_emit` (True in the merge-pass branch, False
+     in the else), closing both branches; caller follows with a reduce step.
+   want_emit == 0: emit only the merge-pass branch (i_op/o_op/_m2) and leave the
+     caller positioned *inside* that `if` body (indent not decremented, no else);
+     the caller emits its store, then dedents and writes its own else. */
+static void emit_fused_action2(CodeBuf *cb, IRFused *fu, const char *eZ,
+                               const char *inter_flag, int want_emit) {
+    char buf[256];
+    char *eC = format_double_literal(fu->outer.empty);
+    char c_name[160];
+    fused_operand_name(&fu->outer, c_name, sizeof(c_name));
+
+    cb_indent(cb); cb_append(cb, "c_val = ");
+    emit_tensor_access(cb, c_name, fu->outer.coords, fu->outer.ncoords);
+    cb_append(cb, "\n");
+    cb_indent(cb);
+    cb_appendf(cb, "c_exists = c_val %s %s\n", fu->outer.negate ? "==" : "!=", eC);
+
+    const char *l_exists = fu->inter_is_left2 ? inter_flag : "c_exists";
+    const char *r_exists = fu->inter_is_left2 ? "c_exists" : inter_flag;
+    cb_indent(cb); cb_append(cb, "if ");
+    emit_merge_guard(cb, fu->map2_merge, l_exists, r_exists);
+    cb_append(cb, ":\n");
+    cb->indent++;
+    cb_indent(cb);
+    cb_appendf(cb, "i_op = _inter if %s else %s\n", inter_flag, eZ);
+    cb_indent(cb);
+    cb_appendf(cb, "o_op = %s if c_exists else %s\n",
+               fu->outer.negate ? "1.0" : "c_val", eC);
+    cb_indent(cb); cb_append(cb, "_m2 = ");
+    if (fu->inter_is_left2)
+        cb_append(cb, compute_op_pyexpr(fu->map2_op, "i_op", "o_op", buf, sizeof(buf)));
+    else
+        cb_append(cb, compute_op_pyexpr(fu->map2_op, "o_op", "i_op", buf, sizeof(buf)));
+    cb_append(cb, "\n");
+    if (want_emit) {
+        cb_indent(cb); cb_appendf(cb, "_m2_emit = _m2 != %s\n", eZ);
+        cb->indent--;
+        cb_indent(cb); cb_append(cb, "else:\n");
+        cb->indent++;
+        cb_indent(cb); cb_append(cb, "_m2_emit = False\n");
+        cb_indent(cb); cb_appendf(cb, "_m2 = %s\n", eZ);
+        cb->indent--;
+    }
+    /* want_emit == 0: leave caller inside the `if` body. */
+
+    free(eC);
+}
+
 /* Emit the full fused two-action skeleton (push / pull / neither). */
 static void emit_fused_skeleton(CodeBuf *cb, IRFused *fu) {
     char *eZ = format_double_literal(fu->empty_z);
-    char *eC = format_double_literal(fu->outer.empty);
 
     /* Output (store) tensor name, gen-resolved. */
     char z_name[160];
@@ -505,9 +556,6 @@ static void emit_fused_skeleton(CodeBuf *cb, IRFused *fu) {
         snprintf(z_name, sizeof(z_name), "%s_next", fu->out_name);
     else
         snprintf(z_name, sizeof(z_name), "%s", fu->out_name);
-
-    char c_name[160];
-    fused_operand_name(&fu->outer, c_name, sizeof(c_name));
 
     /* Free-index loops (outermost). */
     for (int i = 0; i < fu->num_free; i++) {
@@ -518,8 +566,6 @@ static void emit_fused_skeleton(CodeBuf *cb, IRFused *fu) {
             cb_appendf(cb, "for %s in range(%d):\n", fu->free_names[i], fu->free_sizes[i]);
         cb->indent++;
     }
-
-    char buf[256];
 
     if (fu->reduce_on_action == 1) {
         /* PUSH: action 1 reduces; action 2 map-only -> store. */
@@ -540,32 +586,10 @@ static void emit_fused_skeleton(CodeBuf *cb, IRFused *fu) {
                                "_acc1", "_m1", "_m1_emit");
         for (int i = 0; i < fu->num_red; i++) cb->indent--;
         cb_indent(cb); cb_append(cb, "_inter = _acc1\n");
-        cb_indent(cb); cb_appendf(cb, "_inter_exists = _inter != %s\n", eZ);
+        cb_indent(cb); cb_appendf(cb, "_inter_emit = _inter != %s\n", eZ);
 
         /* action 2 (map-only) -> store */
-        cb_indent(cb); cb_append(cb, "c_val = ");
-        emit_tensor_access(cb, c_name, fu->outer.coords, fu->outer.ncoords);
-        cb_append(cb, "\n");
-        cb_indent(cb);
-        cb_appendf(cb, "c_exists = c_val %s %s\n", fu->outer.negate ? "==" : "!=", eC);
-
-        const char *l_exists = fu->inter_is_left2 ? "_inter_exists" : "c_exists";
-        const char *r_exists = fu->inter_is_left2 ? "c_exists" : "_inter_exists";
-        cb_indent(cb); cb_append(cb, "if ");
-        emit_merge_guard(cb, fu->map2_merge, l_exists, r_exists);
-        cb_append(cb, ":\n");
-        cb->indent++;
-        cb_indent(cb);
-        cb_appendf(cb, "i_op = _inter if _inter_exists else %s\n", eZ);
-        cb_indent(cb);
-        cb_appendf(cb, "o_op = %s if c_exists else %s\n",
-                   fu->outer.negate ? "1.0" : "c_val", eC);
-        cb_indent(cb); cb_append(cb, "_m2 = ");
-        if (fu->inter_is_left2)
-            cb_append(cb, compute_op_pyexpr(fu->map2_op, "i_op", "o_op", buf, sizeof(buf)));
-        else
-            cb_append(cb, compute_op_pyexpr(fu->map2_op, "o_op", "i_op", buf, sizeof(buf)));
-        cb_append(cb, "\n");
+        emit_fused_action2(cb, fu, eZ, "_inter_emit", 0);
         cb_indent(cb);
         emit_tensor_access(cb, z_name, fu->out_coords, fu->out_ncoords);
         cb_appendf(cb, " = _m2 if _m2 != %s else %s\n", eZ, eZ);
@@ -593,36 +617,7 @@ static void emit_fused_skeleton(CodeBuf *cb, IRFused *fu) {
         emit_fused_map_body(cb, &fu->inner1, &fu->inner2,
                             fu->map1_op, fu->map1_merge, eZ, "_inter");
 
-        cb_indent(cb); cb_append(cb, "c_val = ");
-        emit_tensor_access(cb, c_name, fu->outer.coords, fu->outer.ncoords);
-        cb_append(cb, "\n");
-        cb_indent(cb);
-        cb_appendf(cb, "c_exists = c_val %s %s\n", fu->outer.negate ? "==" : "!=", eC);
-
-        const char *l_exists = fu->inter_is_left2 ? "_inter_emit" : "c_exists";
-        const char *r_exists = fu->inter_is_left2 ? "c_exists" : "_inter_emit";
-        cb_indent(cb); cb_append(cb, "if ");
-        emit_merge_guard(cb, fu->map2_merge, l_exists, r_exists);
-        cb_append(cb, ":\n");
-        cb->indent++;
-        cb_indent(cb);
-        cb_appendf(cb, "i_op = _inter if _inter_emit else %s\n", eZ);
-        cb_indent(cb);
-        cb_appendf(cb, "o_op = %s if c_exists else %s\n",
-                   fu->outer.negate ? "1.0" : "c_val", eC);
-        cb_indent(cb); cb_append(cb, "_m2 = ");
-        if (fu->inter_is_left2)
-            cb_append(cb, compute_op_pyexpr(fu->map2_op, "i_op", "o_op", buf, sizeof(buf)));
-        else
-            cb_append(cb, compute_op_pyexpr(fu->map2_op, "o_op", "i_op", buf, sizeof(buf)));
-        cb_append(cb, "\n");
-        cb_indent(cb); cb_appendf(cb, "_m2_emit = _m2 != %s\n", eZ);
-        cb->indent--;
-        cb_indent(cb); cb_append(cb, "else:\n");
-        cb->indent++;
-        cb_indent(cb); cb_append(cb, "_m2_emit = False\n");
-        cb_indent(cb); cb_appendf(cb, "_m2 = %s\n", eZ);
-        cb->indent--;
+        emit_fused_action2(cb, fu, eZ, "_inter_emit", 1);
 
         emit_fused_reduce_step(cb, fu->reduce2_op, fu->reduce2_merge, eZ,
                                "_acc2", "_m2", "_m2_emit");
@@ -636,29 +631,7 @@ static void emit_fused_skeleton(CodeBuf *cb, IRFused *fu) {
         emit_fused_map_body(cb, &fu->inner1, &fu->inner2,
                             fu->map1_op, fu->map1_merge, eZ, "_inter");
 
-        cb_indent(cb); cb_append(cb, "c_val = ");
-        emit_tensor_access(cb, c_name, fu->outer.coords, fu->outer.ncoords);
-        cb_append(cb, "\n");
-        cb_indent(cb);
-        cb_appendf(cb, "c_exists = c_val %s %s\n", fu->outer.negate ? "==" : "!=", eC);
-
-        const char *l_exists = fu->inter_is_left2 ? "_inter_emit" : "c_exists";
-        const char *r_exists = fu->inter_is_left2 ? "c_exists" : "_inter_emit";
-        cb_indent(cb); cb_append(cb, "if ");
-        emit_merge_guard(cb, fu->map2_merge, l_exists, r_exists);
-        cb_append(cb, ":\n");
-        cb->indent++;
-        cb_indent(cb);
-        cb_appendf(cb, "i_op = _inter if _inter_emit else %s\n", eZ);
-        cb_indent(cb);
-        cb_appendf(cb, "o_op = %s if c_exists else %s\n",
-                   fu->outer.negate ? "1.0" : "c_val", eC);
-        cb_indent(cb); cb_append(cb, "_m2 = ");
-        if (fu->inter_is_left2)
-            cb_append(cb, compute_op_pyexpr(fu->map2_op, "i_op", "o_op", buf, sizeof(buf)));
-        else
-            cb_append(cb, compute_op_pyexpr(fu->map2_op, "o_op", "i_op", buf, sizeof(buf)));
-        cb_append(cb, "\n");
+        emit_fused_action2(cb, fu, eZ, "_inter_emit", 0);
         cb_indent(cb);
         emit_tensor_access(cb, z_name, fu->out_coords, fu->out_ncoords);
         cb_appendf(cb, " = _m2 if _m2 != %s else %s\n", eZ, eZ);
@@ -673,7 +646,7 @@ static void emit_fused_skeleton(CodeBuf *cb, IRFused *fu) {
 
     for (int i = 0; i < fu->num_free; i++) cb->indent--;
 
-    free(eZ); free(eC);
+    free(eZ);
 }
 
 /* ---- Main codegen ---- */
