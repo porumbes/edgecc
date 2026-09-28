@@ -524,6 +524,34 @@ TEST(test_semantic_fused_bad_over_errors) {
     semantic_result_free(&sem); ast_free(ast);
 }
 
+/* The generational rank variable is never emitted into Python (the loop
+   counter is _it), so it is exempt from the reserved/shadowing name checks. */
+TEST(test_semantic_gen_rank_var_not_name_checked) {
+    AstNode *ast = parse(
+        "dim N = 3;\n"
+        "tensor G[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor F[gen I, R=N] : float, empty = 0.0;\n"
+        "init G = [[0,1,0],[0,0,1],[0,0,0]];\n"
+        "init F = [1.0,0.0,0.0];\n"
+        "F[len+1,d] = G[s,d] . F[len,s] :: map(mul,intersect) reduce(max,union);\n"
+        "stop: stable(F);\n");
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    semantic_result_free(&sem); ast_free(ast);
+
+    ast = parse(
+        "dim N = 3;\n"
+        "tensor G[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor F[gen I, R=N] : float, empty = 0.0;\n"
+        "init G = [[0,1,0],[0,0,1],[0,0,0]];\n"
+        "init F = [1.0,0.0,0.0];\n"
+        "F[N+1,d] = G[s,d] . F[N,s] :: map(mul,intersect) reduce(max,union);\n"
+        "stop: stable(F);\n");
+    sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    semantic_result_free(&sem); ast_free(ast);
+}
+
 TEST(test_semantic_fused_generational) {
     AstNode *ast = parse(
         "dim N = 3;\n"
@@ -628,5 +656,6 @@ int main(void) {
     RUN_TEST(test_semantic_fused_missing_reduce_errors);
     RUN_TEST(test_semantic_fused_bad_over_errors);
     RUN_TEST(test_semantic_fused_generational);
+    RUN_TEST(test_semantic_gen_rank_var_not_name_checked);
     return test_report();
 }

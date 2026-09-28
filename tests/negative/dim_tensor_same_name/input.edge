@@ -1,0 +1,8 @@
+// A dim and a tensor share the name A; both become Python names.
+dim A = 2;
+tensor A[R=A, C=A] : float, empty = 0.0;
+tensor B[R=A]      : float, empty = 0.0;
+tensor Z[R=A]      : float, empty = 0.0;
+init A = [[1.0, 2.0], [3.0, 4.0]];
+init B = [1.0, 1.0];
+Z[m] = A[m,k] . B[k] :: map(mul, intersect) reduce(add, union);

@@ -59,52 +59,6 @@ static int is_py_reserved(const char *name) {
     return 0;
 }
 
-/* Names already reported, so a reserved rank variable used in several
-   operands yields one error, not one per occurrence. */
-typedef struct { const char *names[64]; int n; } ReportedNames;
-
-static void check_reserved(SemanticResult *res, ReportedNames *seen,
-                           const char *what, const char *name) {
-    if (!name || !is_py_reserved(name)) return;
-    for (int i = 0; i < seen->n; i++)
-        if (strcmp(seen->names[i], name) == 0) return;
-    if (seen->n < 64) seen->names[seen->n++] = name;
-    add_error(res, "%s '%s' is reserved in the generated Python "
-                   "(keyword, builtin, or compiler temporary); rename it", what, name);
-}
-
-/* Is `name` declared as a dim (kind "dim") or tensor (kind "tensor")? */
-static const char *declared_kind(AstNode *program, const char *name) {
-    ProgramData *pd = &program->data.program;
-    for (int i = 0; i < pd->count; i++) {
-        AstNode *s = pd->statements[i];
-        if (s->type == NODE_DIM_DECL && strcmp(s->data.dim_decl.name, name) == 0)
-            return "dim";
-        if (s->type == NODE_TENSOR_DECL && strcmp(s->data.tensor_decl.name, name) == 0)
-            return "tensor";
-    }
-    return NULL;
-}
-
-static void check_ref_vars(SemanticResult *res, ReportedNames *seen,
-                           ReportedNames *shadowed, AstNode *program, const TensorRef *r) {
-    for (int k = 0; k < r->num_vars; k++) {
-        const char *v = r->rank_vars[k];
-        check_reserved(res, seen, "rank variable", v);
-        /* The rank variable becomes a loop variable, which would shadow a
-           dim or tensor of the same name inside run(). */
-        const char *kind = declared_kind(program, v);
-        if (!kind) continue;
-        int dup = 0;
-        for (int i = 0; i < shadowed->n; i++)
-            if (strcmp(shadowed->names[i], v) == 0) dup = 1;
-        if (dup) continue;
-        if (shadowed->n < 64) shadowed->names[shadowed->n++] = v;
-        add_error(res, "rank variable '%s' shadows %s '%s' in the generated Python; rename it",
-                  v, kind, v);
-    }
-}
-
 /* A generational tensor T owns the generated names T_prev and T_next. */
 static int is_gen_buffer_name(AstNode *program, const char *name) {
     ProgramData *pd = &program->data.program;
@@ -122,6 +76,59 @@ static int is_gen_buffer_name(AstNode *program, const char *name) {
     return 0;
 }
 
+static AstNode *find_decl(AstNode *program, NodeType type, const char *name) {
+    ProgramData *pd = &program->data.program;
+    for (int i = 0; i < pd->count; i++) {
+        AstNode *s = pd->statements[i];
+        if (s->type != type) continue;
+        const char *n = type == NODE_DIM_DECL ? s->data.dim_decl.name : s->data.tensor_decl.name;
+        if (strcmp(n, name) == 0) return s;
+    }
+    return NULL;
+}
+
+/* Names already reported, so a name used in several places yields one
+   error, not one per occurrence. */
+typedef struct { const char *names[64]; int n; } ReportedNames;
+
+static int first_report(ReportedNames *seen, const char *name) {
+    for (int i = 0; i < seen->n; i++)
+        if (strcmp(seen->names[i], name) == 0) return 0;
+    if (seen->n < 64) seen->names[seen->n++] = name;
+    return 1;
+}
+
+static void check_reserved(SemanticResult *res, ReportedNames *seen, AstNode *program,
+                           const char *what, const char *name) {
+    const char *why = is_py_reserved(name) ? "keyword, builtin, or compiler temporary"
+                    : is_gen_buffer_name(program, name) ? "buffer of a generational tensor"
+                    : NULL;
+    if (why && first_report(seen, name))
+        add_error(res, "%s '%s' is reserved in the generated Python (%s); rename it",
+                  what, name, why);
+}
+
+static void check_ref_vars(SemanticResult *res, ReportedNames *seen,
+                           ReportedNames *shadowed, AstNode *program, const TensorRef *r) {
+    AstNode *decl = find_decl(program, NODE_TENSOR_DECL, r->tensor_name);
+    for (int k = 0; k < r->num_vars; k++) {
+        /* The generational coordinate is never emitted (the loop counter is
+           _it), so its variable cannot collide with anything. */
+        if (decl && k < decl->data.tensor_decl.num_ranks &&
+            decl->data.tensor_decl.ranks[k].is_generational)
+            continue;
+        const char *v = r->rank_vars[k];
+        check_reserved(res, seen, program, "rank variable", v);
+        /* Other rank variables become loop variables, which would shadow a
+           dim or tensor of the same name inside run(). */
+        const char *kind = find_decl(program, NODE_DIM_DECL, v) ? "dim"
+                         : find_decl(program, NODE_TENSOR_DECL, v) ? "tensor" : NULL;
+        if (kind && first_report(shadowed, v))
+            add_error(res, "rank variable '%s' shadows %s '%s' in the generated Python; rename it",
+                      v, kind, v);
+    }
+}
+
 static void validate_identifiers(SemanticResult *res, AstNode *program) {
     ProgramData *pd = &program->data.program;
     ReportedNames seen = { {0}, 0 }, shadowed = { {0}, 0 };
@@ -129,14 +136,14 @@ static void validate_identifiers(SemanticResult *res, AstNode *program) {
         AstNode *s = pd->statements[i];
         switch (s->type) {
             case NODE_DIM_DECL:
-                check_reserved(res, &seen, "dim", s->data.dim_decl.name);
+                check_reserved(res, &seen, program, "dim", s->data.dim_decl.name);
                 break;
             case NODE_TENSOR_DECL: {
                 const char *name = s->data.tensor_decl.name;
-                check_reserved(res, &seen, "tensor", name);
-                if (is_gen_buffer_name(program, name))
-                    add_error(res, "tensor '%s' is reserved in the generated Python "
-                                   "(buffer of a generational tensor); rename it", name);
+                check_reserved(res, &seen, program, "tensor", name);
+                if (find_decl(program, NODE_DIM_DECL, name))
+                    add_error(res, "tensor '%s' has the same name as dim '%s' "
+                                   "(both become Python names); rename one", name, name);
                 break;
             }
             case NODE_EINSUM:
