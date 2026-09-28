@@ -26,7 +26,7 @@ JUNK = ["@", "#", "$", "-1", "999999999", "1e999", "\"x\"", "(", ")", "[", "]",
 # Exceptions that, raised by a generated program, point at a codegen bug
 # rather than at legitimate program behavior (e.g. the generation cap).
 CODEGEN_BUG_EXC = {"SyntaxError", "NameError", "UnboundLocalError",
-                   "IndentationError", "AttributeError"}
+                   "IndentationError", "AttributeError", "TypeError", "IndexError"}
 EDGECC_TIMEOUT = 10
 RUN_TIMEOUT = 20
 
