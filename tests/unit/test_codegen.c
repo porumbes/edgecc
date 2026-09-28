@@ -101,6 +101,57 @@ TEST(test_codegen_intersect_union) {
     ast_free(ast);
 }
 
+/* Multi-dim generational buffers (cross-gen _next and intermediates) must be
+   sized by their declared dim names, per axis -- not by matching sizes. */
+TEST(test_codegen_generational_2d_alloc_uses_dim_names) {
+    AstNode *ast = parse(
+        "dim M = 3;\n"
+        "dim N = 3;\n"
+        "tensor G[R=N, C=N]        : float, empty = 0.0;\n"
+        "tensor U[gen I, R=N, C=M] : float, empty = 0.0;\n"
+        "tensor T[gen I, R=N, C=M] : float, empty = 0.0;\n"
+        "init G = [[0.0,1.0,0.0],[0.0,0.0,1.0],[0.0,0.0,0.0]];\n"
+        "init T = [[0.0,1.0,0.0],[0.0,0.0,1.0],[0.0,0.0,0.0]];\n"
+        "U[i, a, c]   = G[a,b] . T[i,b,c] :: map(and,intersect) reduce(or,union);\n"
+        "T[i+1, a, c] = U[i,a,c] . T[i,a,c] :: map(or,union) reduce(or,union);\n"
+        "stop: stable(T);\n"
+    );
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    char *code = codegen_python(ir);
+    ASSERT_NOT_NULL(code);
+    ASSERT_TRUE(strstr(code, "T_next = [[0.0] * M for _ in range(N)]") != NULL);
+    ASSERT_TRUE(strstr(code, "U = [[0.0] * M for _ in range(N)]") != NULL);
+    free(code);
+    ir_free(ir);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
+/* Same, with an inferred dim: the size is only known at runtime. */
+TEST(test_codegen_generational_2d_alloc_inferred_dim) {
+    AstNode *ast = parse(
+        "dim N = *;\n"
+        "tensor G[R=N, C=N]        : float, empty = 0.0;\n"
+        "tensor T[gen I, R=N, C=N] : float, empty = 0.0;\n"
+        "init G = load(\"graph.mtx\");\n"
+        "init T = load(\"graph.mtx\");\n"
+        "T[i+1, a, c] = G[a,b] . T[i,b,c] :: map(and,intersect) reduce(or,union);\n"
+        "stop: stable(T);\n"
+    );
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    char *code = codegen_python(ir);
+    ASSERT_NOT_NULL(code);
+    ASSERT_TRUE(strstr(code, "T_next = [[0.0] * N for _ in range(N)]") != NULL);
+    free(code);
+    ir_free(ir);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
 TEST(test_codegen_generational) {
     AstNode *ast = parse(
         "dim N = 4;\n"
@@ -504,6 +555,8 @@ int main(void) {
     RUN_TEST(test_codegen_negated_operand);
     RUN_TEST(test_codegen_intersect_union);
     RUN_TEST(test_codegen_generational);
+    RUN_TEST(test_codegen_generational_2d_alloc_uses_dim_names);
+    RUN_TEST(test_codegen_generational_2d_alloc_inferred_dim);
     RUN_TEST(test_codegen_cascade_bellman_ford);
     RUN_TEST(test_codegen_two_cross_gen);
     RUN_TEST(test_codegen_independent_cross_gen);
