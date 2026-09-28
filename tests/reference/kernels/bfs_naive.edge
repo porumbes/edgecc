@@ -1,0 +1,11 @@
+// Reachability from node 0: naive (unpruned frontier)
+dim N = *;
+tensor G[R=N, C=N]   : float, empty = 0.0;
+tensor F[gen I, R=N] : float, empty = 0.0;   // frontier
+tensor P[gen I, R=N] : float, empty = 0.0;   // visited (watched)
+init G = load("graph.mtx");
+init F = seed(source=0, value=1.0);
+init P = seed(source=0, value=1.0);
+F[i+1, d] = G[s,d] . F[i,s] :: map(and,intersect) reduce(or,union);
+P[i+1, d] = P[i,d] . F[i+1,d] :: map(or,union) reduce(or,union);
+stop: stable(P);

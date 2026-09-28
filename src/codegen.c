@@ -1056,8 +1056,10 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
                     IRTensorAlloc tmp; memset(&tmp, 0, sizeof(tmp));
                     tmp.ndims = gloop->cross_gens[c].spatial_ndims;
                     tmp.empty_val = gloop->cross_gens[c].empty_val;
-                    for (int k = 0; k < tmp.ndims; k++)
+                    for (int k = 0; k < tmp.ndims; k++) {
                         tmp.dim_sizes[k] = gloop->cross_gens[c].spatial_dims[k];
+                        tmp.dim_names[k] = gloop->cross_gens[c].spatial_dim_names[k];
+                    }
                     cb_indent(&cb);
                     cb_appendf(&cb, "%s_next = ", gloop->cross_gens[c].name);
                     emit_alloc(&cb, &tmp, ir, i);
@@ -1067,8 +1069,10 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
                     IRTensorAlloc tmp; memset(&tmp, 0, sizeof(tmp));
                     tmp.ndims = gloop->intermediates[m].spatial_ndims;
                     tmp.empty_val = gloop->intermediates[m].empty_val;
-                    for (int k = 0; k < tmp.ndims; k++)
+                    for (int k = 0; k < tmp.ndims; k++) {
                         tmp.dim_sizes[k] = gloop->intermediates[m].spatial_dims[k];
+                        tmp.dim_names[k] = gloop->intermediates[m].spatial_dim_names[k];
+                    }
                     cb_indent(&cb);
                     cb_appendf(&cb, "%s = ", gloop->intermediates[m].name);
                     emit_alloc(&cb, &tmp, ir, i);

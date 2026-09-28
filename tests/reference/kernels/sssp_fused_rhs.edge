@@ -1,0 +1,8 @@
+// SSSP from node 0: fused, paren on the right  D .2 (W .1 D)
+dim N = *;
+tensor W[R=N, C=N]   : float, empty = 0.0;   // loaded weights; 0.0 = no edge
+tensor D[gen I, R=N] : float, empty = inf;   // distances (watched)
+init W = load("graph.mtx");
+init D = seed(source=0, value=0.0);
+D[i+1, d] = D[i,d] .2 (W[s,d] .1 D[i,s]) :: map.1(add,intersect) reduce.1(min,union) map.2(min,union);
+stop: stable(D);

@@ -36,8 +36,45 @@ This runs:
 - **E2E tests** (`tests/e2e/run_e2e.py`): compiles `.edge` files, runs generated Python, compares stdout against expected output
 - **Negative tests** (`tests/negative/run_negative.py`): invalid programs that must produce specific error messages
 - **Iterative E2E tests** (`tests/e2e/iterative/run_iterative.py`): drives a generated kernel in a loop with feedback until a watched tensor stabilizes (e.g., BFS). Requires PyYAML (`pip install pyyaml`); skipped if missing.
+- **Reference tests** (`tests/reference/run_reference.py`, ctest `reference_tests`): kernels in `tests/reference/kernels/` (written with `dim N = *` + `load` + `seed` so one kernel runs on any graph) are run on the vendored SuiteSparse graphs plus seeded random directed weighted graphs and compared against **independent** implementations (scipy.sparse.csgraph / numpy), never against another edgecc form. Add a case to `CASES` for any new semantics with a known graph-algorithm meaning. Skipped without scipy.
+- **Fuzz tests** (`tests/fuzz/run_fuzz.py`, ctest `fuzz_tests`): token-level mutations of the example/e2e/negative corpus; every case must be a clean rejection (exit 1 with an error) or Python that compiles and, without file I/O, runs without a codegen-bug exception. Fixed seed in ctest; `--cases N --seed S` for long runs, `--seed S --only I` to replay a failure.
+- **Reserved-name sync** (`tests/reserved/run_reserved_names.py`, ctest `reserved_names_tests`): fails if codegen emits a name users could collide with that is missing from `PY_RESERVED` in `src/semantic.c`. If you add a codegen temporary, either `_`-prefix it or add it to that list.
 
 Run a single unit test: `./build/test_lexer`
+
+### Pre-merge gate
+
+```bash
+tools/premerge.sh
+```
+
+Runs the normal build + ctest, a UBSan build (`build-ubsan/`) + ctest, and a long mutation fuzz (5000 cases, fresh random seed, printed for replay) against the UBSan binary. ~1 minute; non-zero exit on any failure; logs in `build/premerge/`. **Must pass before any merge to `main`.** (ASan is not used: ASan binaries hang at startup on the dev Mac.)
+
+## Adding a feature (process)
+
+Each feature is its own small, reviewable cycle; split big goals into
+sub-pieces (e.g. "full BFS" became C1, C2, `!`, fusion).
+
+1. **Brainstorm → spec** in `docs/superpowers/specs/<date>-edgecc-<topic>-design.md`.
+2. **Plan** in `docs/superpowers/plans/<date>-edgecc-<topic>.md`: one task per
+   pipeline stage (lexer → AST → parser → semantic → IR → codegen → e2e →
+   negatives → docs), each test-first. Every plan must include:
+   - an **unknown-value negative test for every new named slot** (operator,
+     keyword, label, option) — the unknown-compute-op bug hid for months
+     because only merge names had one;
+   - an **independent-reference check** (a `tests/reference/` case) for new
+     semantics with a known meaning, on at least one real graph — a
+     differential oracle between two edgecc forms is not enough;
+   - **scaffolding-test reconciliation** when a restriction is lifted
+     (delete / tighten / keep each test that defended it);
+   - a final **Finish** task: run `tools/premerge.sh`; record spec
+     deviations in the spec itself; tick the plan's checkboxes; merge
+     `--no-ff` into `main` and update CLAUDE.md/roadmap/memory — in the
+     same session, so finished work never sits unmerged.
+3. **Implement** on a feature branch in a worktree (`.worktrees/<name>`),
+   one implementer at a time, each task reviewed for spec compliance, then
+   code quality. Bugs found along the way get a failing test before the fix;
+   small ones are fixed in place, bigger ones are recorded as future work.
 
 ## Architecture
 
@@ -122,6 +159,14 @@ stop: stable(P);
 ```
 
 See `docs/superpowers/specs/2026-06-02-edgecc-multi-cross-gen-tensors-c1-design.md`.
+
+**Names.** Dim names, tensor names, and rank variables are emitted verbatim into
+the generated Python, so they may not be Python keywords, builtins/modules the
+generated code uses (`range`, `min`, `math`, `run`, …), codegen temporaries
+(`state`, `map_val`, …), or start with `_` (the full list is `PY_RESERVED` in
+`src/semantic.c`); a rank variable may not reuse a dim or tensor name, and a
+tensor may not be named `<T>_prev`/`<T>_next` for a generational `T`. A program
+must contain at least one Einsum.
 
 Rank variables in expressions bind to declared rank names by position. Built-in compute operators: `add`, `sub`, `mul`, `min`, `max`, `and`, `or`, `take_left` (map-only — emits its left operand verbatim; pair with the `take_left_only` or `intersect` merge for a value-preserving mask; using it as a `reduce` operator is an error). Built-in merge operators (optional second arg, default `passthrough`): `passthrough`, `nopass`, `intersect`, `take_left`, `take_left_only`, `take_right`, `take_right_only`, `xor`, `union`. Omitting the merge argument preserves v1 source-program semantics. Unary complement: prefix a map operand with `!` (the paper's `¬`) to use its existence complement — `!X` is present exactly where `X` is empty (supplying a `1.0` true marker there). Paper-faithful masking is `A . !B :: map(take_left, intersect)`, equivalent to the `map(_, take_left_only)` encoding. `!` is operand-only (not on the output) and keys off empty-vs-non-empty, so it works for any declared type.
 

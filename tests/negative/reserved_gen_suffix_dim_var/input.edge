@@ -1,0 +1,12 @@
+// F and P are generational, so the generated code owns F_prev/F_next and
+// P_prev/P_next -- as dim names and rank variables too, not just tensors.
+dim F_prev = 3;
+tensor G[R=F_prev, C=F_prev] : float, empty = 0.0;
+tensor F[gen I, R=F_prev]    : float, empty = 0.0;
+tensor P[gen I, R=F_prev]    : float, empty = 0.0;
+init G = [[0.0,1.0,0.0],[0.0,0.0,1.0],[0.0,0.0,0.0]];
+init F = [1.0, 0.0, 0.0];
+init P = [1.0, 0.0, 0.0];
+F[i+1, P_next] = G[s,P_next] . F[i,s] :: map(and,intersect) reduce(or,union);
+P[i+1, d] = P[i,d] . F[i+1,d] :: map(or,union) reduce(or,union);
+stop: stable(P);

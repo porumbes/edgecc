@@ -307,6 +307,8 @@ static void fill_gen_alloc(IRGenAlloc *a, TensorEntry *te) {
     int sn = 0;
     for (int i = 0; i < te->num_ranks; i++) {
         if (i == te->gen_axis) continue;
+        const char *dn = te->ranks[i].dim_name;
+        a->spatial_dim_names[sn] = dn ? dup_str(dn) : NULL;
         a->spatial_dims[sn++] = te->dim_sizes[i];
     }
     a->spatial_ndims = sn;
@@ -396,11 +398,17 @@ void ir_free(IRProgram *ir) {
             case IR_LOOP_END:
                 break;
             case IR_GEN_LOOP_BEGIN:
-                for (int c = 0; c < instr->data.gen_loop.num_cross_gens; c++)
+                for (int c = 0; c < instr->data.gen_loop.num_cross_gens; c++) {
                     free(instr->data.gen_loop.cross_gens[c].name);
+                    for (int k = 0; k < instr->data.gen_loop.cross_gens[c].spatial_ndims; k++)
+                        free(instr->data.gen_loop.cross_gens[c].spatial_dim_names[k]);
+                }
                 free(instr->data.gen_loop.watch);
-                for (int j = 0; j < instr->data.gen_loop.num_intermediates; j++)
+                for (int j = 0; j < instr->data.gen_loop.num_intermediates; j++) {
                     free(instr->data.gen_loop.intermediates[j].name);
+                    for (int k = 0; k < instr->data.gen_loop.intermediates[j].spatial_ndims; k++)
+                        free(instr->data.gen_loop.intermediates[j].spatial_dim_names[k]);
+                }
                 break;
             case IR_GEN_LOOP_END:
                 break;

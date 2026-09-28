@@ -27,6 +27,142 @@ static void add_error(SemanticResult *res, const char *fmt, ...) {
     res->errors[res->error_count++] = buf;
 }
 
+/* ---- Reserved identifiers ----
+ * Dim names, tensor names, and rank variables are emitted verbatim into the
+ * generated Python, so they must not collide with Python keywords, the
+ * builtins/modules the generated code uses, or codegen's own temporaries.
+ * Names starting with '_' are reserved wholesale for codegen. Keep this list
+ * in sync with codegen.c -- tests/reserved/run_reserved_names.py checks it
+ * against what the compiler actually emits. */
+/* BEGIN PY_RESERVED */
+static const char *const PY_RESERVED[] = {
+    /* Python keywords */
+    "False", "None", "True", "and", "as", "assert", "async", "await", "break",
+    "class", "continue", "def", "del", "elif", "else", "except", "finally",
+    "for", "from", "global", "if", "import", "in", "is", "lambda", "nonlocal",
+    "not", "or", "pass", "raise", "return", "try", "while", "with", "yield",
+    /* builtins, modules, and top-level names used by generated code */
+    "ImportError", "RuntimeError", "SystemExit", "ValueError", "hasattr",
+    "isinstance", "len", "list", "max", "min", "open", "print", "range",
+    "json", "math", "mmread", "mmwrite", "np", "run", "sys",
+    /* codegen temporaries */
+    "a_exists", "a_op", "a_val", "b_exists", "b_m", "b_op", "b_s", "b_val",
+    "c_exists", "c_val", "i_op", "map_emitted", "map_val", "new_state",
+    "o_op", "state", "val_for_red",
+};
+/* END PY_RESERVED */
+
+static int is_py_reserved(const char *name) {
+    if (name[0] == '_') return 1;
+    for (size_t i = 0; i < sizeof(PY_RESERVED) / sizeof(PY_RESERVED[0]); i++)
+        if (strcmp(name, PY_RESERVED[i]) == 0) return 1;
+    return 0;
+}
+
+/* A generational tensor T owns the generated names T_prev and T_next. */
+static int is_gen_buffer_name(AstNode *program, const char *name) {
+    ProgramData *pd = &program->data.program;
+    for (int i = 0; i < pd->count; i++) {
+        AstNode *s = pd->statements[i];
+        if (s->type != NODE_TENSOR_DECL) continue;
+        TensorDeclData *t = &s->data.tensor_decl;
+        int gen = 0;
+        for (int r = 0; r < t->num_ranks; r++) gen |= t->ranks[r].is_generational;
+        size_t n = strlen(t->name);
+        if (gen && strncmp(name, t->name, n) == 0 &&
+            (strcmp(name + n, "_prev") == 0 || strcmp(name + n, "_next") == 0))
+            return 1;
+    }
+    return 0;
+}
+
+static AstNode *find_decl(AstNode *program, NodeType type, const char *name) {
+    ProgramData *pd = &program->data.program;
+    for (int i = 0; i < pd->count; i++) {
+        AstNode *s = pd->statements[i];
+        if (s->type != type) continue;
+        const char *n = type == NODE_DIM_DECL ? s->data.dim_decl.name : s->data.tensor_decl.name;
+        if (strcmp(n, name) == 0) return s;
+    }
+    return NULL;
+}
+
+/* Names already reported, so a name used in several places yields one
+   error, not one per occurrence. */
+typedef struct { const char *names[64]; int n; } ReportedNames;
+
+static int first_report(ReportedNames *seen, const char *name) {
+    for (int i = 0; i < seen->n; i++)
+        if (strcmp(seen->names[i], name) == 0) return 0;
+    if (seen->n < 64) seen->names[seen->n++] = name;
+    return 1;
+}
+
+static void check_reserved(SemanticResult *res, ReportedNames *seen, AstNode *program,
+                           const char *what, const char *name) {
+    const char *why = is_py_reserved(name) ? "keyword, builtin, or compiler temporary"
+                    : is_gen_buffer_name(program, name) ? "buffer of a generational tensor"
+                    : NULL;
+    if (why && first_report(seen, name))
+        add_error(res, "%s '%s' is reserved in the generated Python (%s); rename it",
+                  what, name, why);
+}
+
+static void check_ref_vars(SemanticResult *res, ReportedNames *seen,
+                           ReportedNames *shadowed, AstNode *program, const TensorRef *r) {
+    AstNode *decl = find_decl(program, NODE_TENSOR_DECL, r->tensor_name);
+    for (int k = 0; k < r->num_vars; k++) {
+        /* The generational coordinate is never emitted (the loop counter is
+           _it), so its variable cannot collide with anything. */
+        if (decl && k < decl->data.tensor_decl.num_ranks &&
+            decl->data.tensor_decl.ranks[k].is_generational)
+            continue;
+        const char *v = r->rank_vars[k];
+        check_reserved(res, seen, program, "rank variable", v);
+        /* Other rank variables become loop variables, which would shadow a
+           dim or tensor of the same name inside run(). */
+        const char *kind = find_decl(program, NODE_DIM_DECL, v) ? "dim"
+                         : find_decl(program, NODE_TENSOR_DECL, v) ? "tensor" : NULL;
+        if (kind && first_report(shadowed, v))
+            add_error(res, "rank variable '%s' shadows %s '%s' in the generated Python; rename it",
+                      v, kind, v);
+    }
+}
+
+static void validate_identifiers(SemanticResult *res, AstNode *program) {
+    ProgramData *pd = &program->data.program;
+    ReportedNames seen = { {0}, 0 }, shadowed = { {0}, 0 };
+    for (int i = 0; i < pd->count; i++) {
+        AstNode *s = pd->statements[i];
+        switch (s->type) {
+            case NODE_DIM_DECL:
+                check_reserved(res, &seen, program, "dim", s->data.dim_decl.name);
+                break;
+            case NODE_TENSOR_DECL: {
+                const char *name = s->data.tensor_decl.name;
+                check_reserved(res, &seen, program, "tensor", name);
+                if (find_decl(program, NODE_DIM_DECL, name))
+                    add_error(res, "tensor '%s' has the same name as dim '%s' "
+                                   "(both become Python names); rename one", name, name);
+                break;
+            }
+            case NODE_EINSUM:
+                check_ref_vars(res, &seen, &shadowed, program, &s->data.einsum.output);
+                check_ref_vars(res, &seen, &shadowed, program, &s->data.einsum.input1);
+                check_ref_vars(res, &seen, &shadowed, program, &s->data.einsum.input2);
+                break;
+            case NODE_EINSUM_FUSED:
+                check_ref_vars(res, &seen, &shadowed, program, &s->data.einsum_fused.output);
+                check_ref_vars(res, &seen, &shadowed, program, &s->data.einsum_fused.inner1);
+                check_ref_vars(res, &seen, &shadowed, program, &s->data.einsum_fused.inner2);
+                check_ref_vars(res, &seen, &shadowed, program, &s->data.einsum_fused.outer);
+                break;
+            default:
+                break;
+        }
+    }
+}
+
 /* ---- Symbol table helpers ---- */
 
 static int find_dim(SymbolTable *st, const char *name) {
@@ -713,6 +849,8 @@ SemanticResult semantic_analyze(AstNode *program) {
         return res;
     }
 
+    validate_identifiers(&res, program);
+
     ProgramData *pd = &program->data.program;
     int einsum_index = 0;
     for (int i = 0; i < pd->count; i++) {
@@ -744,6 +882,9 @@ SemanticResult semantic_analyze(AstNode *program) {
                 break;
         }
     }
+
+    if (einsum_index == 0)
+        add_error(&res, "program has no Einsum statement (nothing to compute)");
 
     validate_cascade_ordering(&res, program);
 

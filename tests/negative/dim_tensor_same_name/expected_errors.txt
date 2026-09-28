@@ -1,0 +1,1 @@
+tensor 'A' has the same name as dim 'A'

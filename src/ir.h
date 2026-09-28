@@ -93,6 +93,7 @@ typedef struct {
 typedef struct {
     char *name;
     int spatial_dims[8];     /* shape excluding the generational axis */
+    char *spatial_dim_names[8]; /* per-axis dim name (NULL if anonymous); owned */
     int spatial_ndims;
     double empty_val;
 } IRGenAlloc;

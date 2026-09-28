@@ -1,0 +1,2 @@
+rank variable 'N' shadows dim 'N'
+rank variable 'A' shadows tensor 'A'
