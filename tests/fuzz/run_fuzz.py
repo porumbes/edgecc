@@ -26,18 +26,36 @@ JUNK = ["@", "#", "$", "-1", "999999999", "1e999", "\"x\"", "(", ")", "[", "]",
 # Exceptions that, raised by a generated program, point at a codegen bug
 # rather than at legitimate program behavior (e.g. the generation cap).
 CODEGEN_BUG_EXC = {"SyntaxError", "NameError", "UnboundLocalError",
-                   "IndentationError", "AttributeError", "TypeError", "IndexError"}
+                   "IndentationError", "AttributeError", "TypeError", "IndexError",
+                   "KeyError", "ZeroDivisionError", "RecursionError"}
 EDGECC_TIMEOUT = 10
 RUN_TIMEOUT = 20
 
 
 def load_corpus():
-    paths = sorted(glob.glob(os.path.join(REPO, "examples", "*.edge"))
+    """Return (valid programs, negative-test programs, vocabulary)."""
+    valid = sorted(glob.glob(os.path.join(REPO, "examples", "*.edge"))
                    + glob.glob(os.path.join(REPO, "tests", "e2e", "*", "input.edge"))
-                   + glob.glob(os.path.join(REPO, "tests", "negative", "*", "input.edge")))
-    corpus = [(os.path.relpath(p, REPO), open(p).read()) for p in paths]
-    vocab = sorted({t for _, src in corpus for t in TOKEN_RE.findall(src) if not t.isspace()})
-    return corpus, vocab + JUNK
+                   + glob.glob(os.path.join(REPO, "tests", "reference", "kernels", "*.edge")))
+    negative = sorted(glob.glob(os.path.join(REPO, "tests", "negative", "*", "input.edge")))
+    read = lambda ps: [(os.path.relpath(p, REPO), open(p).read()) for p in ps]
+    valid, negative = read(valid), read(negative)
+    vocab = sorted({t for _, src in valid + negative for t in TOKEN_RE.findall(src) if not t.isspace()})
+    return valid, negative, vocab + JUNK
+
+
+def pick(valid, negative, rng):
+    # Mutating a valid program is far likelier to reach codegen than mutating
+    # an already-invalid one, so negatives are only an occasional source.
+    return rng.choice(negative) if negative and rng.random() < 0.1 else rng.choice(valid)
+
+
+def kind(tok):
+    if re.fullmatch(r"\d+|\.\d+", tok):
+        return "num"
+    if re.fullmatch(r"\w+", tok):
+        return "word"
+    return "punct"
 
 
 def mutate(src, vocab, rng):
@@ -58,7 +76,10 @@ def mutate(src, vocab, rng):
         elif op < 0.6:
             toks.insert(i, " " + rng.choice(vocab) + " ")
         elif op < 0.9:
-            toks[i] = rng.choice(vocab)
+            # Mostly swap like for like (word/number/punct) so more mutants
+            # still parse and reach semantic analysis and codegen.
+            same = [t for t in vocab if kind(t) == kind(toks[i])]
+            toks[i] = rng.choice(same if same and rng.random() < 0.7 else vocab)
         else:
             toks.insert(i, toks[i])
     lines[li] = "".join(toks)
@@ -118,13 +139,13 @@ def main():
     args = ap.parse_args()
     edgecc = os.path.abspath(args.edgecc)  # cases run with cwd = a temp dir
 
-    corpus, vocab = load_corpus()
+    valid, negative, vocab = load_corpus()
     indices = [args.only] if args.only is not None else range(args.cases)
     failures, accepted = [], 0
     with tempfile.TemporaryDirectory() as workdir:
         for i in indices:
             rng = random.Random(f"{args.seed}:{i}")
-            origin, src = rng.choice(corpus)
+            origin, src = pick(valid, negative, rng)
             prog, line = mutate(src, vocab, rng)
             why = check(edgecc, prog, workdir)
             if why:

@@ -45,6 +45,9 @@ build() {  # build <dir> [cmake args...]
 run_ctest() { (cd "$ROOT/$1" && ctest --output-on-failure); }
 
 echo "edgecc pre-merge gate  ($(git -C "$ROOT" rev-parse --abbrev-ref HEAD) @ $(git -C "$ROOT" rev-parse --short HEAD))"
+# The reference/iterative/.mtx suites skip (and ctest reports "Passed") when
+# their Python deps are missing; the gate must not pass on skips.
+step "python deps (numpy scipy yaml)" python3 -c "import numpy, scipy, yaml"
 step "build"                build build
 step "ctest"                run_ctest build
 step "build (UBSan)"        build build-ubsan -DCMAKE_BUILD_TYPE=Debug "-DCMAKE_C_FLAGS=$UBSAN_FLAGS"

@@ -212,7 +212,11 @@ def main():
                     failures.append((case["kernel"], gname, f"run() raised {type(e).__name__}: {e}"))
                     continue
                 exp = case["ref"](G)
-                if not case["cmp"](out, exp):
+                try:
+                    ok = case["cmp"](out, exp)
+                except Exception as e:  # e.g. wrong output shape
+                    ok, out = False, f"{out!r} (comparison raised {type(e).__name__}: {e})"
+                if not ok:
                     failures.append((case["kernel"], gname, f"got {out}\n       expected {exp}"))
 
     for kernel, gname, why in failures:
