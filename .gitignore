@@ -1,4 +1,5 @@
 build/
+build-ubsan/
 *.o
 *.pyc
 .DS_Store
