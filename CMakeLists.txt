@@ -136,3 +136,10 @@ add_test(
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/reference/run_reference.py
         $<TARGET_FILE:edgecc>
 )
+
+add_test(
+    NAME reserved_names_tests
+    COMMAND ${CMAKE_COMMAND} -E env python3
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/reserved/run_reserved_names.py
+        $<TARGET_FILE:edgecc>
+)

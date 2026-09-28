@@ -1,0 +1,9 @@
+// Names that would collide with the generated Python: a keyword rank
+// variable, a builtin dim, a codegen temporary tensor, and a leading underscore.
+dim range = 3;
+tensor state[R=range] : float, empty = 0.0;
+tensor _B[R=range]    : float, empty = 0.0;
+tensor Z[R=range]     : float, empty = 0.0;
+init state = [1.0, 2.0, 0.0];
+init _B = [1.0, 0.0, 3.0];
+Z[or] = state[or] . _B[or] :: map(add, union) reduce(add);
