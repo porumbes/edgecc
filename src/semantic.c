@@ -876,6 +876,9 @@ SemanticResult semantic_analyze(AstNode *program) {
         }
     }
 
+    if (einsum_index == 0)
+        add_error(&res, "program has no Einsum statement (nothing to compute)");
+
     validate_cascade_ordering(&res, program);
 
     /* Iterative consistency: a generational einsum needs a stop clause that
