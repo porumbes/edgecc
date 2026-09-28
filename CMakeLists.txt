@@ -122,3 +122,10 @@ add_test(
     COMMAND ${CMAKE_COMMAND} -E env python3
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/tools/test_fetch_suitesparse.py
 )
+
+add_test(
+    NAME fuzz_tests
+    COMMAND ${CMAKE_COMMAND} -E env python3
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/fuzz/run_fuzz.py
+        $<TARGET_FILE:edgecc>
+)
