@@ -1,0 +1,11 @@
+// Transitive closure T+ (paths of length >= 1), run on the 0/1 pattern graph.
+// Each generation's output starts empty, so the step must carry T forward:
+// T' = (G . T) or T, fused into one statement.
+dim N = *;
+tensor G[R=N, C=N]        : float, empty = 0.0;
+tensor T[gen I, R=N, C=N] : float, empty = 0.0;
+init G = load("graph.mtx");
+init T = load("graph.mtx");
+T[i+1, a, c] = (G[a,b] .1 T[i,b,c]) .2 T[i,a,c]
+  :: map.1(and,intersect) reduce.1(or,union) map.2(or,union);
+stop: stable(T);

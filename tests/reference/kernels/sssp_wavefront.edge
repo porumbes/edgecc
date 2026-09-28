@@ -1,0 +1,11 @@
+// SSSP from node 0: oscillating wavefront F + monotone best-known D.
+dim N = *;
+tensor G[R=N, C=N]   : float, empty = 0.0;
+tensor F[gen I, R=N] : float, empty = inf;   // wavefront candidate distances
+tensor D[gen I, R=N] : float, empty = inf;   // best-known distances (watched)
+init G = load("graph.mtx");
+init F = seed(source=0, value=0.0);
+init D = seed(source=0, value=0.0);
+F[i+1, d] = G[s,d] . F[i,s]   :: map(add, intersect) reduce(min, union);
+D[i+1, d] = D[i,d] . F[i+1,d] :: map(min, union) reduce(min, union);
+stop: stable(D);

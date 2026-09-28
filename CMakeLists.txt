@@ -129,3 +129,10 @@ add_test(
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/fuzz/run_fuzz.py
         $<TARGET_FILE:edgecc>
 )
+
+add_test(
+    NAME reference_tests
+    COMMAND ${CMAKE_COMMAND} -E env python3
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/reference/run_reference.py
+        $<TARGET_FILE:edgecc>
+)
