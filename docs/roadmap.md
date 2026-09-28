@@ -1,6 +1,6 @@
 # edgecc roadmap & feature status
 
-**Last updated:** 2026-06-08
+**Last updated:** 2026-09-28
 
 Legend:  ✅ implemented · 🚧 partial · ❌ planned
 
@@ -13,7 +13,8 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 | Compute ops — `add` `sub` `mul` `min` `max` `and` `or` `take_left` | ✅ |
 | Merge ops — 9 of 16 (`passthrough` `nopass` `intersect` `take_left[_only]` `take_right[_only]` `xor` `union`) | 🚧 |
 | Unary complement `!` (the paper's `¬`) — per-operand existence complement | ✅ |
-| `<<` update op · compute labels · multi-operation expressions | ❌ |
+| Two-action fused Einsums `(A .1 B) .2 C` | ✅ |
+| `<<` update op · compute labels · general N-ary nesting · matrix-chain | ❌ |
 | Anonymous tensors / sub-expressions · user-defined unary funcs · user-defined ops | ❌ |
 | **Iteration** | |
 | Generational ranks (`gen`, `stop: stable`) | ✅ |
@@ -38,9 +39,11 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 | Per-scalar stepping · scrubbing · animation export · print themes | ❌ |
 | **Test data** | |
 | SuiteSparse: vendored graphs + stdlib fetch script | ✅ |
-| Expanded test set · one-kernel × many-graphs sweep runner | ❌ |
+| Independent-reference suite (kernels × vendored + random graphs vs scipy) | ✅ |
+| Expanded test set · user-facing one-kernel × many-graphs sweep runner | ❌ |
 | **Tooling** | |
 | CLI (`--dump-ir`, `--emit-trace`) | ✅ |
+| Pre-merge gate `tools/premerge.sh` (ctest + UBSan + mutation fuzz) | ✅ |
 | VS Code: syntax highlighting + static autocomplete | ✅ |
 | VS Code Tier-2 (context-aware) · Neovim port | ❌ |
 | Compiler optimizations | ❌ |
@@ -60,7 +63,7 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 - **`seed(source=I, value=V)`** source vectors sized to a loaded graph (unblocks BFS/SSSP on real graphs).
 - **SuiteSparse data:** `data/suitesparse/` (vendored karate/lesmis/GD98_a) + `tools/fetch_suitesparse.py` (manifest + sha256).
 - **Visualization:** `tools/edgecc_viz.py` with six layouts; non-spring layouts fall back to spring on failure.
-- **Tooling/tests:** CLI flags; VS Code extension (Tier 1); 11 ctest targets (unit, e2e, negative, iterative, trace, viz, fetch-helper).
+- **Tooling/tests:** CLI flags; VS Code extension (Tier 1); 14 ctest targets (unit, e2e, negative, iterative, trace, viz, fetch-helper, reference, fuzz, reserved-names); `tools/premerge.sh` gate (normal + UBSan suites, long mutation fuzz) required before merging.
 
 ### Partial 🚧
 - **Merge ops:** 9 of 16 shipped; the 7 `(No,No)→Yes` operators (NOR, equivalence, NAND, ¬→, ¬←, ⇐, ⇒) are not implemented.
