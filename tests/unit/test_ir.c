@@ -398,6 +398,32 @@ TEST(test_ir_save_instruction) {
     ir_free(ir);
 }
 
+TEST(test_ir_fused_push_node) {
+    AstNode *ast = parse(
+        "dim N = 3;\n"
+        "tensor F[R=N] : float, empty = 0.0;\n"
+        "tensor G[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor P[R=N] : float, empty = 0.0;\n"
+        "init G = [[0,0,0],[0,0,0],[0,0,0]];\n"
+        "init F = [1.0,0.0,0.0];\n"
+        "init P = [1.0,0.0,0.0];\n"
+        "F[d] = (G[s,d] .1 F[s]) .2 P[d] "
+        ":: map.1(and,intersect) reduce.1(or,union) map.2(take_left,intersect);\n");
+    SemanticResult sem = semantic_analyze(ast);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    int found = 0;
+    for (int i = 0; i < ir->count; i++) if (ir->instrs[i].type == IR_FUSED) {
+        IRFused *fu = &ir->instrs[i].data.fused;
+        ASSERT_INT_EQ(1, fu->reduce_on_action);
+        ASSERT_INT_EQ(1, fu->num_free);
+        ASSERT_INT_EQ(1, fu->num_red);
+        ASSERT_INT_EQ(OP_TAKE_LEFT, fu->map2_op);
+        found = 1;
+    }
+    ASSERT_INT_EQ(1, found);
+    ir_free(ir); semantic_result_free(&sem); ast_free(ast);
+}
+
 int main(void) {
     RUN_TEST(test_ir_gemm_structure);
     RUN_TEST(test_ir_load_carries_negate);
@@ -410,5 +436,6 @@ int main(void) {
     RUN_TEST(test_ir_load_init_carries_path);
     RUN_TEST(test_ir_inferred_dim_flag);
     RUN_TEST(test_ir_save_instruction);
+    RUN_TEST(test_ir_fused_push_node);
     return test_report();
 }

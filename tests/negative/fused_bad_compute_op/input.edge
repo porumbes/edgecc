@@ -1,0 +1,8 @@
+dim N = 3;
+tensor F[R=N] : float, empty = 0.0;
+tensor G[R=N, C=N] : float, empty = 0.0;
+tensor P[R=N] : float, empty = 0.0;
+init G = [[0,0,0],[0,0,0],[0,0,0]];
+init F = [1.0,0.0,0.0];
+init P = [1.0,0.0,0.0];
+F[d] = (G[s,d] .1 F[s]) .2 P[d] :: map.1(and,intersect) reduce.1(orunion, over=s) map.2(take_left,intersect);

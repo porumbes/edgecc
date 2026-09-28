@@ -1,0 +1,21 @@
+// Pull-BFS, fused: (G · !P) gathers candidate edges to unvisited nodes, then
+// the outer action reduces over s against the frontier F. Same result as push.
+dim N = 6;
+
+tensor G[R=N, C=N]   : float, empty = 0.0;
+tensor F[gen I, R=N] : float, empty = 0.0;
+tensor P[gen I, R=N] : float, empty = 0.0;
+
+init G = [[0.0,1.0,1.0,0.0,0.0,0.0],
+          [0.0,0.0,0.0,1.0,0.0,0.0],
+          [0.0,0.0,0.0,1.0,1.0,0.0],
+          [0.0,0.0,0.0,0.0,0.0,1.0],
+          [0.0,0.0,0.0,0.0,0.0,1.0],
+          [0.0,0.0,0.0,0.0,0.0,0.0]];
+init F = [1.0,0.0,0.0,0.0,0.0,0.0];
+init P = [1.0,0.0,0.0,0.0,0.0,0.0];
+
+F[i+1, d] = (G[s,d] .1 !P[i,d]) .2 F[i,s]
+  :: map.1(and,intersect) map.2(and,intersect) reduce.2(or,union, over=s);
+P[i+1, d] = P[i,d] . F[i+1,d] :: map(or,union) reduce(or,union);
+stop: stable(P);

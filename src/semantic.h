@@ -38,6 +38,10 @@ typedef struct {
     int num_free_indices;
     IndexEntry reduction_indices[MAX_INDICES];
     int num_reduction_indices;
+    int is_fused;
+    IndexEntry a1_reduce[MAX_INDICES]; int num_a1_reduce;
+    IndexEntry a2_reduce[MAX_INDICES]; int num_a2_reduce;
+    int inter_is_left2;
 } EinsumClass;
 
 typedef struct {

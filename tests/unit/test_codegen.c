@@ -455,7 +455,51 @@ TEST(test_codegen_seed_generational) {
     ast_free(ast);
 }
 
+TEST(test_codegen_fused_push) {
+    AstNode *ast = parse(
+        "dim N = 3;\n"
+        "tensor F[R=N] : float, empty = 0.0;\n"
+        "tensor G[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor P[R=N] : float, empty = 0.0;\n"
+        "init G = [[0,0,0],[0,0,0],[0,0,0]];\n"
+        "init F = [1.0,0.0,0.0];\n"
+        "init P = [1.0,0.0,0.0];\n"
+        "F[d] = (G[s,d] .1 F[s]) .2 !P[d] "
+        ":: map.1(and,intersect) reduce.1(or,union) map.2(take_left,intersect);\n");
+    SemanticResult sem = semantic_analyze(ast);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    char *code = codegen_python(ir);
+    ASSERT_NOT_NULL(code);
+    ASSERT_TRUE(strstr(code, "_acc1 =") != NULL);
+    ASSERT_TRUE(strstr(code, "_inter =") != NULL);
+    ASSERT_TRUE(strstr(code, "c_exists = c_val == 0.0") != NULL);   /* !P existence flip */
+    ASSERT_TRUE(strstr(code, "NotImplementedError") == NULL);       /* stub replaced */
+    free(code); ir_free(ir); semantic_result_free(&sem); ast_free(ast);
+}
+
+TEST(test_codegen_fused_pull) {
+    AstNode *ast = parse(
+        "dim N = 3;\n"
+        "tensor F[R=N] : float, empty = 0.0;\n"
+        "tensor G[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor P[R=N] : float, empty = 0.0;\n"
+        "init G = [[0,0,0],[0,0,0],[0,0,0]];\n"
+        "init F = [1.0,0.0,0.0];\n"
+        "init P = [1.0,0.0,0.0];\n"
+        "F[d] = (G[s,d] .1 !P[d]) .2 F[s] "
+        ":: map.1(and,intersect) map.2(and,intersect) reduce.2(or,union);\n");
+    SemanticResult sem = semantic_analyze(ast);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    char *code = codegen_python(ir);
+    ASSERT_NOT_NULL(code);
+    ASSERT_TRUE(strstr(code, "_acc2 =") != NULL);       /* action-2 reduction accumulator */
+    ASSERT_TRUE(strstr(code, "_inter_emit") != NULL);   /* unified intermediate flag */
+    free(code); ir_free(ir); semantic_result_free(&sem); ast_free(ast);
+}
+
 int main(void) {
+    RUN_TEST(test_codegen_fused_push);
+    RUN_TEST(test_codegen_fused_pull);
     RUN_TEST(test_codegen_gemm);
     RUN_TEST(test_codegen_negated_operand);
     RUN_TEST(test_codegen_intersect_union);

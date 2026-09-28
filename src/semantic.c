@@ -230,6 +230,169 @@ static int find_index(IndexInfo *arr, int count, const char *name) {
     return -1;
 }
 
+/* Collect a ref's spatial index names (skipping its gen axis); returns count. */
+static int ref_spatial_indices(TensorRef *r, TensorEntry *te, char *names[], int *sizes) {
+    int n = 0;
+    for (int a = 0; a < r->num_vars && a < te->num_ranks; a++) {
+        if (a == te->gen_axis) continue;
+        names[n] = r->rank_vars[a];
+        sizes[n] = te->dim_sizes[a];
+        n++;
+    }
+    return n;
+}
+static int name_present(char *const names[], int n, const char *x) {
+    for (int i = 0; i < n; i++) if (strcmp(names[i], x) == 0) return 1;
+    return 0;
+}
+
+static void analyze_einsum_fused(SemanticResult *res, AstNode *node, int eidx) {
+    SymbolTable *st = res->symtab;
+    EinsumFusedData *f = &node->data.einsum_fused;
+    TensorEntry *out_te = symtab_find_tensor(st, f->output.tensor_name);
+    TensorEntry *i1_te  = symtab_find_tensor(st, f->inner1.tensor_name);
+    TensorEntry *i2_te  = symtab_find_tensor(st, f->inner2.tensor_name);
+    TensorEntry *ou_te  = symtab_find_tensor(st, f->outer.tensor_name);
+    if (!out_te || !i1_te || !i2_te || !ou_te) { add_error(res, "fused einsum: unknown tensor"); return; }
+
+    /* validate each ref's index count matches its tensor's declared rank count
+       (mirror the single-action arity check) */
+    {
+        TensorRef *frefs[4] = { &f->output, &f->inner1, &f->inner2, &f->outer };
+        TensorEntry *ftes[4] = { out_te, i1_te, i2_te, ou_te };
+        for (int k = 0; k < 4; k++) {
+            if (frefs[k]->num_vars != ftes[k]->num_ranks)
+                add_error(res,
+                          "fused einsum: tensor '%s' has %d ranks but %d index vars given",
+                          ftes[k]->name, ftes[k]->num_ranks, frefs[k]->num_vars);
+        }
+    }
+
+    /* generational metadata (mirror analyze_einsum over the four fused refs) */
+    {
+        TensorEntry *tes[4]  = { out_te, i1_te, i2_te, ou_te };
+        TensorRef   *refs[4] = { &f->output, &f->inner1, &f->inner2, &f->outer };
+        for (int k = 0; k < 4; k++) {
+            if (tes[k]->gen_axis >= 0 && tes[k]->gen_axis < refs[k]->num_vars) {
+                st->is_iterative = 1;
+                char *v = refs[k]->rank_vars[tes[k]->gen_axis];
+                if (st->gen_rank_var == NULL) st->gen_rank_var = v;
+                else if (strcmp(st->gen_rank_var, v) != 0)
+                    add_error(res, "generational rank variable mismatch: '%s' vs '%s'", st->gen_rank_var, v);
+            }
+        }
+        if (out_te->gen_axis >= 0) {
+            if (f->output.gen_axis >= 0 && f->output.gen_axis != out_te->gen_axis) {
+                add_error(res, "generational tensor '%s' written with an offset on the wrong axis", out_te->name);
+            } else {
+                int eff_off = (f->output.gen_axis == out_te->gen_axis) ? f->output.gen_offset : 0;
+                if (eff_off == 1) {
+                    int seen = 0;
+                    for (int m = 0; m < st->num_gen_tensors; m++)
+                        if (strcmp(st->gen_tensors[m], out_te->name) == 0) seen = 1;
+                    if (!seen && st->num_gen_tensors < MAX_TENSORS) {
+                        st->gen_tensors[st->num_gen_tensors++] = out_te->name;
+                        if (st->gen_tensor == NULL) st->gen_tensor = out_te->name;
+                    }
+                } else if (eff_off == 0) {
+                    int seen = 0;
+                    for (int m = 0; m < st->num_intermediates; m++)
+                        if (strcmp(st->intermediates[m], out_te->name) == 0) seen = 1;
+                    if (!seen && st->num_intermediates < MAX_TENSORS)
+                        st->intermediates[st->num_intermediates++] = out_te->name;
+                } else {
+                    add_error(res, "generational tensor '%s' written at unsupported offset +%d (only i and i+1 are allowed)", out_te->name, eff_off);
+                }
+            }
+        }
+    }
+
+    char *iname1[MAX_INDICES]; int isz1[MAX_INDICES]; int n1 = ref_spatial_indices(&f->inner1, i1_te, iname1, isz1);
+    char *iname2[MAX_INDICES]; int isz2[MAX_INDICES]; int n2 = ref_spatial_indices(&f->inner2, i2_te, iname2, isz2);
+    char *onm[MAX_INDICES];    int osz[MAX_INDICES];  int no = ref_spatial_indices(&f->outer,  ou_te, onm,    osz);
+    char *znm[MAX_INDICES];    int zsz[MAX_INDICES];  int nz = ref_spatial_indices(&f->output, out_te, znm,    zsz);
+
+    /* a rank name shared across operands must resolve to a single size */
+    {
+        char *seen_n[4 * MAX_INDICES]; int seen_s[4 * MAX_INDICES]; int seen_c = 0;
+        char *all_n[4 * MAX_INDICES]; int all_s[4 * MAX_INDICES]; int all_c = 0;
+        for (int i = 0; i < n1; i++) { all_n[all_c]=iname1[i]; all_s[all_c]=isz1[i]; all_c++; }
+        for (int i = 0; i < n2; i++) { all_n[all_c]=iname2[i]; all_s[all_c]=isz2[i]; all_c++; }
+        for (int i = 0; i < no; i++) { all_n[all_c]=onm[i];    all_s[all_c]=osz[i];  all_c++; }
+        for (int i = 0; i < nz; i++) { all_n[all_c]=znm[i];    all_s[all_c]=zsz[i];  all_c++; }
+        for (int i = 0; i < all_c; i++) {
+            int found = -1;
+            for (int j = 0; j < seen_c; j++) if (strcmp(seen_n[j], all_n[i])==0) found = j;
+            if (found < 0) { seen_n[seen_c]=all_n[i]; seen_s[seen_c]=all_s[i]; seen_c++; }
+            else if (seen_s[found] != all_s[i])
+                add_error(res, "fused einsum: index '%s' bound to size %d and size %d", all_n[i], seen_s[found], all_s[i]);
+        }
+    }
+
+    char *inner[2 * MAX_INDICES]; int innersz[2 * MAX_INDICES]; int ni = 0;
+    for (int i = 0; i < n1; i++) if (!name_present(inner, ni, iname1[i])) { inner[ni]=iname1[i]; innersz[ni]=isz1[i]; ni++; }
+    for (int i = 0; i < n2; i++) if (!name_present(inner, ni, iname2[i])) { inner[ni]=iname2[i]; innersz[ni]=isz2[i]; ni++; }
+
+    EinsumClass *ec = &st->einsum_class[eidx];
+    memset(ec, 0, sizeof(*ec));
+    ec->is_fused = 1;
+    ec->inter_is_left2 = f->inter_is_left2;
+
+    for (int i = 0; i < nz; i++) {
+        ec->free_indices[ec->num_free_indices].name = znm[i];
+        ec->free_indices[ec->num_free_indices].size = zsz[i];
+        ec->free_indices[ec->num_free_indices].is_free = 1;
+        ec->num_free_indices++;
+    }
+    for (int i = 0; i < ni; i++) {
+        int downstream = name_present(onm, no, inner[i]) || name_present(znm, nz, inner[i]);
+        if (!downstream) {
+            ec->a1_reduce[ec->num_a1_reduce].name = inner[i];
+            ec->a1_reduce[ec->num_a1_reduce].size = innersz[i];
+            ec->num_a1_reduce++;
+        }
+    }
+    char *inter[2 * MAX_INDICES]; int intersz[2 * MAX_INDICES]; int nint = 0;
+    for (int i = 0; i < ni; i++) {
+        int reduced = 0;
+        for (int j = 0; j < ec->num_a1_reduce; j++) if (strcmp(ec->a1_reduce[j].name, inner[i])==0) reduced = 1;
+        if (!reduced) { inter[nint]=inner[i]; intersz[nint]=innersz[i]; nint++; }
+    }
+    char *a2in[2 * MAX_INDICES]; int a2sz[2 * MAX_INDICES]; int na2 = 0;
+    for (int i = 0; i < nint; i++) if (!name_present(a2in, na2, inter[i])) { a2in[na2]=inter[i]; a2sz[na2]=intersz[i]; na2++; }
+    for (int i = 0; i < no;   i++) if (!name_present(a2in, na2, onm[i]))   { a2in[na2]=onm[i];   a2sz[na2]=osz[i];   na2++; }
+    for (int i = 0; i < na2; i++) {
+        if (!name_present(znm, nz, a2in[i])) {
+            ec->a2_reduce[ec->num_a2_reduce].name = a2in[i];
+            ec->a2_reduce[ec->num_a2_reduce].size = a2sz[i];
+            ec->num_a2_reduce++;
+        }
+    }
+
+    if (ec->num_a1_reduce > 0 && !f->a1_has_reduce)
+        add_error(res, "fused einsum: action 1 reduces an index but has no reduce.1");
+    if (ec->num_a1_reduce == 0 && f->a1_has_reduce)
+        add_error(res, "fused einsum: reduce.1 given but action 1 reduces nothing");
+    if (ec->num_a2_reduce > 0 && !f->a2_has_reduce)
+        add_error(res, "fused einsum: action 2 reduces an index but has no reduce.2");
+    if (ec->num_a2_reduce == 0 && f->a2_has_reduce)
+        add_error(res, "fused einsum: reduce.2 given but action 2 reduces nothing");
+    if (ec->num_a1_reduce > 0 && ec->num_a2_reduce > 0)
+        add_error(res, "fused einsum: reductions on both actions (matrix-chain) are not yet supported");
+    if (f->over1) {
+        int ok = 0; for (int j=0;j<ec->num_a1_reduce;j++) if (strcmp(ec->a1_reduce[j].name,f->over1)==0) ok=1;
+        if (!ok) add_error(res, "fused einsum: reduce.1 over= names a rank not reduced by action 1");
+    }
+    if (f->over2) {
+        int ok = 0; for (int j=0;j<ec->num_a2_reduce;j++) if (strcmp(ec->a2_reduce[j].name,f->over2)==0) ok=1;
+        if (!ok) add_error(res, "fused einsum: reduce.2 over= names a rank not reduced by action 2");
+    }
+    if (f->a1_has_reduce && f->reduce1_op == OP_TAKE_LEFT) add_error(res, "fused einsum: take_left cannot be a reduce operator");
+    if (f->a2_has_reduce && f->reduce2_op == OP_TAKE_LEFT) add_error(res, "fused einsum: take_left cannot be a reduce operator");
+
+    if (eidx + 1 > st->num_einsums) st->num_einsums = eidx + 1;
+}
+
 static void analyze_einsum(SemanticResult *res, AstNode *node, int eidx) {
     EinsumData *d = &node->data.einsum;
     if (d->reduce_op == OP_TAKE_LEFT) {
@@ -433,6 +596,15 @@ static void analyze_einsum(SemanticResult *res, AstNode *node, int eidx) {
         }
     }
 
+    /* Single-action reduce over= must name one of the reduction indices. */
+    if (d->reduce_over != NULL) {
+        int ok = 0;
+        for (int i = 0; i < st->num_reduction_indices; i++)
+            if (strcmp(st->reduction_indices[i].name, d->reduce_over) == 0) ok = 1;
+        if (!ok)
+            add_error(res, "reduce over= names a rank that is not reduced");
+    }
+
     /* Copy this Einsum's classification into the per-Einsum slot (cascade support).
        The global free/reduction fields remain populated for the single-Einsum path. */
     if (eidx >= 0 && eidx < MAX_EINSUMS) {
@@ -476,11 +648,19 @@ static void validate_cascade_ordering(SemanticResult *res, AstNode *program) {
     ProgramData *pd = &program->data.program;
     for (int i = 0; i < pd->count; i++) {
         AstNode *stmt = pd->statements[i];
-        if (stmt->type != NODE_EINSUM) continue;
-        EinsumData *e = &stmt->data.einsum;
+        TensorRef *ins[3]; int nins = 0; const char *onm = NULL;
+        if (stmt->type == NODE_EINSUM) {
+            ins[0] = &stmt->data.einsum.input1; ins[1] = &stmt->data.einsum.input2; nins = 2;
+            onm = stmt->data.einsum.output.tensor_name;
+        } else if (stmt->type == NODE_EINSUM_FUSED) {
+            ins[0] = &stmt->data.einsum_fused.inner1;
+            ins[1] = &stmt->data.einsum_fused.inner2;
+            ins[2] = &stmt->data.einsum_fused.outer;
+            nins = 3;
+            onm = stmt->data.einsum_fused.output.tensor_name;
+        } else continue;
 
-        TensorRef *ins[2] = { &e->input1, &e->input2 };
-        for (int k = 0; k < 2; k++) {
+        for (int k = 0; k < nins; k++) {
             const char *nm = ins[k]->tensor_name;
             /* (1) intermediate read-before-write */
             int is_inter = 0;
@@ -507,7 +687,6 @@ static void validate_cascade_ordering(SemanticResult *res, AstNode *program) {
         }
 
         /* record this Einsum's output */
-        const char *onm = e->output.tensor_name;
         for (int m = 0; m < st->num_intermediates; m++) {
             if (strcmp(st->intermediates[m], onm) == 0) {
                 written[nwritten++] = st->intermediates[m]; break;
@@ -550,6 +729,9 @@ SemanticResult semantic_analyze(AstNode *program) {
                 break;
             case NODE_EINSUM:
                 analyze_einsum(&res, stmt, einsum_index++);
+                break;
+            case NODE_EINSUM_FUSED:
+                analyze_einsum_fused(&res, stmt, einsum_index++);
                 break;
             case NODE_STOP:
                 analyze_stop(&res, stmt);
@@ -614,17 +796,21 @@ SemanticResult semantic_analyze(AstNode *program) {
     for (int m = 0; st->is_iterative && m < st->num_gen_tensors; m++) {
         const char *gt = st->gen_tensors[m];
         int read_at_i = 0;
-        for (int i = 0; i < pd->count; i++) {
+        for (int i = 0; i < pd->count && !read_at_i; i++) {
             AstNode *s = pd->statements[i];
-            if (s->type != NODE_EINSUM) continue;
-            EinsumData *e = &s->data.einsum;
-            TensorEntry *t1 = symtab_find_tensor(st, e->input1.tensor_name);
-            TensorEntry *t2 = symtab_find_tensor(st, e->input2.tensor_name);
-            int eff1 = (t1 && e->input1.gen_axis == t1->gen_axis) ? e->input1.gen_offset : 0;
-            int eff2 = (t2 && e->input2.gen_axis == t2->gen_axis) ? e->input2.gen_offset : 0;
-            if ((strcmp(e->input1.tensor_name, gt) == 0 && eff1 == 0) ||
-                (strcmp(e->input2.tensor_name, gt) == 0 && eff2 == 0)) {
-                read_at_i = 1; break;
+            TensorRef *ins[3]; int nins = 0;
+            if (s->type == NODE_EINSUM) {
+                ins[0] = &s->data.einsum.input1; ins[1] = &s->data.einsum.input2; nins = 2;
+            } else if (s->type == NODE_EINSUM_FUSED) {
+                ins[0] = &s->data.einsum_fused.inner1;
+                ins[1] = &s->data.einsum_fused.inner2;
+                ins[2] = &s->data.einsum_fused.outer;
+                nins = 3;
+            } else continue;
+            for (int k = 0; k < nins; k++) {
+                TensorEntry *t = symtab_find_tensor(st, ins[k]->tensor_name);
+                int eff = (t && ins[k]->gen_axis == t->gen_axis) ? ins[k]->gen_offset : 0;
+                if (strcmp(ins[k]->tensor_name, gt) == 0 && eff == 0) { read_at_i = 1; break; }
             }
         }
         if (!read_at_i) {

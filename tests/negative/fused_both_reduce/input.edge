@@ -1,0 +1,9 @@
+dim M = 2; dim K = 2; dim NN = 2; dim Pp = 2;
+tensor Z[R=M, C=Pp] : float, empty = 0.0;
+tensor A[R=M, C=K] : float, empty = 0.0;
+tensor B[R=K, C=NN] : float, empty = 0.0;
+tensor C[R=NN, C=Pp] : float, empty = 0.0;
+init A = [[1,2],[3,4]];
+init B = [[1,0],[0,1]];
+init C = [[1,1],[1,1]];
+Z[m,p] = (A[m,k] .1 B[k,n]) .2 C[n,p] :: map.1(mul,intersect) reduce.1(add,union) map.2(mul,intersect) reduce.2(add,union);

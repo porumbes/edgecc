@@ -122,7 +122,7 @@ Both-actions-reduce (matrix-chain) is **out of scope**: a clear semantic error (
 
 **Files:** Modify `src/lexer.l`; Test `tests/unit/test_lexer.c`. (Also add `%token TOK_OVER` in Task 3's parser work — but the lexer references `TOK_OVER` from `parser.tab.h`, so this task's build will fail until Task 3 declares the token. To keep Task 1 self-contained, declare the token here too by adding the `%token` line to `parser.y` now.)
 
-- [ ] **Step 1: Declare the token (parser) and write the failing lexer test**
+- [x] **Step 1: Declare the token (parser) and write the failing lexer test**
 
 In `src/parser.y`, add `TOK_OVER` to the token list (the line beginning `%token TOK_LOAD TOK_SAVE ...`):
 ```
@@ -138,24 +138,24 @@ TEST(test_over_keyword) {
 ```
 Registration: `    RUN_TEST(test_over_keyword);`
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `cmake --build build && ./build/test_lexer`
 Expected: FAIL — `over` currently lexes as `TOK_IDENT`, not `TOK_OVER`.
 
-- [ ] **Step 3: Add the lexer rule**
+- [x] **Step 3: Add the lexer rule**
 
 In `src/lexer.l`, with the other keyword rules (after `"seed"`):
 ```
 "over"              { return TOK_OVER; }
 ```
 
-- [ ] **Step 4: Verify pass**
+- [x] **Step 4: Verify pass**
 
 Run: `cmake --build build && ./build/test_lexer`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 ```bash
 git add src/lexer.l src/parser.y tests/unit/test_lexer.c
 git commit -m "lexer: add 'over' keyword for reduce rank tags"
@@ -167,7 +167,7 @@ git commit -m "lexer: add 'over' keyword for reduce rank tags"
 
 **Files:** Modify `src/ast.h`, `src/ast.c`. Test: covered by Task 3 parser tests (struct-only changes).
 
-- [ ] **Step 1: Add the node type and struct**
+- [x] **Step 1: Add the node type and struct**
 
 In `src/ast.h`, add to `NodeType`:
 ```c
@@ -210,7 +210,7 @@ Declare the constructor (after `ast_einsum_new`):
 AstNode *ast_einsum_fused_new(EinsumFusedData data);
 ```
 
-- [ ] **Step 2: Implement constructor, init, and free**
+- [x] **Step 2: Implement constructor, init, and free**
 
 In `src/ast.c`, in `ast_einsum_new`, initialize the new field (after the struct is populated, before return — find where `EinsumData` is filled and add):
 ```c
@@ -246,12 +246,12 @@ In `ast_free`, find the `NODE_EINSUM` case and extend it / add the fused case. T
 ```
 (If the existing `NODE_EINSUM` case already frees the three refs without `reduce_over`, just add the `free(node->data.einsum.reduce_over);` line.)
 
-- [ ] **Step 3: Verify build**
+- [x] **Step 3: Verify build**
 
 Run: `cmake --build build`
 Expected: builds clean (parser doesn't yet produce the node; no behavior change).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 ```bash
 git add src/ast.h src/ast.c
 git commit -m "ast: add NODE_EINSUM_FUSED and optional single-action reduce_over"
@@ -265,7 +265,7 @@ git commit -m "ast: add NODE_EINSUM_FUSED and optional single-action reduce_over
 
 This task adds: (a) an `opt_over` arg, (b) `over=` on the existing single-action reduce, (c) the fused production with a label-dispatched action list.
 
-- [ ] **Step 1: Write the failing parser tests**
+- [x] **Step 1: Write the failing parser tests**
 
 Add to `tests/unit/test_parser.c` (after the negation tests) and register all three in `main()`:
 ```c
@@ -319,12 +319,12 @@ TEST(test_parse_fused_pull_paren_right) {
 ```
 Registration: `    RUN_TEST(test_parse_single_reduce_over);` etc.
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cmake --build build && ./build/test_parser`
 Expected: build/parse failure — fused grammar and `over=` don't exist yet.
 
-- [ ] **Step 3: Add an action-spec accumulator in the prologue**
+- [x] **Step 3: Add an action-spec accumulator in the prologue**
 
 In `src/parser.y`, in the top C prologue (`%{ ... %}`), add:
 ```c
@@ -338,7 +338,7 @@ static FActList *factlist_new(void){ FActList *l=malloc(sizeof(FActList)); l->n=
 static void factlist_add(FActList *l, FAct a){ if(l->n<4) l->items[l->n++]=a; }
 ```
 
-- [ ] **Step 4: Add `opt_over` and extend the single-action reduce**
+- [x] **Step 4: Add `opt_over` and extend the single-action reduce**
 
 Add `%type <str_val> opt_over` near the other `%type` lines, and `%type <ptr> fused_rhs fused_action_list` and `%type <ptr> fused_action`.
 
@@ -361,7 +361,7 @@ In the existing single-action `einsum_stmt` rule, change the reduce part from
 ```
 (Replace the existing direct `$$ = (void *)ast_einsum_new(...)` with the two lines above.)
 
-- [ ] **Step 5: Add the fused production and action list**
+- [x] **Step 5: Add the fused production and action list**
 
 Add a second alternative to `einsum_stmt` (after the single-action rule's `;`-terminated action, as `|`):
 ```
@@ -436,14 +436,14 @@ fused_action:
     ;
 ```
 
-- [ ] **Step 6: Run to verify pass; check for grammar conflicts**
+- [x] **Step 6: Run to verify pass; check for grammar conflicts**
 
 Run: `cmake --build build 2>&1 | grep -iE 'conflict|error'` → expect no output (no shift/reduce conflicts).
 Run: `./build/test_parser` → expect PASS (including the 3 new tests and all existing).
 
 If Bison reports a conflict between the single-action `.` operand rule and the fused `.` TOK_INT_LIT rule: confirm it's resolved — `map_operand '.' TOK_IDENT` (single) vs `map_operand '.' TOK_INT_LIT` (fused) differ on the token after `.` (IDENT vs INT_LIT), so LALR(1) distinguishes them. If a conflict persists, STOP and report it.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 ```bash
 git add src/parser.y tests/unit/test_parser.c
 git commit -m "parser: fused einsum grammar (.N labels, map.N/reduce.N) and over= arg"
@@ -455,7 +455,7 @@ git commit -m "parser: fused einsum grammar (.N labels, map.N/reduce.N) and over
 
 **Files:** Modify `src/semantic.h`, `src/semantic.c`; Test `tests/unit/test_semantic.c`.
 
-- [ ] **Step 1: Extend `EinsumClass` (semantic.h)**
+- [x] **Step 1: Extend `EinsumClass` (semantic.h)**
 
 Add fused fields to `EinsumClass` (after the existing reduction fields):
 ```c
@@ -465,7 +465,7 @@ Add fused fields to `EinsumClass` (after the existing reduction fields):
     int inter_is_left2;
 ```
 
-- [ ] **Step 2: Write failing semantic tests**
+- [x] **Step 2: Write failing semantic tests**
 
 Add to `tests/unit/test_semantic.c` (use the file's existing `parse()` helper; register in `main()`):
 ```c
@@ -526,7 +526,7 @@ TEST(test_semantic_fused_bad_over_errors) {
 ```
 Register all three.
 
-- [ ] **Step 3: Implement `analyze_einsum_fused` and dispatch**
+- [x] **Step 3: Implement `analyze_einsum_fused` and dispatch**
 
 In `src/semantic.c`, find where statements are dispatched in `semantic_analyze` (a switch/if on `node->type` calling `analyze_einsum`). Add a branch: when `node->type == NODE_EINSUM_FUSED`, call `analyze_einsum_fused(res, node, eidx)` and increment the einsum index counter the same way the single-action path does.
 
@@ -642,12 +642,12 @@ static void analyze_einsum_fused(SemanticResult *res, AstNode *node, int eidx) {
 ```
 Add a forward declaration near the other static prototypes if needed. Also handle the single-action `reduce_over` validation in `analyze_einsum`: after it computes `reduction_indices`, if `d->reduce_over` is set, check it's among them, else `add_error(res, "reduce over= names a rank that is not reduced")`.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `cmake --build build && ./build/test_semantic`
 Expected: PASS (3 new tests + existing).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 ```bash
 git add src/semantic.h src/semantic.c tests/unit/test_semantic.c
 git commit -m "semantic: classify and validate fused einsums; single-action over= check"
@@ -659,7 +659,7 @@ git commit -m "semantic: classify and validate fused einsums; single-action over
 
 **Files:** Modify `src/ir.h`, `src/ir.c`; Test `tests/unit/test_ir.c`.
 
-- [ ] **Step 1: Define `IR_FUSED` (ir.h)**
+- [x] **Step 1: Define `IR_FUSED` (ir.h)**
 
 Add `IR_FUSED` to the `IRType` enum. Add a struct carrying everything codegen needs (operands, actions, classification). Place near the other IR structs:
 ```c
@@ -687,7 +687,7 @@ typedef struct {
 ```
 Add `IRFused fused;` to the IR instruction union and free its owned strings in `ir_free`'s switch.
 
-- [ ] **Step 2: Write failing IR test**
+- [x] **Step 2: Write failing IR test**
 
 Add to `tests/unit/test_ir.c` (register in `main()`):
 ```c
@@ -718,7 +718,7 @@ TEST(test_ir_fused_push_node) {
 }
 ```
 
-- [ ] **Step 3: Implement `emit_einsum_fused` and dispatch**
+- [x] **Step 3: Implement `emit_einsum_fused` and dispatch**
 
 In `src/ir.c`, in the lowering walk (where it dispatches `NODE_EINSUM` to `emit_einsum`), add: `NODE_EINSUM_FUSED → emit_einsum_fused(ir, node, symtab, eidx)`. Implement it modeled on `emit_einsum` for coord-stripping (`dup_coords_strip`), `gen_read_kind`, `is_cross_gen_name`, and `compute_op_identity`:
 ```c
@@ -779,12 +779,12 @@ static void emit_einsum_fused(IRProgram *ir, AstNode *node, SymbolTable *st, int
 ```
 Add a `dim_name_for_index_fused` helper modeled on the existing `dim_name_for_index` but scanning the four fused refs (output, inner1, inner2, outer). Add `ir_free` cleanup for all owned strings in the `IR_FUSED` case (out_name, out_coords[], the three operands' name+coords[], free_names[]/free_dimnames[], red_names[]/red_dimnames[]).
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `cmake --build build && ./build/test_ir`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 ```bash
 git add src/ir.h src/ir.c tests/unit/test_ir.c
 git commit -m "ir: IR_FUSED instruction and fused einsum lowering"
@@ -796,7 +796,7 @@ git commit -m "ir: IR_FUSED instruction and fused einsum lowering"
 
 **Files:** Modify `src/codegen.c`; Test `tests/unit/test_codegen.c`.
 
-- [ ] **Step 1: Write the failing codegen test**
+- [x] **Step 1: Write the failing codegen test**
 
 Add to `tests/unit/test_codegen.c` (register in `main()`):
 ```c
@@ -822,7 +822,7 @@ TEST(test_codegen_fused_push) {
 }
 ```
 
-- [ ] **Step 2: Implement `emit_fused_skeleton` + dispatch**
+- [x] **Step 2: Implement `emit_fused_skeleton` + dispatch**
 
 In `src/codegen.c`, in the main IR walk (the `switch (instr->type)` inside `codegen_python_ex`), add a `case IR_FUSED:` that calls `emit_fused_skeleton(&cb, &instr->data.fused)`. Implement the emitter to generate the push/pull/neither structures from the plan's "Generated-code targets," reusing `emit_merge_guard` and `compute_op_pyexpr`. Use a small static helper to emit one "map body" producing a named result var, and one "reduce step" into a named accumulator, parameterized by op/merge/empties/negate and the `_prev`/`_next` operand names (derive operand names from `gen_read`/`gen_write` exactly as `emit_general_skeleton` does at codegen.c:313-329). Full structure:
 
@@ -891,17 +891,17 @@ Implement the helpers `emit_map_body`, `emit_reduce_step`, `emit_action2_store`,
 
 (The plan's two "Generated-code targets" blocks are the exact byte target; match them.)
 
-- [ ] **Step 3: Run codegen test, then a manual smoke**
+- [x] **Step 3: Run codegen test, then a manual smoke**
 
 Run: `cmake --build build && ./build/test_codegen` → PASS.
 Smoke: write the push test program to `/tmp/f.edge`, `./build/edgecc /tmp/f.edge -o /tmp/f.py && python3 -c "import ast; ast.parse(open('/tmp/f.py').read()); print('py-parses')"` → expect `py-parses` (generated Python is syntactically valid).
 
-- [ ] **Step 4: Full unit suite (no regressions)**
+- [x] **Step 4: Full unit suite (no regressions)**
 
 Run: `ctest --test-dir build --output-on-failure`
 Expected: all targets pass; single-action output unchanged (the new emitter only runs for `IR_FUSED`).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 ```bash
 git add src/codegen.c tests/unit/test_codegen.c
 git commit -m "codegen: emit fused two-action skeleton (push/pull/neither)"
@@ -913,12 +913,12 @@ git commit -m "codegen: emit fused two-action skeleton (push/pull/neither)"
 
 **Files:** Create `examples/push_bfs_fused.edge`, `tests/e2e/push_bfs_fused/{input.edge,expected_output.txt}`.
 
-- [ ] **Step 1: Reference output**
+- [x] **Step 1: Reference output**
 
 Run: `./build/edgecc examples/push_bfs_neg.edge -o /tmp/ref.py && python3 /tmp/ref.py`
 Expected: `[1.0, 1.0, 1.0, 1.0, 1.0, 1.0]` (record exactly).
 
-- [ ] **Step 2: Write the fused kernel**
+- [x] **Step 2: Write the fused kernel**
 
 Create `examples/push_bfs_fused.edge` (fuses the gather `C` and mask `F` of `push_bfs_neg.edge` into one statement; `P` update stays single-action):
 ```edge
@@ -946,7 +946,7 @@ P[i+1, d] = P[i,d] . F[i+1,d] :: map(or,union) reduce(or,union);
 stop: stable(P);
 ```
 
-- [ ] **Step 3: Generate, run, assert match**
+- [x] **Step 3: Generate, run, assert match**
 
 Run:
 ```bash
@@ -958,7 +958,7 @@ diff <(python3 /tmp/ref.py) <(python3 /tmp/fused.py) && echo MATCH
 ```
 Expected: prints `[1.0, 1.0, 1.0, 1.0, 1.0, 1.0]` and `MATCH`. If no MATCH, STOP — do not edit expected output to paper over a real discrepancy; the fused semantics are wrong.
 
-- [ ] **Step 4: Record expected + run e2e suite**
+- [x] **Step 4: Record expected + run e2e suite**
 
 Write `tests/e2e/push_bfs_fused/expected_output.txt`:
 ```
@@ -967,7 +967,7 @@ Write `tests/e2e/push_bfs_fused/expected_output.txt`:
 Run: `python3 tests/e2e/run_e2e.py build/edgecc 2>&1 | grep -i 'push_bfs_fused\|FAIL'`
 Expected: `PASS push_bfs_fused`, no FAIL.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 ```bash
 git add examples/push_bfs_fused.edge tests/e2e/push_bfs_fused/
 git commit -m "test(e2e): fused push-BFS differential oracle vs cascade"
@@ -979,7 +979,7 @@ git commit -m "test(e2e): fused push-BFS differential oracle vs cascade"
 
 **Files:** Create `examples/pull_bfs_fused.edge`, `tests/e2e/pull_bfs_fused/*`, `tests/e2e/fused_over_roundtrip/*`, and three `tests/negative/*`.
 
-- [ ] **Step 1: Pull kernel + capture**
+- [x] **Step 1: Pull kernel + capture**
 
 Create `examples/pull_bfs_fused.edge` (same graph; pull form — inner mask, outer gather):
 ```edge
@@ -1014,16 +1014,16 @@ cp examples/pull_bfs_fused.edge tests/e2e/pull_bfs_fused/input.edge
 ```
 Expected: `[1.0, 1.0, 1.0, 1.0, 1.0, 1.0]`. Write that into `tests/e2e/pull_bfs_fused/expected_output.txt`. If it differs from push, STOP and debug.
 
-- [ ] **Step 2: `over=` round-trip**
+- [x] **Step 2: `over=` round-trip**
 
 Create `tests/e2e/fused_over_roundtrip/input.edge` = `push_bfs_fused.edge` but with `reduce.1(or,union, over=s)`. Its output must equal the untagged push (`[1.0,...]`). Write `expected_output.txt` with `[1.0, 1.0, 1.0, 1.0, 1.0, 1.0]`.
 
-- [ ] **Step 3: Run e2e suite**
+- [x] **Step 3: Run e2e suite**
 
 Run: `python3 tests/e2e/run_e2e.py build/edgecc 2>&1 | grep -iE 'pull_bfs_fused|fused_over_roundtrip|FAIL'`
 Expected: both PASS, no FAIL.
 
-- [ ] **Step 4: Negative tests**
+- [x] **Step 4: Negative tests**
 
 Create three negative dirs, each with `input.edge` + `expected_errors.txt`:
 
@@ -1076,7 +1076,7 @@ not yet supported
 Run: `python3 tests/negative/run_negative.py build/edgecc 2>&1 | grep -iE 'fused_|FAIL'`
 Expected: all three PASS. (If a message substring doesn't match the actual stderr, adjust `expected_errors.txt` to a substring that does appear.)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 ```bash
 git add examples/pull_bfs_fused.edge tests/e2e/pull_bfs_fused/ tests/e2e/fused_over_roundtrip/ tests/negative/fused_missing_reduce/ tests/negative/fused_bad_over/ tests/negative/fused_both_reduce/
 git commit -m "test: fused pull-BFS, over= round-trip, and fused negatives"
@@ -1088,7 +1088,7 @@ git commit -m "test: fused pull-BFS, over= round-trip, and fused negatives"
 
 **Files:** Modify `CLAUDE.md`, `docs/roadmap.md`.
 
-- [ ] **Step 1: CLAUDE.md — document the form**
+- [x] **Step 1: CLAUDE.md — document the form**
 
 In the EDGE Syntax section, after the unary-`!` paragraph, add:
 ```
@@ -1104,7 +1104,7 @@ nesting, and map rank tags are not yet supported.
 ```
 In the v2 Scope Limitations section, remove "multi-operation expressions with compute labels" wording that implies *all* multi-operation expressions are unsupported — change it to note compute labels and `<<` remain unsupported but two-action fused Einsums are supported.
 
-- [ ] **Step 2: roadmap.md — update BFS row + Implemented bullet**
+- [x] **Step 2: roadmap.md — update BFS row + Implemented bullet**
 
 Change the BFS row to drop "multi-action" from the remaining gaps:
 ```
@@ -1116,7 +1116,7 @@ Add an Implemented bullet (after the unary `!` bullet):
 ```
 Update the "Partial 🚧 — BFS (paper-faithful)" detail to remove multi-action from the remaining list.
 
-- [ ] **Step 3: Full suite + commit**
+- [x] **Step 3: Full suite + commit**
 
 Run: `ctest --test-dir build --output-on-failure` → all green.
 ```bash

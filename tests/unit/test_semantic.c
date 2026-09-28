@@ -470,6 +470,123 @@ TEST(test_semantic_seed_generational_ok) {
     ast_free(ast);
 }
 
+TEST(test_semantic_fused_push_classification) {
+    AstNode *ast = parse(
+        "dim N = 3;\n"
+        "tensor F[R=N] : float, empty = 0.0;\n"
+        "tensor G[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor P[R=N] : float, empty = 0.0;\n"
+        "init G = [[0,0,0],[0,0,0],[0,0,0]];\n"
+        "init F = [1.0,0.0,0.0];\n"
+        "init P = [1.0,0.0,0.0];\n"
+        "F[d] = (G[s,d] .1 F[s]) .2 P[d] "
+        ":: map.1(and,intersect) reduce.1(or,union) map.2(take_left,intersect);\n");
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    EinsumClass *ec = &sem.symtab->einsum_class[0];
+    ASSERT_INT_EQ(1, ec->is_fused);
+    ASSERT_INT_EQ(1, ec->inter_is_left2);     /* push form (inner).2 outer -> intermediate is left */
+    ASSERT_INT_EQ(1, ec->num_free_indices);
+    ASSERT_STR_EQ("d", ec->free_indices[0].name);
+    ASSERT_INT_EQ(1, ec->num_a1_reduce);
+    ASSERT_STR_EQ("s", ec->a1_reduce[0].name);
+    ASSERT_INT_EQ(0, ec->num_a2_reduce);
+    semantic_result_free(&sem); ast_free(ast);
+}
+TEST(test_semantic_fused_missing_reduce_errors) {
+    AstNode *ast = parse(
+        "dim N = 3;\n"
+        "tensor F[R=N] : float, empty = 0.0;\n"
+        "tensor G[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor P[R=N] : float, empty = 0.0;\n"
+        "init G = [[0,0,0],[0,0,0],[0,0,0]];\n"
+        "init F = [1.0,0.0,0.0];\n"
+        "init P = [1.0,0.0,0.0];\n"
+        "F[d] = (G[s,d] .1 F[s]) .2 P[d] "
+        ":: map.1(and,intersect) map.2(take_left,intersect);\n");
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_TRUE(sem.error_count > 0);
+    semantic_result_free(&sem); ast_free(ast);
+}
+TEST(test_semantic_fused_bad_over_errors) {
+    AstNode *ast = parse(
+        "dim N = 3;\n"
+        "tensor F[R=N] : float, empty = 0.0;\n"
+        "tensor G[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor P[R=N] : float, empty = 0.0;\n"
+        "init G = [[0,0,0],[0,0,0],[0,0,0]];\n"
+        "init F = [1.0,0.0,0.0];\n"
+        "init P = [1.0,0.0,0.0];\n"
+        "F[d] = (G[s,d] .1 F[s]) .2 P[d] "
+        ":: map.1(and,intersect) reduce.1(or,union, over=d) map.2(take_left,intersect);\n");
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_TRUE(sem.error_count > 0);
+    semantic_result_free(&sem); ast_free(ast);
+}
+
+TEST(test_semantic_fused_generational) {
+    AstNode *ast = parse(
+        "dim N = 3;\n"
+        "tensor G[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor F[gen I, R=N] : float, empty = 0.0;\n"
+        "tensor P[gen I, R=N] : float, empty = 0.0;\n"
+        "init G = [[0,0,0],[0,0,0],[0,0,0]];\n"
+        "init F = [1.0,0.0,0.0];\n"
+        "init P = [1.0,0.0,0.0];\n"
+        "F[i+1,d] = (G[s,d] .1 F[i,s]) .2 !P[i,d] "
+        ":: map.1(and,intersect) reduce.1(or,union) map.2(take_left,intersect);\n"
+        "P[i+1,d] = P[i,d] . F[i+1,d] :: map(or,union) reduce(or,union);\n"
+        "stop: stable(P);\n");
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    ASSERT_INT_EQ(1, sem.symtab->is_iterative);
+    int f_is_gen = 0;
+    for (int m = 0; m < sem.symtab->num_gen_tensors; m++)
+        if (strcmp(sem.symtab->gen_tensors[m], "F") == 0) f_is_gen = 1;
+    ASSERT_INT_EQ(1, f_is_gen);
+    semantic_result_free(&sem); ast_free(ast);
+}
+
+TEST(test_semantic_fused_arity_mismatch_errors) {
+    AstNode *ast = parse(
+        "dim N = 3;\n"
+        "tensor F[R=N] : float, empty = 0.0;\n"
+        "tensor G[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor P[R=N] : float, empty = 0.0;\n"
+        "init G = [[0,0,0],[0,0,0],[0,0,0]];\n"
+        "init F = [1.0,0.0,0.0];\n"
+        "init P = [1.0,0.0,0.0];\n"
+        "F[d] = (G[s] .1 F[s]) .2 P[d] "          /* G is 2-D but used with 1 index */
+        ":: map.1(and,intersect) reduce.1(or,union) map.2(take_left,intersect);\n");
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_TRUE(sem.error_count > 0);
+    semantic_result_free(&sem); ast_free(ast);
+}
+
+TEST(test_semantic_fused_pull_classification) {
+    AstNode *ast = parse(
+        "dim N = 3;\n"
+        "tensor F[R=N] : float, empty = 0.0;\n"
+        "tensor G[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor P[R=N] : float, empty = 0.0;\n"
+        "init G = [[0,0,0],[0,0,0],[0,0,0]];\n"
+        "init F = [1.0,0.0,0.0];\n"
+        "init P = [1.0,0.0,0.0];\n"
+        /* pull shape: paren on right (inter_is_left2==0), s survives into the
+           outer operand F[s] so action 2 (not action 1) reduces it. */
+        "F[d] = F[s] .2 (G[s,d] .1 P[s]) "
+        ":: map.1(and,intersect) map.2(and,intersect) reduce.2(or,union, over=s);\n");
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    EinsumClass *ec = &sem.symtab->einsum_class[0];
+    ASSERT_INT_EQ(1, ec->is_fused);
+    ASSERT_INT_EQ(0, ec->inter_is_left2);     /* outer .2 (inner) -> intermediate is right */
+    ASSERT_INT_EQ(0, ec->num_a1_reduce);
+    ASSERT_INT_EQ(1, ec->num_a2_reduce);
+    ASSERT_STR_EQ("s", ec->a2_reduce[0].name);
+    semantic_result_free(&sem); ast_free(ast);
+}
+
 int main(void) {
     RUN_TEST(test_valid_gemm);
     RUN_TEST(test_undeclared_dim);
@@ -505,5 +622,11 @@ int main(void) {
     RUN_TEST(test_semantic_seed_rank1_ok);
     RUN_TEST(test_semantic_seed_2d_rejected);
     RUN_TEST(test_semantic_seed_generational_ok);
+    RUN_TEST(test_semantic_fused_push_classification);
+    RUN_TEST(test_semantic_fused_pull_classification);
+    RUN_TEST(test_semantic_fused_arity_mismatch_errors);
+    RUN_TEST(test_semantic_fused_missing_reduce_errors);
+    RUN_TEST(test_semantic_fused_bad_over_errors);
+    RUN_TEST(test_semantic_fused_generational);
     return test_report();
 }

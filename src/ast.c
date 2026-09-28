@@ -104,6 +104,14 @@ AstNode *ast_einsum_new(TensorRef output, TensorRef input1, TensorRef input2,
     node->data.einsum.map_merge_op = map_merge_op;
     node->data.einsum.reduce_op = reduce_op;
     node->data.einsum.reduce_merge_op = reduce_merge_op;
+    node->data.einsum.reduce_over = NULL;
+    return node;
+}
+
+AstNode *ast_einsum_fused_new(EinsumFusedData data) {
+    AstNode *node = malloc(sizeof(AstNode));
+    node->type = NODE_EINSUM_FUSED;
+    node->data.einsum_fused = data;
     return node;
 }
 
@@ -208,7 +216,18 @@ void ast_free(AstNode *node) {
             tensor_ref_free_contents(&node->data.einsum.output);
             tensor_ref_free_contents(&node->data.einsum.input1);
             tensor_ref_free_contents(&node->data.einsum.input2);
+            free(node->data.einsum.reduce_over);
             break;
+        case NODE_EINSUM_FUSED: {
+            EinsumFusedData *f = &node->data.einsum_fused;
+            tensor_ref_free_contents(&f->output);
+            tensor_ref_free_contents(&f->inner1);
+            tensor_ref_free_contents(&f->inner2);
+            tensor_ref_free_contents(&f->outer);
+            free(f->over1);
+            free(f->over2);
+            break;
+        }
         case NODE_STOP:
             free(node->data.stop.watch_tensor);
             break;

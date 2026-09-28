@@ -255,23 +255,30 @@ typedef struct {
 
 /* Collect distinct input tensor names (those appearing in IR_LOAD, in load order).
  * Output tensor name is the operand of IR_STORE. Caller-owned. */
+static void add_input_name(TensorNameList *inputs, const char *n) {
+    if (!n) return;
+    for (int j = 0; j < inputs->count; j++)
+        if (strcmp(inputs->names[j], n) == 0) return;
+    if (inputs->count < 8) inputs->names[inputs->count++] = strdup(n);
+}
+
 static void collect_io(IRProgram *ir, TensorNameList *inputs, char **output) {
     inputs->count = 0;
     *output = NULL;
     for (int i = 0; i < ir->count; i++) {
         IRInstr *instr = &ir->instrs[i];
         if (instr->type == IR_LOAD) {
-            const char *n = instr->data.load.tensor_name;
-            int seen = 0;
-            for (int j = 0; j < inputs->count; j++) {
-                if (strcmp(inputs->names[j], n) == 0) { seen = 1; break; }
-            }
-            if (!seen && inputs->count < 8) {
-                inputs->names[inputs->count++] = strdup(n);
-            }
+            add_input_name(inputs, instr->data.load.tensor_name);
         } else if (instr->type == IR_STORE) {
             if (*output) free(*output);
             *output = strdup(instr->data.store.tensor_name);
+        } else if (instr->type == IR_FUSED) {
+            IRFused *fu = &instr->data.fused;
+            add_input_name(inputs, fu->inner1.name);
+            add_input_name(inputs, fu->inner2.name);
+            add_input_name(inputs, fu->outer.name);
+            if (*output) free(*output);
+            *output = strdup(fu->out_name);
         }
     }
 }
@@ -295,6 +302,10 @@ static const char *compute_op_pyexpr(OperatorType op,
         case OP_AND: snprintf(out, cap, "%s and %s", lhs, rhs); break;
         case OP_OR:  snprintf(out, cap, "%s or %s",  lhs, rhs); break;
         case OP_TAKE_LEFT: snprintf(out, cap, "%s", lhs); break;
+        default:
+            /* Unreachable: the parser rejects unknown compute-op names. */
+            fprintf(stderr, "edgecc: internal error: unknown compute operator %d\n", (int)op);
+            abort();
     }
     return out;
 }
@@ -399,6 +410,247 @@ static void emit_general_skeleton(CodeBuf *cb,
     cb->indent--;
 
     free(eA); free(eB); free(eZ);
+}
+
+/* ---- Fused (two-action) skeleton ---- */
+
+/* Resolve a fused operand's gen-buffered tensor name into `out`. */
+static void fused_operand_name(const IRFusedOperand *op, char *out, size_t cap) {
+    if (op->gen_read == 2)
+        snprintf(out, cap, "%s_next", op->name);
+    else if (op->gen_read == 1)
+        snprintf(out, cap, "%s_prev", op->name);
+    else
+        snprintf(out, cap, "%s", op->name);
+}
+
+/* Emit the map body for action 1 (both operands are tensor loads).
+ * Produces:  <dst>      = <compute(map1)>   (when merge passes)
+ *            <dst>_emit = <dst> != eZ
+ * else:      <dst>_emit = False; <dst> = eZ
+ * The operand value/existence locals are a_val/a_exists/b_val/b_exists. */
+static void emit_fused_map_body(CodeBuf *cb,
+                                const IRFusedOperand *opA,
+                                const IRFusedOperand *opB,
+                                OperatorType op, MergeOp merge,
+                                const char *eZ, const char *dst) {
+    char a_name[160], b_name[160];
+    char *eA = format_double_literal(opA->empty);
+    char *eB = format_double_literal(opB->empty);
+    fused_operand_name(opA, a_name, sizeof(a_name));
+    fused_operand_name(opB, b_name, sizeof(b_name));
+
+    cb_indent(cb); cb_append(cb, "a_val = ");
+    emit_tensor_access(cb, a_name, opA->coords, opA->ncoords);
+    cb_append(cb, "\n");
+    cb_indent(cb); cb_append(cb, "b_val = ");
+    emit_tensor_access(cb, b_name, opB->coords, opB->ncoords);
+    cb_append(cb, "\n");
+
+    cb_indent(cb);
+    cb_appendf(cb, "a_exists = a_val %s %s\n", opA->negate ? "==" : "!=", eA);
+    cb_indent(cb);
+    cb_appendf(cb, "b_exists = b_val %s %s\n", opB->negate ? "==" : "!=", eB);
+
+    cb_indent(cb); cb_append(cb, "if ");
+    emit_merge_guard(cb, merge, "a_exists", "b_exists");
+    cb_append(cb, ":\n");
+    cb->indent++;
+    cb_indent(cb);
+    cb_appendf(cb, "a_op = %s if a_exists else %s\n", opA->negate ? "1.0" : "a_val", eA);
+    cb_indent(cb);
+    cb_appendf(cb, "b_op = %s if b_exists else %s\n", opB->negate ? "1.0" : "b_val", eB);
+    char buf[256];
+    cb_indent(cb); cb_appendf(cb, "%s = ", dst);
+    cb_append(cb, compute_op_pyexpr(op, "a_op", "b_op", buf, sizeof(buf)));
+    cb_append(cb, "\n");
+    cb_indent(cb); cb_appendf(cb, "%s_emit = %s != %s\n", dst, dst, eZ);
+    cb->indent--;
+    cb_indent(cb); cb_append(cb, "else:\n");
+    cb->indent++;
+    cb_indent(cb); cb_appendf(cb, "%s_emit = False\n", dst);
+    cb_indent(cb); cb_appendf(cb, "%s = %s\n", dst, eZ);
+    cb->indent--;
+
+    free(eA); free(eB);
+}
+
+/* Emit a reduce step into accumulator `acc` from value `val` (with existence
+ * flag `val_emit`). Mirrors emit_general_skeleton's reduce half. */
+static void emit_fused_reduce_step(CodeBuf *cb, OperatorType op, MergeOp merge,
+                                   const char *eZ, const char *acc,
+                                   const char *val, const char *val_emit) {
+    cb_indent(cb); cb_appendf(cb, "_s1 = %s != %s\n", acc, eZ);
+    cb_indent(cb); cb_appendf(cb, "_s2 = %s\n", val_emit);
+    cb_indent(cb); cb_append(cb, "if ");
+    emit_merge_guard(cb, merge, "_s1", "_s2");
+    cb_append(cb, ":\n");
+    cb->indent++;
+    cb_indent(cb); cb_appendf(cb, "_vfr = %s if %s else %s\n", val, val_emit, eZ);
+    char buf[256];
+    cb_indent(cb); cb_appendf(cb, "%s = ", acc);
+    cb_append(cb, compute_op_pyexpr(op, acc, "_vfr", buf, sizeof(buf)));
+    cb_append(cb, "\n");
+    cb->indent--;
+    cb_indent(cb); cb_append(cb, "else:\n");
+    cb->indent++;
+    cb_indent(cb); cb_appendf(cb, "%s = %s\n", acc, eZ);
+    cb->indent--;
+}
+
+/* Emit action 2: combine the scalar intermediate (_inter, existence in
+   inter_flag) with the outer operand. Produces `_m2`. Operand order follows
+   fu->inter_is_left2.
+   want_emit != 0: also produce `_m2_emit` (True in the merge-pass branch, False
+     in the else), closing both branches; caller follows with a reduce step.
+   want_emit == 0: emit only the merge-pass branch (i_op/o_op/_m2) and leave the
+     caller positioned *inside* that `if` body (indent not decremented, no else);
+     the caller emits its store, then dedents and writes its own else. */
+static void emit_fused_action2(CodeBuf *cb, IRFused *fu, const char *eZ,
+                               const char *inter_flag, int want_emit) {
+    char buf[256];
+    char *eC = format_double_literal(fu->outer.empty);
+    char c_name[160];
+    fused_operand_name(&fu->outer, c_name, sizeof(c_name));
+
+    cb_indent(cb); cb_append(cb, "c_val = ");
+    emit_tensor_access(cb, c_name, fu->outer.coords, fu->outer.ncoords);
+    cb_append(cb, "\n");
+    cb_indent(cb);
+    cb_appendf(cb, "c_exists = c_val %s %s\n", fu->outer.negate ? "==" : "!=", eC);
+
+    const char *l_exists = fu->inter_is_left2 ? inter_flag : "c_exists";
+    const char *r_exists = fu->inter_is_left2 ? "c_exists" : inter_flag;
+    cb_indent(cb); cb_append(cb, "if ");
+    emit_merge_guard(cb, fu->map2_merge, l_exists, r_exists);
+    cb_append(cb, ":\n");
+    cb->indent++;
+    cb_indent(cb);
+    cb_appendf(cb, "i_op = _inter if %s else %s\n", inter_flag, eZ);
+    cb_indent(cb);
+    cb_appendf(cb, "o_op = %s if c_exists else %s\n",
+               fu->outer.negate ? "1.0" : "c_val", eC);
+    cb_indent(cb); cb_append(cb, "_m2 = ");
+    if (fu->inter_is_left2)
+        cb_append(cb, compute_op_pyexpr(fu->map2_op, "i_op", "o_op", buf, sizeof(buf)));
+    else
+        cb_append(cb, compute_op_pyexpr(fu->map2_op, "o_op", "i_op", buf, sizeof(buf)));
+    cb_append(cb, "\n");
+    if (want_emit) {
+        cb_indent(cb); cb_appendf(cb, "_m2_emit = _m2 != %s\n", eZ);
+        cb->indent--;
+        cb_indent(cb); cb_append(cb, "else:\n");
+        cb->indent++;
+        cb_indent(cb); cb_append(cb, "_m2_emit = False\n");
+        cb_indent(cb); cb_appendf(cb, "_m2 = %s\n", eZ);
+        cb->indent--;
+    }
+    /* want_emit == 0: leave caller inside the `if` body. */
+
+    free(eC);
+}
+
+/* Emit the full fused two-action skeleton (push / pull / neither). */
+static void emit_fused_skeleton(CodeBuf *cb, IRFused *fu) {
+    char *eZ = format_double_literal(fu->empty_z);
+
+    /* Output (store) tensor name, gen-resolved. */
+    char z_name[160];
+    if (fu->gen_write)
+        snprintf(z_name, sizeof(z_name), "%s_next", fu->out_name);
+    else
+        snprintf(z_name, sizeof(z_name), "%s", fu->out_name);
+
+    /* Free-index loops (outermost). */
+    for (int i = 0; i < fu->num_free; i++) {
+        cb_indent(cb);
+        if (fu->free_dimnames[i])
+            cb_appendf(cb, "for %s in range(%s):\n", fu->free_names[i], fu->free_dimnames[i]);
+        else
+            cb_appendf(cb, "for %s in range(%d):\n", fu->free_names[i], fu->free_sizes[i]);
+        cb->indent++;
+    }
+
+    if (fu->reduce_on_action == 1) {
+        /* PUSH: action 1 reduces; action 2 map-only -> store. */
+        char *rid = format_double_literal(fu->reduce1_identity);
+        cb_indent(cb); cb_appendf(cb, "_acc1 = %s\n", rid);
+        free(rid);
+        for (int i = 0; i < fu->num_red; i++) {
+            cb_indent(cb);
+            if (fu->red_dimnames[i])
+                cb_appendf(cb, "for %s in range(%s):\n", fu->red_names[i], fu->red_dimnames[i]);
+            else
+                cb_appendf(cb, "for %s in range(%d):\n", fu->red_names[i], fu->red_sizes[i]);
+            cb->indent++;
+        }
+        emit_fused_map_body(cb, &fu->inner1, &fu->inner2,
+                            fu->map1_op, fu->map1_merge, eZ, "_m1");
+        emit_fused_reduce_step(cb, fu->reduce1_op, fu->reduce1_merge, eZ,
+                               "_acc1", "_m1", "_m1_emit");
+        for (int i = 0; i < fu->num_red; i++) cb->indent--;
+        cb_indent(cb); cb_append(cb, "_inter = _acc1\n");
+        cb_indent(cb); cb_appendf(cb, "_inter_emit = _inter != %s\n", eZ);
+
+        /* action 2 (map-only) -> store */
+        emit_fused_action2(cb, fu, eZ, "_inter_emit", 0);
+        cb_indent(cb);
+        emit_tensor_access(cb, z_name, fu->out_coords, fu->out_ncoords);
+        cb_appendf(cb, " = _m2 if _m2 != %s else %s\n", eZ, eZ);
+        cb->indent--;
+        cb_indent(cb); cb_append(cb, "else:\n");
+        cb->indent++;
+        cb_indent(cb);
+        emit_tensor_access(cb, z_name, fu->out_coords, fu->out_ncoords);
+        cb_appendf(cb, " = %s\n", eZ);
+        cb->indent--;
+
+    } else if (fu->reduce_on_action == 2) {
+        /* PULL: action 1 map-only inside shared red loop; action 2 reduces. */
+        char *rid = format_double_literal(fu->reduce2_identity);
+        cb_indent(cb); cb_appendf(cb, "_acc2 = %s\n", rid);
+        free(rid);
+        for (int i = 0; i < fu->num_red; i++) {
+            cb_indent(cb);
+            if (fu->red_dimnames[i])
+                cb_appendf(cb, "for %s in range(%s):\n", fu->red_names[i], fu->red_dimnames[i]);
+            else
+                cb_appendf(cb, "for %s in range(%d):\n", fu->red_names[i], fu->red_sizes[i]);
+            cb->indent++;
+        }
+        emit_fused_map_body(cb, &fu->inner1, &fu->inner2,
+                            fu->map1_op, fu->map1_merge, eZ, "_inter");
+
+        emit_fused_action2(cb, fu, eZ, "_inter_emit", 1);
+
+        emit_fused_reduce_step(cb, fu->reduce2_op, fu->reduce2_merge, eZ,
+                               "_acc2", "_m2", "_m2_emit");
+        for (int i = 0; i < fu->num_red; i++) cb->indent--;
+        cb_indent(cb);
+        emit_tensor_access(cb, z_name, fu->out_coords, fu->out_ncoords);
+        cb_append(cb, " = _acc2\n");
+
+    } else {
+        /* NEITHER: no reduction. action 1 map -> _inter, action 2 map -> store. */
+        emit_fused_map_body(cb, &fu->inner1, &fu->inner2,
+                            fu->map1_op, fu->map1_merge, eZ, "_inter");
+
+        emit_fused_action2(cb, fu, eZ, "_inter_emit", 0);
+        cb_indent(cb);
+        emit_tensor_access(cb, z_name, fu->out_coords, fu->out_ncoords);
+        cb_appendf(cb, " = _m2 if _m2 != %s else %s\n", eZ, eZ);
+        cb->indent--;
+        cb_indent(cb); cb_append(cb, "else:\n");
+        cb->indent++;
+        cb_indent(cb);
+        emit_tensor_access(cb, z_name, fu->out_coords, fu->out_ncoords);
+        cb_appendf(cb, " = %s\n", eZ);
+        cb->indent--;
+    }
+
+    for (int i = 0; i < fu->num_free; i++) cb->indent--;
+
+    free(eZ);
 }
 
 /* ---- Main codegen ---- */
@@ -899,6 +1151,13 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
                 break;
             case IR_SAVE:
                 /* Save happens in __main__, not inside run(). */
+                break;
+            case IR_FUSED:
+                if (!produced_loops) {
+                    cb_append(&cb, "\n");
+                    produced_loops = 1;
+                }
+                emit_fused_skeleton(&cb, &instr->data.fused);
                 break;
         }
     }

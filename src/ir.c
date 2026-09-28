@@ -138,6 +138,81 @@ static const char *dim_name_for_index(EinsumData *e,
     return NULL;
 }
 
+/* Like dim_name_for_index, but scans the four fused tensor refs. */
+static const char *dim_name_for_index_fused(EinsumFusedData *f,
+                                            TensorEntry *out_te,
+                                            TensorEntry *i1_te,
+                                            TensorEntry *i2_te,
+                                            TensorEntry *ou_te,
+                                            const char *idx) {
+    TensorRef *refs[4]  = { &f->output, &f->inner1, &f->inner2, &f->outer };
+    TensorEntry *tes[4] = { out_te, i1_te, i2_te, ou_te };
+    for (int c = 0; c < 4; c++) {
+        TensorRef *r = refs[c];
+        TensorEntry *te = tes[c];
+        if (!te) continue;
+        for (int a = 0; a < r->num_vars && a < te->num_ranks; a++) {
+            if (strcmp(r->rank_vars[a], idx) == 0 && te->ranks[a].dim_name)
+                return te->ranks[a].dim_name;
+        }
+    }
+    return NULL;
+}
+
+static void fill_fused_operand(IRFusedOperand *o, TensorRef *r, TensorEntry *te, SymbolTable *st) {
+    o->name = dup_str(r->tensor_name);
+    o->coords = dup_coords_strip(r->rank_vars, r->num_vars, te->gen_axis, &o->ncoords);
+    o->empty = te->empty_val;
+    o->negate = r->negate;
+    o->gen_read = gen_read_kind(st, r, te);
+}
+
+static void emit_einsum_fused(IRProgram *ir, AstNode *node, SymbolTable *st, int eidx) {
+    EinsumFusedData *f = &node->data.einsum_fused;
+    EinsumClass *ec = &st->einsum_class[eidx];
+    TensorEntry *out_te = symtab_find_tensor(st, f->output.tensor_name);
+    TensorEntry *i1 = symtab_find_tensor(st, f->inner1.tensor_name);
+    TensorEntry *i2 = symtab_find_tensor(st, f->inner2.tensor_name);
+    TensorEntry *ou = symtab_find_tensor(st, f->outer.tensor_name);
+
+    IRInstr *instr = ir_emit(ir, IR_FUSED);
+    IRFused *fu = &instr->data.fused;
+    /* ir_emit already memset the instr to 0 */
+    fu->out_name = dup_str(f->output.tensor_name);
+    fu->out_coords = dup_coords_strip(f->output.rank_vars, f->output.num_vars, out_te->gen_axis, &fu->out_ncoords);
+    fu->empty_z = out_te->empty_val;
+    fu->gen_write = is_cross_gen_name(st, f->output.tensor_name);
+    fill_fused_operand(&fu->inner1, &f->inner1, i1, st);
+    fill_fused_operand(&fu->inner2, &f->inner2, i2, st);
+    fill_fused_operand(&fu->outer,  &f->outer,  ou, st);
+    fu->inter_is_left2 = f->inter_is_left2;
+    fu->map1_op = f->map1_op; fu->map1_merge = f->map1_merge;
+    fu->a1_has_reduce = f->a1_has_reduce; fu->reduce1_op = f->reduce1_op; fu->reduce1_merge = f->reduce1_merge;
+    fu->reduce1_identity = compute_op_identity(f->reduce1_op, out_te->datatype);
+    fu->map2_op = f->map2_op; fu->map2_merge = f->map2_merge;
+    fu->a2_has_reduce = f->a2_has_reduce; fu->reduce2_op = f->reduce2_op; fu->reduce2_merge = f->reduce2_merge;
+    fu->reduce2_identity = compute_op_identity(f->reduce2_op, out_te->datatype);
+
+    for (int i = 0; i < ec->num_free_indices && i < 8; i++) {
+        fu->free_names[fu->num_free] = dup_str(ec->free_indices[i].name);
+        fu->free_sizes[fu->num_free] = ec->free_indices[i].size;
+        const char *dn = dim_name_for_index_fused(f, out_te, i1, i2, ou, ec->free_indices[i].name);
+        fu->free_dimnames[fu->num_free] = dn ? dup_str(dn) : NULL;
+        fu->num_free++;
+    }
+    IndexEntry *red = NULL; int nred = 0;
+    if (ec->num_a1_reduce > 0) { red = ec->a1_reduce; nred = ec->num_a1_reduce; fu->reduce_on_action = 1; }
+    else if (ec->num_a2_reduce > 0) { red = ec->a2_reduce; nred = ec->num_a2_reduce; fu->reduce_on_action = 2; }
+    else { fu->reduce_on_action = 0; }
+    for (int i = 0; i < nred && i < 8; i++) {
+        fu->red_names[fu->num_red] = dup_str(red[i].name);
+        fu->red_sizes[fu->num_red] = red[i].size;
+        const char *dn = dim_name_for_index_fused(f, out_te, i1, i2, ou, red[i].name);
+        fu->red_dimnames[fu->num_red] = dn ? dup_str(dn) : NULL;
+        fu->num_red++;
+    }
+}
+
 static void emit_einsum(IRProgram *ir, AstNode *einsum_node, SymbolTable *symtab, int eidx) {
     EinsumData *e = &einsum_node->data.einsum;
     EinsumClass *cls = &symtab->einsum_class[eidx];
@@ -271,6 +346,8 @@ IRProgram *ir_lower(AstNode *program, SymbolTable *symtab) {
             AstNode *stmt = program->data.program.statements[i];
             if (stmt->type == NODE_EINSUM)
                 emit_einsum(ir, stmt, symtab, eidx++);
+            else if (stmt->type == NODE_EINSUM_FUSED)
+                emit_einsum_fused(ir, stmt, symtab, eidx++);
         }
 
         ir_emit(ir, IR_GEN_LOOP_END);
@@ -280,6 +357,8 @@ IRProgram *ir_lower(AstNode *program, SymbolTable *symtab) {
             AstNode *stmt = program->data.program.statements[i];
             if (stmt->type == NODE_EINSUM)
                 emit_einsum(ir, stmt, symtab, eidx++);
+            else if (stmt->type == NODE_EINSUM_FUSED)
+                emit_einsum_fused(ir, stmt, symtab, eidx++);
         }
     }
 
@@ -347,6 +426,27 @@ void ir_free(IRProgram *ir) {
                 }
                 free(instr->data.store.coords);
                 break;
+            case IR_FUSED: {
+                IRFused *fu = &instr->data.fused;
+                free(fu->out_name);
+                for (int j = 0; j < fu->out_ncoords; j++) free(fu->out_coords[j]);
+                free(fu->out_coords);
+                IRFusedOperand *ops[3] = { &fu->inner1, &fu->inner2, &fu->outer };
+                for (int o = 0; o < 3; o++) {
+                    free(ops[o]->name);
+                    for (int j = 0; j < ops[o]->ncoords; j++) free(ops[o]->coords[j]);
+                    free(ops[o]->coords);
+                }
+                for (int j = 0; j < fu->num_free; j++) {
+                    free(fu->free_names[j]);
+                    free(fu->free_dimnames[j]);
+                }
+                for (int j = 0; j < fu->num_red; j++) {
+                    free(fu->red_names[j]);
+                    free(fu->red_dimnames[j]);
+                }
+                break;
+            }
         }
     }
 
@@ -453,6 +553,23 @@ void ir_dump(IRProgram *ir, FILE *out) {
                 fprintf(out, "SAVE(%s -> %s)\n",
                         instr->data.save.tensor_name, instr->data.save.path);
                 break;
+            case IR_FUSED: {
+                IRFused *fu = &instr->data.fused;
+                fprintf(out, "FUSED(%s", fu->out_name);
+                dump_coords(out, fu->out_coords, fu->out_ncoords);
+                fprintf(out, " = (%s %s %s) %s %s | map1=%s/%s reduce1=%s/%s map2=%s/%s reduce2=%s/%s"
+                             " reduce_on=%d free=%d red=%d)\n",
+                        fu->inner1.name, operator_to_str(fu->map1_op), fu->inner2.name,
+                        operator_to_str(fu->map2_op), fu->outer.name,
+                        operator_to_str(fu->map1_op), merge_op_to_str(fu->map1_merge),
+                        fu->a1_has_reduce ? operator_to_str(fu->reduce1_op) : "-",
+                        fu->a1_has_reduce ? merge_op_to_str(fu->reduce1_merge) : "-",
+                        operator_to_str(fu->map2_op), merge_op_to_str(fu->map2_merge),
+                        fu->a2_has_reduce ? operator_to_str(fu->reduce2_op) : "-",
+                        fu->a2_has_reduce ? merge_op_to_str(fu->reduce2_merge) : "-",
+                        fu->reduce_on_action, fu->num_free, fu->num_red);
+                break;
+            }
         }
     }
 }
