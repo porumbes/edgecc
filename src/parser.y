@@ -9,6 +9,19 @@ void yyerror(const char *s);
 
 AstNode *parse_result = NULL;
 
+/* Report an unknown compute-operator name. Returns 1 (after yyerror) if
+   `name` is not a built-in compute op, else 0. */
+static int unknown_compute_op(const char *name) {
+    if ((int)operator_from_str(name) != -1) return 0;
+    char buf[256];
+    snprintf(buf, sizeof(buf),
+             "unknown compute operator '%s' (expected one of: "
+             "add, sub, mul, min, max, and, or, take_left)",
+             name);
+    yyerror(buf);
+    return 1;
+}
+
 /* Helper structs for list-building in semantic actions */
 
 typedef struct {
@@ -317,6 +330,11 @@ einsum_stmt:
         TensorRef *in1 = (TensorRef *)$3;
         TensorRef *in2 = (TensorRef *)$5;
         ReduceArgs *ra = (ReduceArgs *)$15;
+        if (unknown_compute_op($9) || unknown_compute_op($14)) {
+            free(ra->over); free(ra); free($9); free($14);
+            free(out); free(in1); free(in2);
+            YYERROR;
+        }
         OperatorType map_op    = operator_from_str($9);
         MergeOp     map_merge  = (MergeOp)$10;
         OperatorType reduce_op = operator_from_str($14);
@@ -344,6 +362,7 @@ einsum_stmt:
         for (int i = 0; i < acts->n; i++) {
             FAct *a = &acts->items[i];
             if (a->label != 1 && a->label != 2) { yyerror("fused einsum: action label must be .1 or .2"); free(a->op); free(a->over); free($1); free($3); free(acts); YYERROR; }
+            if (unknown_compute_op(a->op)) { free(a->op); free(a->over); free($1); free($3); free(acts); YYERROR; }
             OperatorType op = operator_from_str(a->op);
             if (a->kind == 0 && a->label == 1) { if (seen_map1) { yyerror("fused einsum: duplicate map.1"); free(a->op); free(a->over); free($1); free($3); free(acts); YYERROR; } seen_map1=1; f->map1_op=op; f->map1_merge=a->merge; }
             else if (a->kind == 0 && a->label == 2) { if (seen_map2) { yyerror("fused einsum: duplicate map.2"); free(a->op); free(a->over); free($1); free($3); free(acts); YYERROR; } seen_map2=1; f->map2_op=op; f->map2_merge=a->merge; }

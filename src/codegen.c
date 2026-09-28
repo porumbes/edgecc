@@ -302,6 +302,10 @@ static const char *compute_op_pyexpr(OperatorType op,
         case OP_AND: snprintf(out, cap, "%s and %s", lhs, rhs); break;
         case OP_OR:  snprintf(out, cap, "%s or %s",  lhs, rhs); break;
         case OP_TAKE_LEFT: snprintf(out, cap, "%s", lhs); break;
+        default:
+            /* Unreachable: the parser rejects unknown compute-op names. */
+            fprintf(stderr, "edgecc: internal error: unknown compute operator %d\n", (int)op);
+            abort();
     }
     return out;
 }
