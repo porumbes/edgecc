@@ -123,7 +123,8 @@ New semantic errors (each with a negative test):
 | Situation | Error (substring) |
 |---|---|
 | `gen` rank not first (`X[R=N, gen I]`) | generational rank 'I' must be the first rank of 'X' |
-| predicate tensor unknown or not generational | stop predicate: 'X' is not a generational tensor |
+| predicate tensor unknown or not generational | stop predicate: undeclared tensor 'X' / stop predicate: tensor 'X' is not generational |
+| predicate reference is not a whole generation (`\|\|F[i+1, d]\|\| == 0`) | stop predicate: 'F' must name a whole generation, e.g. F[i+1] |
 | generation offset not `i`/`i+1` | stop predicate: generation must be 'i' or 'i+1' |
 | intermediate referenced at `i+1` | intermediate 'T' has only generation 'i' when the stop predicate is checked |
 | `==` between different tensors | stop predicate: '==' compares two generations of the same tensor |
@@ -132,8 +133,14 @@ New semantic errors (each with a negative test):
 | predicate uses another generation variable (`F[j+1]` vs Einsums' `i`) | stop predicate uses 'j', but the generational rank variable is 'i' |
 | unknown predicate function (`stop: settled(P);`) | unknown stop predicate 'settled' (expected 'stable') |
 
-Existing rules stay: a generational Einsum requires `stop:`; `stop:` without
-a generational Einsum is an error.
+Existing rules stay: a generational Einsum requires `stop:` (message now
+"requires a 'stop:' clause"); `stop:` without a generational Einsum is an
+error. The old rule that `stop` must watch a *cross-generational* tensor is
+replaced by the reference rules above (an intermediate may be watched at `i`).
+
+`save:` of a generational tensor with more than one data rank is rejected
+("save: generational tensor 'T' has more than one data rank"): with every
+generation included it would be 3-D, which Matrix Market cannot store.
 
 Lexer: new `||` and `==` tokens; a lone `|` is a lexer error.
 
