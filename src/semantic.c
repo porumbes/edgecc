@@ -234,6 +234,9 @@ static void analyze_tensor_decl(SemanticResult *res, AstNode *node) {
                 add_error(res, "tensor '%s' has more than one generational rank",
                           d->name);
             }
+            if (i != 0)
+                add_error(res, "generational rank '%s' must be the first rank of '%s'",
+                          d->ranks[i].rank_name, d->name);
             te->gen_axis = i;
             te->dim_sizes[i] = -1;   /* unbounded sentinel */
             continue;
@@ -756,21 +759,6 @@ static void analyze_einsum(SemanticResult *res, AstNode *node, int eidx) {
 
 }
 
-static void analyze_stop(SemanticResult *res, AstNode *node) {
-    SymbolTable *st = res->symtab;
-    StopData *sd = &node->data.stop;
-    const char *watch = sd->kind == STOP_STABLE ? sd->stable_tensor : sd->lhs.tensor_name;
-    TensorEntry *te = symtab_find_tensor(st, watch);
-    if (te == NULL) {
-        add_error(res, "stop: undeclared tensor '%s'", watch);
-        return;
-    }
-    if (te->gen_axis < 0) {
-        add_error(res, "stop: tensor '%s' is not generational", watch);
-    }
-    st->stop_watch = te->name;
-}
-
 /* Validate SSA ordering within a generation:
    (1) an intra-generation intermediate must be written by an earlier Einsum
        before a later Einsum reads it;
@@ -839,6 +827,130 @@ static void validate_cascade_ordering(SemanticResult *res, AstNode *program) {
 
 /* ---- Public API ---- */
 
+static int name_in(char *const *list, int n, const char *name) {
+    for (int i = 0; i < n; i++)
+        if (strcmp(list[i], name) == 0) return 1;
+    return 0;
+}
+
+/* Resolve one predicate reference X[g]. X must be a declared generational
+   tensor, the reference must name a whole generation using the program's
+   generational rank variable, and g must be i or i+1 (only i for an
+   intermediate, which has no generation i+1 when the predicate runs).
+   Returns the offset (0 or 1), or -1 after reporting an error. */
+static int resolve_stop_ref(SemanticResult *res, const TensorRef *r, TensorEntry **te_out) {
+    SymbolTable *st = res->symtab;
+    TensorEntry *te = symtab_find_tensor(st, r->tensor_name);
+    *te_out = te;
+    if (!te) {
+        add_error(res, "stop predicate: undeclared tensor '%s'", r->tensor_name);
+        return -1;
+    }
+    if (te->gen_axis < 0) {
+        add_error(res, "stop predicate: tensor '%s' is not generational", r->tensor_name);
+        return -1;
+    }
+    if (r->num_vars != 1) {
+        add_error(res, "stop predicate: '%s' must name a whole generation, e.g. %s[%s+1]",
+                  r->tensor_name, r->tensor_name, st->gen_rank_var ? st->gen_rank_var : "i");
+        return -1;
+    }
+    const char *v = r->rank_vars[0];
+    if (st->gen_rank_var && strcmp(v, st->gen_rank_var) != 0) {
+        add_error(res, "stop predicate uses '%s', but the generational rank variable is '%s'",
+                  v, st->gen_rank_var);
+        return -1;
+    }
+    int off = r->gen_offset;
+    if (off != 0 && off != 1) {
+        add_error(res, "stop predicate: generation must be '%s' or '%s+1'", v, v);
+        return -1;
+    }
+    if (off == 1 && name_in(st->intermediates, st->num_intermediates, te->name)) {
+        add_error(res, "intermediate '%s' has only generation '%s' when the stop predicate is checked",
+                  te->name, v);
+        return -1;
+    }
+    return off;
+}
+
+/* Find the stop clause (the last one, as before), check it against the
+   program's iterativeness, and resolve it into symtab->stop_*. */
+static void resolve_stop(SemanticResult *res, AstNode *program) {
+    SymbolTable *st = res->symtab;
+    ProgramData *pd = &program->data.program;
+    AstNode *stop = NULL;
+    for (int i = 0; i < pd->count; i++)
+        if (pd->statements[i]->type == NODE_STOP) stop = pd->statements[i];
+
+    if (!stop) {
+        if (st->is_iterative)
+            add_error(res, "generational einsum on '%s' requires a 'stop:' clause",
+                      st->gen_tensor ? st->gen_tensor : "?");
+        return;
+    }
+    if (!st->is_iterative) {
+        add_error(res, "'stop' clause present but no generational einsum");
+        return;
+    }
+
+    StopData *sd = &stop->data.stop;
+    TensorEntry *ta = NULL, *tb = NULL;
+    switch (sd->kind) {
+        case STOP_STABLE: {
+            /* stable(X) is sugar for X[i+1] == X[i]. */
+            ta = symtab_find_tensor(st, sd->stable_tensor);
+            if (!ta) {
+                add_error(res, "stop predicate: undeclared tensor '%s'", sd->stable_tensor);
+                return;
+            }
+            if (ta->gen_axis < 0) {
+                add_error(res, "stop predicate: tensor '%s' is not generational", sd->stable_tensor);
+                return;
+            }
+            if (name_in(st->intermediates, st->num_intermediates, ta->name)) {
+                add_error(res, "intermediate '%s' has only generation '%s' when the stop predicate is checked",
+                          ta->name, st->gen_rank_var ? st->gen_rank_var : "i");
+                return;
+            }
+            st->stop_kind = STOP_EQUAL;
+            st->stop_gen_a = 1;
+            st->stop_gen_b = 0;
+            break;
+        }
+        case STOP_OCCUPANCY: {
+            int a = resolve_stop_ref(res, &sd->lhs, &ta);
+            if (sd->occupancy_rhs != 0) {
+                add_error(res, "stop predicate: only '||X[g]|| == 0' is supported");
+                return;
+            }
+            if (a < 0) return;
+            st->stop_kind = STOP_OCCUPANCY;
+            st->stop_gen_a = a;
+            break;
+        }
+        case STOP_EQUAL: {
+            int a = resolve_stop_ref(res, &sd->lhs, &ta);
+            int b = resolve_stop_ref(res, &sd->rhs, &tb);
+            if (a < 0 || b < 0) return;
+            if (ta != tb) {
+                add_error(res, "stop predicate: '==' compares two generations of the same tensor "
+                               "('%s' vs '%s')", ta->name, tb->name);
+                return;
+            }
+            if (a == b) {
+                add_error(res, "stop predicate compares a generation with itself");
+                return;
+            }
+            st->stop_kind = STOP_EQUAL;
+            st->stop_gen_a = a;
+            st->stop_gen_b = b;
+            break;
+        }
+    }
+    st->stop_watch = ta->name;
+}
+
 SemanticResult semantic_analyze(AstNode *program) {
     SemanticResult res;
     memset(&res, 0, sizeof(res));
@@ -873,7 +985,7 @@ SemanticResult semantic_analyze(AstNode *program) {
                 analyze_einsum_fused(&res, stmt, einsum_index++);
                 break;
             case NODE_STOP:
-                analyze_stop(&res, stmt);
+                /* Resolved after all Einsums (needs the generational rank variable). */
                 break;
             case NODE_SAVE:
                 /* Validated in a dedicated pass below (needs all tensors). */
@@ -888,33 +1000,17 @@ SemanticResult semantic_analyze(AstNode *program) {
         add_error(&res, "program has no Einsum statement (nothing to compute)");
 
     validate_cascade_ordering(&res, program);
+    resolve_stop(&res, program);
 
     /* Iterative consistency: a generational einsum needs a stop clause that
        watches the generational tensor, and vice versa. */
     SymbolTable *st = res.symtab;
-    if (st->is_iterative && st->stop_watch == NULL) {
-        add_error(&res, "generational einsum on '%s' requires a 'stop: stable(...)' clause",
-                  st->gen_tensor ? st->gen_tensor : "?");
-    }
-    if (st->stop_watch != NULL && !st->is_iterative) {
-        add_error(&res, "'stop' clause present but no generational einsum");
-    }
     /* A generational program must write at least one cross-generational tensor
        (a gen-rank tensor at offset i+1); otherwise nothing crosses generations. */
     if (st->is_iterative && st->num_gen_tensors == 0) {
         add_error(&res, "generational program has no cross-generational tensor "
                         "(write one at offset i+1, e.g. F[i+1, ...])");
     }
-    if (st->is_iterative && st->stop_watch != NULL && st->num_gen_tensors > 0) {
-        int ok = 0;
-        for (int m = 0; m < st->num_gen_tensors; m++)
-            if (strcmp(st->stop_watch, st->gen_tensors[m]) == 0) ok = 1;
-        if (!ok)
-            add_error(&res,
-                "stop watches '%s' but it is not a cross-generational tensor",
-                st->stop_watch);
-    }
-
     /* Every cross-generational tensor needs a generation-0 init. */
     for (int m = 0; m < st->num_gen_tensors; m++) {
         TensorEntry *cg = symtab_find_tensor(st, st->gen_tensors[m]);
@@ -987,6 +1083,12 @@ SemanticResult semantic_analyze(AstNode *program) {
         }
         if (!is_output) {
             add_error(&res, "save: tensor '%s' is not a computed output", tgt);
+            continue;
+        }
+        TensorEntry *ste = symtab_find_tensor(st, tgt);
+        if (ste->gen_axis >= 0 && ste->num_ranks - 1 > 1) {
+            add_error(&res, "save: generational tensor '%s' has more than one data rank "
+                            "(with every generation it would be 3-D; .mtx stores at most 2-D)", tgt);
             continue;
         }
         st->save_tensor = s->data.save.tensor_name;  /* borrowed */

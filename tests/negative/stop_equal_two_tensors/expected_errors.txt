@@ -1,0 +1,1 @@
+stop predicate: '==' compares two generations of the same tensor
