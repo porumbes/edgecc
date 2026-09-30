@@ -1,6 +1,6 @@
 # edgecc roadmap & feature status
 
-**Last updated:** 2026-09-28
+**Last updated:** 2026-09-30
 
 Legend:  ✅ implemented · 🚧 partial · ❌ planned
 
@@ -17,13 +17,14 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 | `<<` update op · compute labels · general N-ary nesting · matrix-chain | ❌ |
 | Anonymous tensors / sub-expressions · user-defined unary funcs · user-defined ops | ❌ |
 | **Iteration** | |
-| Generational ranks (`gen`, `stop: stable`) | ✅ |
+| Generational ranks (`gen`): every generation stored, as in the paper | ✅ |
+| Stop predicates: occupancy `\|\|F[i+1]\|\| == 0`, equality, `stable(X)` sugar | ✅ |
 | Cascades with ≥1 cross-generational tensor | ✅ |
 | Nested cascades / multiple generational ranks | ❌ |
 | **Graph algorithms** | |
 | SSSP / Bellman–Ford (min-plus) | ✅ |
 | Reachability BFS | ✅ |
-| Paper-faithful 3-step BFS (`ANY`/parent, occupancy stop; unary `¬`=`!` ✅, multi-action fusion ✅) | 🚧 |
+| Paper-faithful 3-step BFS (`ANY`/parent; unary `¬`=`!` ✅, multi-action fusion ✅, occupancy stop ✅) | 🚧 |
 | **Data & I/O** | |
 | Inline `init` literals | ✅ |
 | Matrix Market `load` / `save` (densify-on-load) | ✅ |
@@ -57,7 +58,7 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 - **Semirings:** `map(compute, merge) reduce(compute, merge)` over the 8 compute ops and 9 merge ops above.
 - **Unary complement `!`** (the paper's `¬`): per-operand existence complement; paper-faithful BFS masking `A . !B :: map(take_left, intersect)`, equivalent to the `take_left_only` encoding (`examples/push_bfs_neg.edge`).
 - **Multi-action (fused) Einsums** `(A .1 B) .2 C`: paper-faithful one-line BFS gather/mask (`examples/push_bfs_fused.edge`, `pull_bfs_fused.edge`); transient-scalar intermediate, optional `over=` rank tags.
-- **Generational ranks** (`gen`) with `stop: stable(T)`; internal double-buffered loop in `run()`.
+- **Generational ranks** (`gen`) store every generation (paper semantics; `run()` returns the full watched tensor); stop predicates `||F[i+1]|| == 0`, `X[i+1] == X[i]`, `stable(X)`. Demonstrator: `examples/bfs_paper.edge`.
 - **Cascades:** multiple Einsums per generation, one or more cross-generational tensors plus intra-generation intermediates (Bellman–Ford, reachability BFS).
 - **File I/O:** Matrix Market `load`/`save`, inferred dims `dim N = *`, argv path overrides; densify-on-load (compute stays dense).
 - **`seed(source=I, value=V)`** source vectors sized to a loaded graph (unblocks BFS/SSSP on real graphs).
@@ -67,14 +68,14 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 
 ### Partial 🚧
 - **Merge ops:** 9 of 16 shipped; the 7 `(No,No)→Yes` operators (NOR, equivalence, NAND, ¬→, ¬←, ⇐, ⇒) are not implemented.
-- **BFS (paper-faithful):** masking / pruned / depth BFS work, and unary `¬` (as `!`) now expresses the mask directly (`A . !B :: map(take_left, intersect)`); the full 3-step formulation still needs multi-output return, `ANY`/parent-pointer, and occupancy (`‖F‖≡0`) termination.
+- **BFS (paper-faithful):** masking / pruned / depth BFS work, and unary `¬` (as `!`) now expresses the mask directly (`A . !B :: map(take_left, intersect)`); the full 3-step formulation still needs multi-output return, and `ANY`/parent-pointer.
 
 ### Planned ❌ (by area)
 - **Language:** `<<` update op; compute labels; general N-ary nesting & matrix-chain (both-actions-reduce) beyond the two-action fused form; nested cascades / multiple generational ranks; anonymous tensors; unary functions; user-defined compute ops; the 7 remaining merge ops.
 - **Seeding & data:** multi-source `seed` (keyword syntax already extensible); 1-D vector `.mtx` loading; diagonal/reflexive-adjacency (`+I`) preprocessing; iterative-driver graph loading; one-kernel-over-many-graphs sweep runner; expanded committed SuiteSparse test set.
 - **File I/O:** sparse tensor storage + sparse compute (CSR/CSC/COO); non-`.mtx` formats; EDGE-native input-path CLI.
 - **Visualization:** `--active-edges-only` edge filter (highest-value next addition for dense graphs); `arf` layout; within-ring/layer crossing minimization; per-scalar (inner-loop) stepping; interactive scrubbing; animation export (GIF/MP4); contact-sheet/filmstrip; light/print themes; non-generational-kernel viz.
-- **Tooling:** compiler optimizations of any kind; VS Code Tier-2 (context-aware completions); Neovim port.
+- **Tooling:** compiler optimizations of any kind; liveness-based reclamation of generational storage (ping-pong); VS Code Tier-2 (context-aware completions); Neovim port.
 
 > Design specs and implementation plans for shipped and in-flight features live under
 > `docs/superpowers/specs/` and `docs/superpowers/plans/`.

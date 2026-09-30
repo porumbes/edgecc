@@ -3,8 +3,8 @@
 
 Each kernel in kernels/ is compiled once, imported, and its run() called on
 the vendored SuiteSparse graphs plus seeded random directed weighted graphs.
-Results (final state or every generation) are compared against independent implementations (scipy.sparse.csgraph
-/ numpy) -- never against another edgecc form.
+Results (final state or every generation) are compared against independent
+implementations (scipy.sparse.csgraph / numpy) -- never against another edgecc form.
 
 Usage: run_reference.py <edgecc> [--random N] [--seed S]
 """
@@ -167,19 +167,19 @@ def paper_bfs_inputs(G):
 
 
 CASES = [
-    dict(kernel="bfs_push_fused", graph="weighted", inputs=bfs_inputs, ref=ref_reach_history, cmp=history(same_support), history=True),
-    dict(kernel="bfs_pull_fused", graph="weighted", inputs=bfs_inputs, ref=ref_reach_history, cmp=history(same_support), history=True),
-    dict(kernel="bfs_push_fused_rhs", graph="weighted", inputs=bfs_inputs, ref=ref_reach_history, cmp=history(same_support), history=True),
-    dict(kernel="bfs_neg_cascade", graph="weighted", inputs=bfs_inputs, ref=ref_reach_history, cmp=history(same_support), history=True),
-    dict(kernel="bfs_naive", graph="weighted", inputs=bfs_inputs, ref=ref_reach_history, cmp=history(same_support), history=True),
-    dict(kernel="bfs_depth", graph="pattern", inputs=wave_inputs, ref=ref_depth_history, cmp=history(close), history=True),
+    dict(kernel="bfs_push_fused", graph="weighted", inputs=bfs_inputs, ref=ref_reach_history, cmp=history(same_support)),
+    dict(kernel="bfs_pull_fused", graph="weighted", inputs=bfs_inputs, ref=ref_reach_history, cmp=history(same_support)),
+    dict(kernel="bfs_push_fused_rhs", graph="weighted", inputs=bfs_inputs, ref=ref_reach_history, cmp=history(same_support)),
+    dict(kernel="bfs_neg_cascade", graph="weighted", inputs=bfs_inputs, ref=ref_reach_history, cmp=history(same_support)),
+    dict(kernel="bfs_naive", graph="weighted", inputs=bfs_inputs, ref=ref_reach_history, cmp=history(same_support)),
+    dict(kernel="bfs_depth", graph="pattern", inputs=wave_inputs, ref=ref_depth_history, cmp=history(close)),
     dict(gen=True, kernel="sssp_bellman_ford", graph="weighted", inputs=sssp_inputs, ref=ref_sssp, cmp=close),
     dict(gen=True, kernel="sssp_fused", graph="weighted", inputs=sssp_inputs, ref=ref_sssp, cmp=close),
     dict(gen=True, kernel="sssp_fused_rhs", graph="weighted", inputs=sssp_inputs, ref=ref_sssp, cmp=close),
     dict(gen=True, kernel="sssp_wavefront", graph="weighted", inputs=wave_inputs, ref=ref_sssp, cmp=close),
     dict(gen=True, kernel="widest_path", graph="weighted", inputs=widest_inputs, ref=ref_widest, cmp=close),
     dict(kernel="bfs_paper", graph="pattern", inputs=paper_bfs_inputs,
-         ref=ref_frontier_history, cmp=history(close), history=True),
+         ref=ref_frontier_history, cmp=history(close)),
     dict(kernel="diag_g2", graph="weighted", inputs=lambda G: {"G": G}, ref=ref_diag_g2, cmp=close),
     dict(gen=True, kernel="transitive_closure", graph="pattern", inputs=lambda G: {"G": G, "T": [r[:] for r in G]},
          ref=ref_closure, cmp=same_support_2d, max_n=40),
@@ -243,7 +243,8 @@ def main():
                     failures.append((case["kernel"], gname, f"run() raised {type(e).__name__}: {e}"))
                     continue
                 if case.get("gen"):
-                    out = out[-1]   # run() returns every generation; compare the final state (gen=True) or the whole history (history=True)
+                    # gen=True: compare only the final generation; otherwise run()'s output is compared as-is (history() cmps check every generation)
+                    out = out[-1]
                 exp = case["ref"](G)
                 try:
                     ok = case["cmp"](out, exp)
