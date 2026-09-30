@@ -9,7 +9,7 @@
 // Graph edges (weight): 0->1(1), 0->2(4), 1->2(2), 1->3(6), 2->3(3); source 0.
 //
 // Run:  ./build/edgecc examples/bellman_ford.edge -o out.py && python3 out.py
-// Output: [0.0, 1.0, 3.0, 6.0]
+// Output (last generation): [0.0, 1.0, 3.0, 6.0]
 dim N = 4;
 
 tensor W[R=N, C=N]   : float, empty = inf;

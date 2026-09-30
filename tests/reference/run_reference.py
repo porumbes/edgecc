@@ -138,19 +138,19 @@ def widest_inputs(G):
 
 
 CASES = [
-    dict(kernel="bfs_push_fused", graph="weighted", inputs=bfs_inputs, ref=ref_reach, cmp=same_support),
-    dict(kernel="bfs_pull_fused", graph="weighted", inputs=bfs_inputs, ref=ref_reach, cmp=same_support),
-    dict(kernel="bfs_push_fused_rhs", graph="weighted", inputs=bfs_inputs, ref=ref_reach, cmp=same_support),
-    dict(kernel="bfs_neg_cascade", graph="weighted", inputs=bfs_inputs, ref=ref_reach, cmp=same_support),
-    dict(kernel="bfs_naive", graph="weighted", inputs=bfs_inputs, ref=ref_reach, cmp=same_support),
-    dict(kernel="bfs_depth", graph="pattern", inputs=wave_inputs, ref=ref_hops, cmp=close),
-    dict(kernel="sssp_bellman_ford", graph="weighted", inputs=sssp_inputs, ref=ref_sssp, cmp=close),
-    dict(kernel="sssp_fused", graph="weighted", inputs=sssp_inputs, ref=ref_sssp, cmp=close),
-    dict(kernel="sssp_fused_rhs", graph="weighted", inputs=sssp_inputs, ref=ref_sssp, cmp=close),
-    dict(kernel="sssp_wavefront", graph="weighted", inputs=wave_inputs, ref=ref_sssp, cmp=close),
-    dict(kernel="widest_path", graph="weighted", inputs=widest_inputs, ref=ref_widest, cmp=close),
+    dict(gen=True, kernel="bfs_push_fused", graph="weighted", inputs=bfs_inputs, ref=ref_reach, cmp=same_support),
+    dict(gen=True, kernel="bfs_pull_fused", graph="weighted", inputs=bfs_inputs, ref=ref_reach, cmp=same_support),
+    dict(gen=True, kernel="bfs_push_fused_rhs", graph="weighted", inputs=bfs_inputs, ref=ref_reach, cmp=same_support),
+    dict(gen=True, kernel="bfs_neg_cascade", graph="weighted", inputs=bfs_inputs, ref=ref_reach, cmp=same_support),
+    dict(gen=True, kernel="bfs_naive", graph="weighted", inputs=bfs_inputs, ref=ref_reach, cmp=same_support),
+    dict(gen=True, kernel="bfs_depth", graph="pattern", inputs=wave_inputs, ref=ref_hops, cmp=close),
+    dict(gen=True, kernel="sssp_bellman_ford", graph="weighted", inputs=sssp_inputs, ref=ref_sssp, cmp=close),
+    dict(gen=True, kernel="sssp_fused", graph="weighted", inputs=sssp_inputs, ref=ref_sssp, cmp=close),
+    dict(gen=True, kernel="sssp_fused_rhs", graph="weighted", inputs=sssp_inputs, ref=ref_sssp, cmp=close),
+    dict(gen=True, kernel="sssp_wavefront", graph="weighted", inputs=wave_inputs, ref=ref_sssp, cmp=close),
+    dict(gen=True, kernel="widest_path", graph="weighted", inputs=widest_inputs, ref=ref_widest, cmp=close),
     dict(kernel="diag_g2", graph="weighted", inputs=lambda G: {"G": G}, ref=ref_diag_g2, cmp=close),
-    dict(kernel="transitive_closure", graph="pattern", inputs=lambda G: {"G": G, "T": [r[:] for r in G]},
+    dict(gen=True, kernel="transitive_closure", graph="pattern", inputs=lambda G: {"G": G, "T": [r[:] for r in G]},
          ref=ref_closure, cmp=same_support_2d, max_n=40),
 ]
 
@@ -211,6 +211,8 @@ def main():
                 except Exception as e:  # a crash is a failure, not a harness error
                     failures.append((case["kernel"], gname, f"run() raised {type(e).__name__}: {e}"))
                     continue
+                if case.get("gen"):
+                    out = out[-1]   # run() returns every generation; compare the final state
                 exp = case["ref"](G)
                 try:
                     ok = case["cmp"](out, exp)
