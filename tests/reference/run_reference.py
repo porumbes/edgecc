@@ -3,7 +3,7 @@
 
 Each kernel in kernels/ is compiled once, imported, and its run() called on
 the vendored SuiteSparse graphs plus seeded random directed weighted graphs.
-Results are compared against independent implementations (scipy.sparse.csgraph
+Results (final state or every generation) are compared against independent implementations (scipy.sparse.csgraph
 / numpy) -- never against another edgecc form.
 
 Usage: run_reference.py <edgecc> [--random N] [--seed S]
@@ -49,17 +49,6 @@ def csr(G):
 
 # ---- independent references ---------------------------------------------------
 
-def ref_reach(G):
-    out = [0.0] * len(G)
-    for v in breadth_first_order(csr(G), 0, directed=True, return_predecessors=False):
-        out[v] = 1.0
-    return out
-
-
-def ref_hops(G):
-    return list(shortest_path(csr(G), directed=True, unweighted=True, indices=0))
-
-
 def ref_sssp(G):
     return list(dijkstra(csr(G), directed=True, indices=0))
 
@@ -98,6 +87,34 @@ def ref_closure(G):
              for c in range(n)] for a in range(n)]
 
 
+def hop_dist(G):
+    return list(shortest_path(csr(G), directed=True, unweighted=True, indices=0))
+
+
+def eccentricity(dist):
+    return int(max(d for d in dist if d < INF))
+
+
+def ref_reach_history(G):
+    """P[g] support = vertices within hop distance g. A stable-stop BFS keeps
+    the first repeated generation, so it has eccentricity + 2 generations."""
+    dist = hop_dist(G)
+    return [[1.0 if d <= g else 0.0 for d in dist] for g in range(eccentricity(dist) + 2)]
+
+
+def ref_depth_history(G):
+    """D[g][v] = hop distance if it is <= g, else inf (eccentricity + 2 generations)."""
+    dist = hop_dist(G)
+    return [[d if d <= g else INF for d in dist] for g in range(eccentricity(dist) + 2)]
+
+
+def ref_frontier_history(G):
+    """Paper BFS: F[g][v] = g for vertices at hop distance exactly g; the
+    occupancy stop keeps the first empty generation (eccentricity + 2 in all)."""
+    dist = hop_dist(G)
+    return [[float(g) if d == g else INF for d in dist] for g in range(eccentricity(dist) + 2)]
+
+
 # ---- comparisons --------------------------------------------------------------
 
 def same_support(out, exp):
@@ -112,6 +129,13 @@ def close(out, exp):
     return len(out) == len(exp) and all(
         (a == b) or (math.isfinite(a) and math.isfinite(b) and math.isclose(a, b, rel_tol=1e-9, abs_tol=1e-9))
         for a, b in zip(out, exp))
+
+
+def history(cmp):
+    """Compare every generation (and the number of generations)."""
+    def check(out, exp):
+        return len(out) == len(exp) and all(cmp(o, e) for o, e in zip(out, exp))
+    return check
 
 
 # ---- cases --------------------------------------------------------------------
@@ -137,18 +161,25 @@ def widest_inputs(G):
     return {"G": G, "F": seed(n, 1e9, 0.0), "D": seed(n, 1e9, 0.0)}
 
 
+def paper_bfs_inputs(G):
+    n = len(G)
+    return {"G": G, "F": seed(n, 0.0, INF), "P": seed(n, 1.0, 0.0)}
+
+
 CASES = [
-    dict(gen=True, kernel="bfs_push_fused", graph="weighted", inputs=bfs_inputs, ref=ref_reach, cmp=same_support),
-    dict(gen=True, kernel="bfs_pull_fused", graph="weighted", inputs=bfs_inputs, ref=ref_reach, cmp=same_support),
-    dict(gen=True, kernel="bfs_push_fused_rhs", graph="weighted", inputs=bfs_inputs, ref=ref_reach, cmp=same_support),
-    dict(gen=True, kernel="bfs_neg_cascade", graph="weighted", inputs=bfs_inputs, ref=ref_reach, cmp=same_support),
-    dict(gen=True, kernel="bfs_naive", graph="weighted", inputs=bfs_inputs, ref=ref_reach, cmp=same_support),
-    dict(gen=True, kernel="bfs_depth", graph="pattern", inputs=wave_inputs, ref=ref_hops, cmp=close),
+    dict(kernel="bfs_push_fused", graph="weighted", inputs=bfs_inputs, ref=ref_reach_history, cmp=history(same_support), history=True),
+    dict(kernel="bfs_pull_fused", graph="weighted", inputs=bfs_inputs, ref=ref_reach_history, cmp=history(same_support), history=True),
+    dict(kernel="bfs_push_fused_rhs", graph="weighted", inputs=bfs_inputs, ref=ref_reach_history, cmp=history(same_support), history=True),
+    dict(kernel="bfs_neg_cascade", graph="weighted", inputs=bfs_inputs, ref=ref_reach_history, cmp=history(same_support), history=True),
+    dict(kernel="bfs_naive", graph="weighted", inputs=bfs_inputs, ref=ref_reach_history, cmp=history(same_support), history=True),
+    dict(kernel="bfs_depth", graph="pattern", inputs=wave_inputs, ref=ref_depth_history, cmp=history(close), history=True),
     dict(gen=True, kernel="sssp_bellman_ford", graph="weighted", inputs=sssp_inputs, ref=ref_sssp, cmp=close),
     dict(gen=True, kernel="sssp_fused", graph="weighted", inputs=sssp_inputs, ref=ref_sssp, cmp=close),
     dict(gen=True, kernel="sssp_fused_rhs", graph="weighted", inputs=sssp_inputs, ref=ref_sssp, cmp=close),
     dict(gen=True, kernel="sssp_wavefront", graph="weighted", inputs=wave_inputs, ref=ref_sssp, cmp=close),
     dict(gen=True, kernel="widest_path", graph="weighted", inputs=widest_inputs, ref=ref_widest, cmp=close),
+    dict(kernel="bfs_paper", graph="pattern", inputs=paper_bfs_inputs,
+         ref=ref_frontier_history, cmp=history(close), history=True),
     dict(kernel="diag_g2", graph="weighted", inputs=lambda G: {"G": G}, ref=ref_diag_g2, cmp=close),
     dict(gen=True, kernel="transitive_closure", graph="pattern", inputs=lambda G: {"G": G, "T": [r[:] for r in G]},
          ref=ref_closure, cmp=same_support_2d, max_n=40),
@@ -212,7 +243,7 @@ def main():
                     failures.append((case["kernel"], gname, f"run() raised {type(e).__name__}: {e}"))
                     continue
                 if case.get("gen"):
-                    out = out[-1]   # run() returns every generation; compare the final state
+                    out = out[-1]   # run() returns every generation; compare the final state (gen=True) or the whole history (history=True)
                 exp = case["ref"](G)
                 try:
                     ok = case["cmp"](out, exp)
