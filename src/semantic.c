@@ -833,6 +833,13 @@ static int name_in(char *const *list, int n, const char *name) {
     return 0;
 }
 
+/* A generational tensor is written by some Einsum iff it is a
+   cross-generational tensor (written at i+1) or an intermediate (at i). */
+static int stop_tensor_written(const SymbolTable *st, const char *name) {
+    return name_in(st->gen_tensors, st->num_gen_tensors, name) ||
+           name_in(st->intermediates, st->num_intermediates, name);
+}
+
 /* Resolve one predicate reference X[g]. X must be a declared generational
    tensor, the reference must name a whole generation using the program's
    generational rank variable, and g must be i or i+1 (only i for an
@@ -848,6 +855,11 @@ static int resolve_stop_ref(SemanticResult *res, const TensorRef *r, TensorEntry
     }
     if (te->gen_axis < 0) {
         add_error(res, "stop predicate: tensor '%s' is not generational", r->tensor_name);
+        return -1;
+    }
+    if (!stop_tensor_written(st, te->name)) {
+        add_error(res, "stop predicate: generational tensor '%s' is not written by any Einsum",
+                  r->tensor_name);
         return -1;
     }
     if (r->num_vars != 1) {
@@ -906,6 +918,11 @@ static void resolve_stop(SemanticResult *res, AstNode *program) {
             }
             if (ta->gen_axis < 0) {
                 add_error(res, "stop predicate: tensor '%s' is not generational", sd->stable_tensor);
+                return;
+            }
+            if (!stop_tensor_written(st, ta->name)) {
+                add_error(res, "stop predicate: generational tensor '%s' is not written by any Einsum",
+                          sd->stable_tensor);
                 return;
             }
             if (name_in(st->intermediates, st->num_intermediates, ta->name)) {
@@ -1002,8 +1019,7 @@ SemanticResult semantic_analyze(AstNode *program) {
     validate_cascade_ordering(&res, program);
     resolve_stop(&res, program);
 
-    /* Iterative consistency: a generational einsum needs a stop clause that
-       watches the generational tensor, and vice versa. */
+    /* Stop-clause presence and target checks live in resolve_stop above. */
     SymbolTable *st = res.symtab;
     /* A generational program must write at least one cross-generational tensor
        (a gen-rank tensor at offset i+1); otherwise nothing crosses generations. */
