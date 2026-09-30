@@ -676,6 +676,23 @@ TEST(test_semantic_stop_on_intermediate_at_i) {
     semantic_result_free(&res); ast_free(ast);
 }
 
+/* Generated code no longer uses <T>_prev/<T>_next, so those names are free. */
+TEST(test_semantic_gen_buffer_names_are_free) {
+    AstNode *ast = parse(
+        "dim N = 3;\n"
+        "tensor G[R=N, C=N]   : float, empty = 0.0;\n"
+        "tensor F[gen I, R=N] : float, empty = 0.0;\n"
+        "tensor F_next[R=N]   : float, empty = 0.0;\n"
+        "init G = [[0.0,1.0,0.0],[0.0,0.0,1.0],[0.0,0.0,0.0]];\n"
+        "init F = [1.0, 0.0, 0.0];\n"
+        "init F_next = [0.0, 0.0, 0.0];\n"
+        "F[i+1, d] = G[s,d] . F[i,s] :: map(and, intersect) reduce(or, union);\n"
+        "stop: stable(F);\n");
+    SemanticResult res = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, res.error_count);
+    semantic_result_free(&res); ast_free(ast);
+}
+
 int main(void) {
     RUN_TEST(test_valid_gemm);
     RUN_TEST(test_semantic_stop_occupancy);
@@ -722,5 +739,6 @@ int main(void) {
     RUN_TEST(test_semantic_fused_bad_over_errors);
     RUN_TEST(test_semantic_fused_generational);
     RUN_TEST(test_semantic_gen_rank_var_not_name_checked);
+    RUN_TEST(test_semantic_gen_buffer_names_are_free);
     return test_report();
 }

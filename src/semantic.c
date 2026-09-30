@@ -59,23 +59,6 @@ static int is_py_reserved(const char *name) {
     return 0;
 }
 
-/* A generational tensor T owns the generated names T_prev and T_next. */
-static int is_gen_buffer_name(AstNode *program, const char *name) {
-    ProgramData *pd = &program->data.program;
-    for (int i = 0; i < pd->count; i++) {
-        AstNode *s = pd->statements[i];
-        if (s->type != NODE_TENSOR_DECL) continue;
-        TensorDeclData *t = &s->data.tensor_decl;
-        int gen = 0;
-        for (int r = 0; r < t->num_ranks; r++) gen |= t->ranks[r].is_generational;
-        size_t n = strlen(t->name);
-        if (gen && strncmp(name, t->name, n) == 0 &&
-            (strcmp(name + n, "_prev") == 0 || strcmp(name + n, "_next") == 0))
-            return 1;
-    }
-    return 0;
-}
-
 static AstNode *find_decl(AstNode *program, NodeType type, const char *name) {
     ProgramData *pd = &program->data.program;
     for (int i = 0; i < pd->count; i++) {
@@ -98,14 +81,11 @@ static int first_report(ReportedNames *seen, const char *name) {
     return 1;
 }
 
-static void check_reserved(SemanticResult *res, ReportedNames *seen, AstNode *program,
+static void check_reserved(SemanticResult *res, ReportedNames *seen,
                            const char *what, const char *name) {
-    const char *why = is_py_reserved(name) ? "keyword, builtin, or compiler temporary"
-                    : is_gen_buffer_name(program, name) ? "buffer of a generational tensor"
-                    : NULL;
-    if (why && first_report(seen, name))
-        add_error(res, "%s '%s' is reserved in the generated Python (%s); rename it",
-                  what, name, why);
+    if (is_py_reserved(name) && first_report(seen, name))
+        add_error(res, "%s '%s' is reserved in the generated Python "
+                  "(keyword, builtin, or compiler temporary); rename it", what, name);
 }
 
 static void check_ref_vars(SemanticResult *res, ReportedNames *seen,
@@ -118,7 +98,7 @@ static void check_ref_vars(SemanticResult *res, ReportedNames *seen,
             decl->data.tensor_decl.ranks[k].is_generational)
             continue;
         const char *v = r->rank_vars[k];
-        check_reserved(res, seen, program, "rank variable", v);
+        check_reserved(res, seen, "rank variable", v);
         /* Other rank variables become loop variables, which would shadow a
            dim or tensor of the same name inside run(). */
         const char *kind = find_decl(program, NODE_DIM_DECL, v) ? "dim"
@@ -136,11 +116,11 @@ static void validate_identifiers(SemanticResult *res, AstNode *program) {
         AstNode *s = pd->statements[i];
         switch (s->type) {
             case NODE_DIM_DECL:
-                check_reserved(res, &seen, program, "dim", s->data.dim_decl.name);
+                check_reserved(res, &seen, "dim", s->data.dim_decl.name);
                 break;
             case NODE_TENSOR_DECL: {
                 const char *name = s->data.tensor_decl.name;
-                check_reserved(res, &seen, program, "tensor", name);
+                check_reserved(res, &seen, "tensor", name);
                 if (find_decl(program, NODE_DIM_DECL, name))
                     add_error(res, "tensor '%s' has the same name as dim '%s' "
                                    "(both become Python names); rename one", name, name);

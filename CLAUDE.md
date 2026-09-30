@@ -164,8 +164,7 @@ See `docs/superpowers/specs/2026-06-02-edgecc-multi-cross-gen-tensors-c1-design.
 the generated Python, so they may not be Python keywords, builtins/modules the
 generated code uses (`range`, `min`, `math`, `run`, …), codegen temporaries
 (`state`, `map_val`, …), or start with `_` (the full list is `PY_RESERVED` in
-`src/semantic.c`); a rank variable may not reuse a dim or tensor name, and a
-tensor may not be named `<T>_prev`/`<T>_next` for a generational `T`. A program
+`src/semantic.c`); a rank variable may not reuse a dim or tensor name. A program
 must contain at least one Einsum.
 
 Rank variables in expressions bind to declared rank names by position. Built-in compute operators: `add`, `sub`, `mul`, `min`, `max`, `and`, `or`, `take_left` (map-only — emits its left operand verbatim; pair with the `take_left_only` or `intersect` merge for a value-preserving mask; using it as a `reduce` operator is an error). Built-in merge operators (optional second arg, default `passthrough`): `passthrough`, `nopass`, `intersect`, `take_left`, `take_left_only`, `take_right`, `take_right_only`, `xor`, `union`. Omitting the merge argument preserves v1 source-program semantics. Unary complement: prefix a map operand with `!` (the paper's `¬`) to use its existence complement — `!X` is present exactly where `X` is empty (supplying a `1.0` true marker there). Paper-faithful masking is `A . !B :: map(take_left, intersect)`, equivalent to the `map(_, take_left_only)` encoding. `!` is operand-only (not on the output) and keys off empty-vs-non-empty, so it works for any declared type.
