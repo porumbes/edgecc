@@ -758,7 +758,8 @@ static void analyze_einsum(SemanticResult *res, AstNode *node, int eidx) {
 
 static void analyze_stop(SemanticResult *res, AstNode *node) {
     SymbolTable *st = res->symtab;
-    const char *watch = node->data.stop.watch_tensor;
+    StopData *sd = &node->data.stop;
+    const char *watch = sd->kind == STOP_STABLE ? sd->stable_tensor : sd->lhs.tensor_name;
     TensorEntry *te = symtab_find_tensor(st, watch);
     if (te == NULL) {
         add_error(res, "stop: undeclared tensor '%s'", watch);

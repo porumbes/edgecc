@@ -115,10 +115,29 @@ AstNode *ast_einsum_fused_new(EinsumFusedData data) {
     return node;
 }
 
-AstNode *ast_stop_new(char *watch_tensor) {
+AstNode *ast_stop_stable_new(char *tensor) {
     AstNode *node = calloc(1, sizeof(AstNode));
     node->type = NODE_STOP;
-    node->data.stop.watch_tensor = watch_tensor;
+    node->data.stop.kind = STOP_STABLE;
+    node->data.stop.stable_tensor = tensor;
+    return node;
+}
+
+AstNode *ast_stop_equal_new(TensorRef lhs, TensorRef rhs) {
+    AstNode *node = calloc(1, sizeof(AstNode));
+    node->type = NODE_STOP;
+    node->data.stop.kind = STOP_EQUAL;
+    node->data.stop.lhs = lhs;
+    node->data.stop.rhs = rhs;
+    return node;
+}
+
+AstNode *ast_stop_occupancy_new(TensorRef ref, int rhs_value) {
+    AstNode *node = calloc(1, sizeof(AstNode));
+    node->type = NODE_STOP;
+    node->data.stop.kind = STOP_OCCUPANCY;
+    node->data.stop.lhs = ref;
+    node->data.stop.occupancy_rhs = rhs_value;
     return node;
 }
 
@@ -229,7 +248,9 @@ void ast_free(AstNode *node) {
             break;
         }
         case NODE_STOP:
-            free(node->data.stop.watch_tensor);
+            free(node->data.stop.stable_tensor);
+            tensor_ref_free_contents(&node->data.stop.lhs);
+            tensor_ref_free_contents(&node->data.stop.rhs);
             break;
         case NODE_SAVE:
             free(node->data.save.tensor_name);
