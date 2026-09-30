@@ -179,9 +179,32 @@ longer emits those names. New codegen names (`_i`, `_edgecc_occupancy`) are
    `i` where `◇(i)` holds, but evaluating `◇(i)` requires computing
    `F_{i+1}`. edgecc keeps it (compute-then-check, as in the paper's draft
    programming-model comment).
-2. **`G^{I, S, D}`.** The full BFS specification declares the graph with a
-   generational rank although `G` never changes. Typo, or intentional (e.g.
-   dynamic graphs)? edgecc keeps `G` non-generational.
+2. **`G^{I, S, D}` declared, `G_{s,d}` used.** The full BFS specification
+   (`tex/bfs-example/07-iteration.tex:152`) declares the graph with a
+   generational rank, `G^{I, S≡|V|, D≡|V|}`, but every Einsum indexes it with
+   two variables and no generation (`T_{i,d} = G_{s,d} · F_{i,s}`), and
+   nothing writes `G` (it is `⟨user-specified⟩`). The two concurrent
+   connected-components examples (`tex/7-examples.tex:541, 586`) have the same
+   pattern (`G^{I,S,D}` declared, `G_{v,w}` used). Elsewhere the same graph is
+   declared without `I`: the single-step BFS (`02-declarations.tex:43`,
+   `08-populate.tex:252`) and the Bellman-Ford appendix (`G^{S, D}`). When the
+   paper wants a graph that changes per generation, it introduces a separate
+   tensor with an explicit generation: Green's BFS (`7-examples.tex:57–61`)
+   uses `GG_{0,s,d} = G_{s,d}` and `GG_{i+1,s,d} = GG_{i,s,d} · ¬F_{i+1,d}`.
+   Since rank variables bind to declared ranks by position, `G_{s,d}` against
+   ranks `(I, S, D)` does not read literally. Which is intended?
+   - **(a) Typo:** `G` should be declared `G^{S, D}`.
+   - **(b) Implicit convention:** a generational coordinate may be omitted
+     when a tensor is constant across generations, so `G_{s,d}` means
+     `G_{i,s,d}` with the same value for every `i`. Same results as (a) for
+     every example in the paper.
+   - **(c) Dynamic graphs:** the user supplies a (possibly different) graph
+     per generation, and `G_{s,d}` implicitly means this generation's graph.
+     The only reading that changes results.
+
+   edgecc treats `G` as non-generational, which matches (a) and computes the
+   same thing as (b). Only (c) would require new work (per-generation inputs
+   plus an implicit-`i` rule) — a separate feature, not part of this branch.
 
 ## Out of scope
 
