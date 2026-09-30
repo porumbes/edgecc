@@ -2,6 +2,7 @@
 #include "ast.h"
 #include "semantic.h"
 #include "ir.h"
+#include <math.h>
 
 typedef struct yy_buffer_state *YY_BUFFER_STATE;
 extern YY_BUFFER_STATE yy_scan_string(const char *str);
@@ -250,6 +251,7 @@ TEST(test_ir_cascade_structure) {
 
     int gen_begin = 0, gen_end = 0, stores = 0, loop_begins = 0;
     int cross_writes = 0;
+    int inter_writes = 0;
     for (int i = 0; i < ir->count; i++) {
         switch (ir->instrs[i].type) {
             case IR_GEN_LOOP_BEGIN:
@@ -264,7 +266,8 @@ TEST(test_ir_cascade_structure) {
             case IR_LOOP_BEGIN:    loop_begins++; break;
             case IR_STORE:
                 stores++;
-                if (ir->instrs[i].data.store.gen_write) cross_writes++;
+                if (ir->instrs[i].data.store.gen_write == 2) cross_writes++;
+                if (ir->instrs[i].data.store.gen_write == 1) inter_writes++;
                 break;
             default: break;
         }
@@ -273,6 +276,7 @@ TEST(test_ir_cascade_structure) {
     ASSERT_INT_EQ(1, gen_end);
     ASSERT_INT_EQ(2, stores);
     ASSERT_INT_EQ(1, cross_writes);
+    ASSERT_INT_EQ(1, inter_writes);
     ASSERT_INT_EQ(3, loop_begins);
 
     ir_free(ir);
@@ -312,7 +316,7 @@ TEST(test_ir_two_cross_gen) {
             if (strcmp(in->data.load.tensor_name, "P") == 0 && in->data.load.gen_read == 1)
                 p_prev_read = 1;
         }
-        if (in->type == IR_STORE && in->data.store.gen_write == 1) stores++;
+        if (in->type == IR_STORE && in->data.store.gen_write == 2) stores++;
     }
     ASSERT_INT_EQ(1, found_begin);
     ASSERT_INT_EQ(1, f_next_read);
@@ -424,6 +428,75 @@ TEST(test_ir_fused_push_node) {
     ir_free(ir); semantic_result_free(&sem); ast_free(ast);
 }
 
+TEST(test_ir_intermediate_generation_kinds) {
+    AstNode *ast = parse(
+        "dim N = 3;\n"
+        "tensor W[R=N, C=N]   : float, empty = 0.0;\n"
+        "tensor T[gen I, R=N] : float, empty = inf;\n"
+        "tensor D[gen I, R=N] : float, empty = inf;\n"
+        "init W = [[0.0,1.0,4.0],[0.0,0.0,2.0],[0.0,0.0,0.0]];\n"
+        "init D = [0.0, inf, inf];\n"
+        "T[i, d]   = W[s,d] . D[i, s] :: map(add, intersect) reduce(min, union);\n"
+        "D[i+1, d] = D[i, d] . T[i, d] :: map(min, union) reduce(min, union);\n"
+        "stop: stable(D);\n");
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    int t_read_i = 0, t_write_i = 0, d_write_next = 0, saw_loop = 0;
+    for (int i = 0; i < ir->count; i++) {
+        IRInstr *in = &ir->instrs[i];
+        if (in->type == IR_LOAD && strcmp(in->data.load.tensor_name, "T") == 0 &&
+            in->data.load.gen_read == 1) t_read_i = 1;
+        if (in->type == IR_STORE && strcmp(in->data.store.tensor_name, "T") == 0 &&
+            in->data.store.gen_write == 1) t_write_i = 1;
+        if (in->type == IR_STORE && strcmp(in->data.store.tensor_name, "D") == 0 &&
+            in->data.store.gen_write == 2) d_write_next = 1;
+        if (in->type == IR_GEN_LOOP_BEGIN) {
+            saw_loop = 1;
+            ASSERT_STR_EQ("D", in->data.gen_loop.watch);
+            ASSERT_INT_EQ(STOP_EQUAL, in->data.gen_loop.stop_kind);
+            ASSERT_INT_EQ(1, in->data.gen_loop.stop_gen_a);
+            ASSERT_INT_EQ(0, in->data.gen_loop.stop_gen_b);
+        }
+    }
+    ASSERT_INT_EQ(1, t_read_i);
+    ASSERT_INT_EQ(1, t_write_i);
+    ASSERT_INT_EQ(1, d_write_next);
+    ASSERT_INT_EQ(1, saw_loop);
+    ir_free(ir); semantic_result_free(&sem); ast_free(ast);
+}
+
+TEST(test_ir_occupancy_stop) {
+    AstNode *ast = parse(
+        "dim N = 3;\n"
+        "tensor G[R=N, C=N]   : float, empty = 0.0;\n"
+        "tensor T[gen I, R=N] : float, empty = inf;\n"
+        "tensor F[gen I, R=N] : float, empty = inf;\n"
+        "tensor P[gen I, R=N] : float, empty = 0.0;\n"
+        "init G = [[0.0,1.0,0.0],[0.0,0.0,1.0],[0.0,0.0,0.0]];\n"
+        "init F = [0.0, inf, inf];\n"
+        "init P = [1.0, 0.0, 0.0];\n"
+        "T[i, d]   = G[s,d] . F[i,s]   :: map(add, intersect) reduce(min, union);\n"
+        "F[i+1, d] = T[i,d] . !P[i,d]  :: map(take_left, intersect) reduce(min, union);\n"
+        "P[i+1, d] = P[i,d] . F[i+1,d] :: map(or, union) reduce(or, union);\n"
+        "stop: ||F[i+1]|| == 0;\n");
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    int saw = 0;
+    for (int i = 0; i < ir->count; i++) {
+        IRInstr *in = &ir->instrs[i];
+        if (in->type != IR_GEN_LOOP_BEGIN) continue;
+        saw = 1;
+        ASSERT_STR_EQ("F", in->data.gen_loop.watch);
+        ASSERT_INT_EQ(STOP_OCCUPANCY, in->data.gen_loop.stop_kind);
+        ASSERT_INT_EQ(1, in->data.gen_loop.stop_gen_a);
+        ASSERT_TRUE(isinf(in->data.gen_loop.watch_empty));
+    }
+    ASSERT_INT_EQ(1, saw);
+    ir_free(ir); semantic_result_free(&sem); ast_free(ast);
+}
+
 int main(void) {
     RUN_TEST(test_ir_gemm_structure);
     RUN_TEST(test_ir_load_carries_negate);
@@ -437,5 +510,7 @@ int main(void) {
     RUN_TEST(test_ir_inferred_dim_flag);
     RUN_TEST(test_ir_save_instruction);
     RUN_TEST(test_ir_fused_push_node);
+    RUN_TEST(test_ir_intermediate_generation_kinds);
+    RUN_TEST(test_ir_occupancy_stop);
     return test_report();
 }
