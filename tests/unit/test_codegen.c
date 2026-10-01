@@ -101,7 +101,8 @@ TEST(test_codegen_intersect_union) {
     ast_free(ast);
 }
 
-/* Multi-dim generational buffers (cross-gen _next and intermediates) must be
+/* Multi-dim generational buffers (per-generation slices appended each
+   iteration, for cross-gen tensors and intermediates alike) must be
    sized by their declared dim names, per axis -- not by matching sizes. */
 TEST(test_codegen_generational_2d_alloc_uses_dim_names) {
     AstNode *ast = parse(
