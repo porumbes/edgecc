@@ -131,8 +131,8 @@ stop: stable(F);
 ```
 
 **Cascades (multiple Einsums per generation).** A generation may run a *sequence*
-of Einsums in source order, sharing one generational rank. Exactly one
-**cross-generational** tensor is written at `i+1` (it carries the `init`); any number of **intra-generation
+of Einsums in source order, sharing one generational rank. At least one
+**cross-generational** tensor is written at `i+1` (it carries the `init`; more than one is allowed, see C1 below); any number of **intra-generation
 intermediates** are written and read at `i` (no `init`, one new generation per
 iteration). Bellman-Ford shortest paths:
 
@@ -201,8 +201,8 @@ normal nested-list representation (the compute stays dense). `dim N = *;` infers
 the size from a loaded tensor at runtime; an inferred dim must be pinned by at
 least one `load(...)` tensor (else a compile-time error). A literal init on an
 inferred-dim tensor is not shape-checked at compile time; its length is verified
-against the loaded shape at runtime. `save: T -> "path";` (a generational tensor writes every generation: generations x N for a 1-D generational tensor; tensors with more than one data rank cannot be saved) writes tensor `T` after
-`run()` (1-D results are stored as a column). Generated programs accept
+against the loaded shape at runtime. `save: T -> "path";` writes tensor `T` after
+`run()`. `T` must be the tensor `run()` returns: the stop-watched tensor for a generational program (written with every generation: generations x N for a 1-D generational tensor; tensors with more than one data rank cannot be saved), or the output of the last Einsum otherwise. Saving any other tensor is a compile-time error (it needs multi-output return, future work) (1-D results are stored as a column). Generated programs accept
 positional argv overrides for the file-backed inputs (in
 `__edgecc_meta__["file_inputs"]` order); run with `-h` for usage. See
 `examples/load_push.edge`.
@@ -349,4 +349,4 @@ Coverage is Tier 1 only — static dropdowns for compute / merge / type / empty-
 
 ## v2 Scope Limitations
 
-Not yet supported: compute labels and the `<<` update compute operator (two-action fused Einsums `(A .1 B) .2 C` ARE now supported — see "Multi-action (fused) Einsum" in EDGE Syntax above; general N-ary nesting and matrix-chain (both actions reduce) remain unsupported), the remaining gaps for full 3-step BFS (multi-output return, `ANY` compute, unary `¬` is now supported as `!`, see EDGE Syntax above), and nested cascades / multiple generational ranks — single-Einsum generational ranks and cascades with one **or more** cross-generational tensors (e.g. Bellman-Ford; naive reachability BFS) are supported; see "Generational (iterative) ranks", anonymous tensors, unary functions, the 7 (No,No)→Yes merge operators (NOR, equivalence, NAND, ¬→, ¬←, ⇐, ⇒), sparse tensor storage, optimizations of any kind, user-defined compute operators. File-based init is now supported for Matrix Market (`.mtx`) via `load`/`save` (see "File input/output"); it **densifies on load** — sparse *compute* (CSR/CSC/COO iteration in the generated loops) remains part of the deferred sparse-tensor-storage work, as does loading non-`.mtx` formats and a proper EDGE-native CLI for input paths. Per-generation visualization is available via `--emit-trace` + `tools/edgecc_viz.py` (generational kernels only; see "Visualization"); per-scalar (inner-loop) stepping, interactive scrubbing, animation export, contact-sheet/filmstrip, and print themes are deferred.
+Not yet supported: compute labels and the `<<` update compute operator (two-action fused Einsums `(A .1 B) .2 C` ARE now supported — see "Multi-action (fused) Einsum" in EDGE Syntax above; general N-ary nesting and matrix-chain (both actions reduce) remain unsupported), the remaining gaps for full 3-step BFS (multi-output return and `ANY` compute; unary `¬` is supported as `!`, fused Einsums and occupancy termination `||F[i+1]|| == 0` are supported, see EDGE Syntax above), stop predicates beyond a single clause (no `and`/`or` combinations; occupancy only compares `== 0`), `save:` of any tensor other than the one `run()` returns, and nested cascades / multiple generational ranks — single-Einsum generational ranks and cascades with one **or more** cross-generational tensors (e.g. Bellman-Ford; naive reachability BFS) are supported; see "Generational (iterative) ranks", anonymous tensors, unary functions, the 7 (No,No)→Yes merge operators (NOR, equivalence, NAND, ¬→, ¬←, ⇐, ⇒), sparse tensor storage, optimizations of any kind, user-defined compute operators. File-based init is now supported for Matrix Market (`.mtx`) via `load`/`save` (see "File input/output"); it **densifies on load** — sparse *compute* (CSR/CSC/COO iteration in the generated loops) remains part of the deferred sparse-tensor-storage work, as does loading non-`.mtx` formats and a proper EDGE-native CLI for input paths. Per-generation visualization is available via `--emit-trace` + `tools/edgecc_viz.py` (generational kernels only; see "Visualization"); per-scalar (inner-loop) stepping, interactive scrubbing, animation export, contact-sheet/filmstrip, and print themes are deferred.
