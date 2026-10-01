@@ -107,10 +107,18 @@ static int is_cross_gen_name(SymbolTable *st, const char *name) {
     return 0;
 }
 
-/* 0: not cross-gen; 1: cross-gen read at i (prev); 2: cross-gen read at i+1 (next). */
-static int gen_read_kind(SymbolTable *st, TensorRef *ref, TensorEntry *te) {
+static int is_intermediate_name(SymbolTable *st, const char *name) {
+    for (int m = 0; m < st->num_intermediates; m++)
+        if (strcmp(st->intermediates[m], name) == 0) return 1;
+    return 0;
+}
+
+/* Generation kind of a reference: 0 not generational; 1 generation i;
+   2 generation i+1. Applies to cross-generational tensors and intermediates
+   alike -- every generational tensor stores all of its generations. */
+static int gen_kind(SymbolTable *st, TensorRef *ref, TensorEntry *te) {
     if (!te || te->gen_axis < 0) return 0;
-    if (!is_cross_gen_name(st, te->name)) return 0;
+    if (!is_cross_gen_name(st, te->name) && !is_intermediate_name(st, te->name)) return 0;
     int eff = (ref->gen_axis == te->gen_axis) ? ref->gen_offset : 0;
     return (eff == 1) ? 2 : 1;
 }
@@ -164,7 +172,7 @@ static void fill_fused_operand(IRFusedOperand *o, TensorRef *r, TensorEntry *te,
     o->coords = dup_coords_strip(r->rank_vars, r->num_vars, te->gen_axis, &o->ncoords);
     o->empty = te->empty_val;
     o->negate = r->negate;
-    o->gen_read = gen_read_kind(st, r, te);
+    o->gen_read = gen_kind(st, r, te);
 }
 
 static void emit_einsum_fused(IRProgram *ir, AstNode *node, SymbolTable *st, int eidx) {
@@ -181,7 +189,7 @@ static void emit_einsum_fused(IRProgram *ir, AstNode *node, SymbolTable *st, int
     fu->out_name = dup_str(f->output.tensor_name);
     fu->out_coords = dup_coords_strip(f->output.rank_vars, f->output.num_vars, out_te->gen_axis, &fu->out_ncoords);
     fu->empty_z = out_te->empty_val;
-    fu->gen_write = is_cross_gen_name(st, f->output.tensor_name);
+    fu->gen_write = gen_kind(st, &f->output, out_te);
     fill_fused_operand(&fu->inner1, &f->inner1, i1, st);
     fill_fused_operand(&fu->inner2, &f->inner2, i2, st);
     fill_fused_operand(&fu->outer,  &f->outer,  ou, st);
@@ -246,7 +254,7 @@ static void emit_einsum(IRProgram *ir, AstNode *einsum_node, SymbolTable *symtab
         instr->data.load.tensor_name = dup_str(e->input1.tensor_name);
         instr->data.load.coords = dup_coords_strip(e->input1.rank_vars,
             e->input1.num_vars, in1_te->gen_axis, &instr->data.load.ncoords);
-        instr->data.load.gen_read = gen_read_kind(symtab, &e->input1, in1_te);
+        instr->data.load.gen_read = gen_kind(symtab, &e->input1, in1_te);
         instr->data.load.negate = e->input1.negate;
     }
     /* LOAD input2 -> reg 1 */
@@ -256,7 +264,7 @@ static void emit_einsum(IRProgram *ir, AstNode *einsum_node, SymbolTable *symtab
         instr->data.load.tensor_name = dup_str(e->input2.tensor_name);
         instr->data.load.coords = dup_coords_strip(e->input2.rank_vars,
             e->input2.num_vars, in2_te->gen_axis, &instr->data.load.ncoords);
-        instr->data.load.gen_read = gen_read_kind(symtab, &e->input2, in2_te);
+        instr->data.load.gen_read = gen_kind(symtab, &e->input2, in2_te);
         instr->data.load.negate = e->input2.negate;
     }
 
@@ -292,7 +300,7 @@ static void emit_einsum(IRProgram *ir, AstNode *einsum_node, SymbolTable *symtab
         instr->data.store.coords = dup_coords_strip(e->output.rank_vars,
             e->output.num_vars, out_te->gen_axis, &instr->data.store.ncoords);
         instr->data.store.src_reg = 3;
-        instr->data.store.gen_write = is_cross_gen_name(symtab, e->output.tensor_name);
+        instr->data.store.gen_write = gen_kind(symtab, &e->output, out_te);
     }
 
     /* LOOP_END in reverse order: reduction first, then free. */
@@ -336,6 +344,11 @@ IRProgram *ir_lower(AstNode *program, SymbolTable *symtab) {
         }
         gl->data.gen_loop.num_cross_gens = nc;
         gl->data.gen_loop.watch = symtab->stop_watch ? dup_str(symtab->stop_watch) : NULL;
+        gl->data.gen_loop.stop_kind  = symtab->stop_kind;
+        gl->data.gen_loop.stop_gen_a = symtab->stop_gen_a;
+        gl->data.gen_loop.stop_gen_b = symtab->stop_gen_b;
+        TensorEntry *wte = symtab->stop_watch ? symtab_find_tensor(symtab, symtab->stop_watch) : NULL;
+        gl->data.gen_loop.watch_empty = wte ? wte->empty_val : 0.0;
         int ni = 0;
         for (int m = 0; m < symtab->num_intermediates && ni < 8; m++) {
             TensorEntry *te = symtab_find_tensor(symtab, symtab->intermediates[m]);
@@ -505,7 +518,7 @@ void ir_dump(IRProgram *ir, FILE *out) {
                 fprintf(out, "LOAD(r%d, %s%s%s, ", instr->data.load.reg,
                         instr->data.load.tensor_name,
                         instr->data.load.negate ? " [neg]" : "",
-                        instr->data.load.gen_read ? " [gen_read]" : "");
+                        instr->data.load.gen_read == 2 ? " [gen i+1]" : instr->data.load.gen_read == 1 ? " [gen i]" : "");
                 dump_coords(out, instr->data.load.coords, instr->data.load.ncoords);
                 fprintf(out, ")\n");
                 break;
@@ -531,7 +544,7 @@ void ir_dump(IRProgram *ir, FILE *out) {
                 break;
             case IR_STORE:
                 fprintf(out, "STORE(%s%s, ", instr->data.store.tensor_name,
-                        instr->data.store.gen_write ? " [gen_write]" : "");
+                        instr->data.store.gen_write == 2 ? " [gen i+1]" : instr->data.store.gen_write == 1 ? " [gen i]" : "");
                 dump_coords(out, instr->data.store.coords, instr->data.store.ncoords);
                 fprintf(out, ", r%d)\n", instr->data.store.src_reg);
                 break;
@@ -552,7 +565,18 @@ void ir_dump(IRProgram *ir, FILE *out) {
                     if (j > 0) fprintf(out, ",");
                     fprintf(out, "%s", instr->data.gen_loop.intermediates[j].name);
                 }
-                fprintf(out, "], max_gen=%d)\n", instr->data.gen_loop.max_gen);
+                {
+                    IRGenLoop *g = &instr->data.gen_loop;
+                    const char *ga = g->stop_gen_a ? "i+1" : "i";
+                    if (g->stop_kind == STOP_OCCUPANCY)
+                        fprintf(out, "], stop=||%s[%s]||==0, max_gen=%d)\n",
+                                g->watch ? g->watch : "?", ga, g->max_gen);
+                    else
+                        fprintf(out, "], stop=%s[%s]==%s[%s], max_gen=%d)\n",
+                                g->watch ? g->watch : "?", ga,
+                                g->watch ? g->watch : "?", g->stop_gen_b ? "i+1" : "i",
+                                g->max_gen);
+                }
                 break;
             case IR_GEN_LOOP_END:
                 fprintf(out, "GEN_LOOP_END\n");

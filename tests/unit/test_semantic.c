@@ -615,8 +615,109 @@ TEST(test_semantic_fused_pull_classification) {
     semantic_result_free(&sem); ast_free(ast);
 }
 
+#define BFS_DECLS \
+    "dim N = 3;\n" \
+    "tensor G[R=N, C=N]   : float, empty = 0.0;\n" \
+    "tensor F[gen I, R=N] : float, empty = 0.0;\n" \
+    "tensor P[gen I, R=N] : float, empty = 0.0;\n" \
+    "init G = [[0.0,1.0,0.0],[0.0,0.0,1.0],[0.0,0.0,0.0]];\n" \
+    "init F = [1.0, 0.0, 0.0];\n" \
+    "init P = [1.0, 0.0, 0.0];\n" \
+    "F[i+1, d] = G[s,d] . F[i,s]   :: map(and, intersect) reduce(or, union);\n" \
+    "P[i+1, d] = P[i,d] . F[i+1,d] :: map(or, union) reduce(or, union);\n"
+
+TEST(test_semantic_stop_occupancy) {
+    AstNode *ast = parse(BFS_DECLS "stop: ||F[i+1]|| == 0;\n");
+    SemanticResult res = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, res.error_count);
+    ASSERT_STR_EQ("F", res.symtab->stop_watch);
+    ASSERT_INT_EQ(STOP_OCCUPANCY, res.symtab->stop_kind);
+    ASSERT_INT_EQ(1, res.symtab->stop_gen_a);
+    semantic_result_free(&res); ast_free(ast);
+}
+
+TEST(test_semantic_stop_equal) {
+    AstNode *ast = parse(BFS_DECLS "stop: P[i+1] == P[i];\n");
+    SemanticResult res = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, res.error_count);
+    ASSERT_STR_EQ("P", res.symtab->stop_watch);
+    ASSERT_INT_EQ(STOP_EQUAL, res.symtab->stop_kind);
+    ASSERT_INT_EQ(1, res.symtab->stop_gen_a);
+    ASSERT_INT_EQ(0, res.symtab->stop_gen_b);
+    semantic_result_free(&res); ast_free(ast);
+}
+
+TEST(test_semantic_stable_is_equal_sugar) {
+    AstNode *ast = parse(BFS_DECLS "stop: stable(P);\n");
+    SemanticResult res = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, res.error_count);
+    ASSERT_STR_EQ("P", res.symtab->stop_watch);
+    ASSERT_INT_EQ(STOP_EQUAL, res.symtab->stop_kind);
+    ASSERT_INT_EQ(1, res.symtab->stop_gen_a);
+    ASSERT_INT_EQ(0, res.symtab->stop_gen_b);
+    semantic_result_free(&res); ast_free(ast);
+}
+
+TEST(test_semantic_stop_on_intermediate_at_i) {
+    AstNode *ast = parse(
+        "dim N = 3;\n"
+        "tensor W[R=N, C=N]   : float, empty = 0.0;\n"
+        "tensor T[gen I, R=N] : float, empty = inf;\n"
+        "tensor D[gen I, R=N] : float, empty = inf;\n"
+        "init W = [[0.0,1.0,4.0],[0.0,0.0,2.0],[0.0,0.0,0.0]];\n"
+        "init D = [0.0, inf, inf];\n"
+        "T[i, d]   = W[s,d] . D[i, s] :: map(add, intersect) reduce(min, union);\n"
+        "D[i+1, d] = D[i, d] . T[i, d] :: map(min, union) reduce(min, union);\n"
+        "stop: ||T[i]|| == 0;\n");
+    SemanticResult res = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, res.error_count);
+    ASSERT_STR_EQ("T", res.symtab->stop_watch);
+    ASSERT_INT_EQ(0, res.symtab->stop_gen_a);
+    semantic_result_free(&res); ast_free(ast);
+}
+
+/* Generated code no longer uses <T>_prev/<T>_next, so those names are free. */
+TEST(test_semantic_gen_buffer_names_are_free) {
+    AstNode *ast = parse(
+        "dim N = 3;\n"
+        "tensor G[R=N, C=N]   : float, empty = 0.0;\n"
+        "tensor F[gen I, R=N] : float, empty = 0.0;\n"
+        "tensor F_next[R=N]   : float, empty = 0.0;\n"
+        "init G = [[0.0,1.0,0.0],[0.0,0.0,1.0],[0.0,0.0,0.0]];\n"
+        "init F = [1.0, 0.0, 0.0];\n"
+        "init F_next = [0.0, 0.0, 0.0];\n"
+        "F[i+1, d] = G[s,d] . F[i,s] :: map(and, intersect) reduce(or, union);\n"
+        "stop: stable(F);\n");
+    SemanticResult res = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, res.error_count);
+    semantic_result_free(&res); ast_free(ast);
+}
+
+/* A failed left reference must not also report the right one. */
+TEST(test_semantic_stop_equal_undeclared_reports_once) {
+    AstNode *ast = parse(
+        "dim N = 3;\n"
+        "tensor G[R=N, C=N]   : float, empty = 0.0;\n"
+        "tensor F[gen I, R=N] : float, empty = 0.0;\n"
+        "tensor P[gen I, R=N] : float, empty = 0.0;\n"
+        "init G = [[0.0,1.0,0.0],[0.0,0.0,1.0],[0.0,0.0,0.0]];\n"
+        "init F = [1.0, 0.0, 0.0];\n"
+        "init P = [1.0, 0.0, 0.0];\n"
+        "F[i+1, d] = G[s,d] . F[i,s]   :: map(and, intersect) reduce(or, union);\n"
+        "P[i+1, d] = P[i,d] . F[i+1,d] :: map(or, union) reduce(or, union);\n"
+        "stop: Q[i+1] == Q[i];\n");
+    SemanticResult res = semantic_analyze(ast);
+    ASSERT_INT_EQ(1, res.error_count);
+    semantic_result_free(&res); ast_free(ast);
+}
+
 int main(void) {
     RUN_TEST(test_valid_gemm);
+    RUN_TEST(test_semantic_stop_equal_undeclared_reports_once);
+    RUN_TEST(test_semantic_stop_occupancy);
+    RUN_TEST(test_semantic_stop_equal);
+    RUN_TEST(test_semantic_stable_is_equal_sugar);
+    RUN_TEST(test_semantic_stop_on_intermediate_at_i);
     RUN_TEST(test_undeclared_dim);
     RUN_TEST(test_undeclared_tensor_in_init);
     RUN_TEST(test_dimension_mismatch);
@@ -657,5 +758,6 @@ int main(void) {
     RUN_TEST(test_semantic_fused_bad_over_errors);
     RUN_TEST(test_semantic_fused_generational);
     RUN_TEST(test_semantic_gen_rank_var_not_name_checked);
+    RUN_TEST(test_semantic_gen_buffer_names_are_free);
     return test_report();
 }

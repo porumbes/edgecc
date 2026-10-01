@@ -110,6 +110,15 @@ static void emit_tensor_access(CodeBuf *cb, const char *name, char **coords, int
     }
 }
 
+/* A generational tensor stores every generation (the paper's rank I), so a
+   reference names one slice: kind 1 -> X[_i], kind 2 -> X[_i + 1]; kind 0 is
+   a non-generational tensor (plain name). */
+static void gen_slice_name(char *out, size_t cap, const char *name, int kind) {
+    if (kind == 2)      snprintf(out, cap, "%s[_i + 1]", name);
+    else if (kind == 1) snprintf(out, cap, "%s[_i]", name);
+    else                snprintf(out, cap, "%s", name);
+}
+
 /* Forward declaration: emit_general_skeleton is defined below codegen_python.
    format_double_literal is forward-declared earlier (above emit_literal). */
 static void emit_general_skeleton(CodeBuf *cb,
@@ -319,25 +328,11 @@ static void emit_general_skeleton(CodeBuf *cb,
     char *eB = format_double_literal(map_i->data.map.empty_b);
     char *eZ = format_double_literal(map_i->data.map.empty_z);
 
-    /* Generational tensors are double-buffered: reads use <name>_prev,
-       writes use <name>_next. Non-generational tensors keep their name. */
+    /* Generational tensors store every generation; index the slice. */
     char a_name[128], b_name[128], z_name[128];
-    if (load1->data.load.gen_read == 2)
-        snprintf(a_name, sizeof(a_name), "%s_next", load1->data.load.tensor_name);
-    else if (load1->data.load.gen_read == 1)
-        snprintf(a_name, sizeof(a_name), "%s_prev", load1->data.load.tensor_name);
-    else
-        snprintf(a_name, sizeof(a_name), "%s", load1->data.load.tensor_name);
-    if (load2->data.load.gen_read == 2)
-        snprintf(b_name, sizeof(b_name), "%s_next", load2->data.load.tensor_name);
-    else if (load2->data.load.gen_read == 1)
-        snprintf(b_name, sizeof(b_name), "%s_prev", load2->data.load.tensor_name);
-    else
-        snprintf(b_name, sizeof(b_name), "%s", load2->data.load.tensor_name);
-    if (store_i->data.store.gen_write)
-        snprintf(z_name, sizeof(z_name), "%s_next", store_i->data.store.tensor_name);
-    else
-        snprintf(z_name, sizeof(z_name), "%s", store_i->data.store.tensor_name);
+    gen_slice_name(a_name, sizeof(a_name), load1->data.load.tensor_name, load1->data.load.gen_read);
+    gen_slice_name(b_name, sizeof(b_name), load2->data.load.tensor_name, load2->data.load.gen_read);
+    gen_slice_name(z_name, sizeof(z_name), store_i->data.store.tensor_name, store_i->data.store.gen_write);
 
     /* LOAD operands */
     cb_indent(cb); cb_append(cb, "a_val = ");
@@ -414,14 +409,9 @@ static void emit_general_skeleton(CodeBuf *cb,
 
 /* ---- Fused (two-action) skeleton ---- */
 
-/* Resolve a fused operand's gen-buffered tensor name into `out`. */
+/* Resolve a fused operand's generation slice into `out`. */
 static void fused_operand_name(const IRFusedOperand *op, char *out, size_t cap) {
-    if (op->gen_read == 2)
-        snprintf(out, cap, "%s_next", op->name);
-    else if (op->gen_read == 1)
-        snprintf(out, cap, "%s_prev", op->name);
-    else
-        snprintf(out, cap, "%s", op->name);
+    gen_slice_name(out, cap, op->name, op->gen_read);
 }
 
 /* Emit the map body for action 1 (both operands are tensor loads).
@@ -556,10 +546,7 @@ static void emit_fused_skeleton(CodeBuf *cb, IRFused *fu) {
 
     /* Output (store) tensor name, gen-resolved. */
     char z_name[160];
-    if (fu->gen_write)
-        snprintf(z_name, sizeof(z_name), "%s_next", fu->out_name);
-    else
-        snprintf(z_name, sizeof(z_name), "%s", fu->out_name);
+    gen_slice_name(z_name, sizeof(z_name), fu->out_name, fu->gen_write);
 
     /* Free-index loops (outermost). */
     for (int i = 0; i < fu->num_free; i++) {
@@ -811,6 +798,42 @@ char *codegen_python(IRProgram *ir) {
     return codegen_python_ex(ir, 0, NULL);
 }
 
+/* Build the per-generation trace from the stored history, after the loop.
+   Step g holds each cross-generational tensor at generation g and, for g >= 1,
+   each intermediate at generation g-1 (written during iteration g-1) -- the
+   same steps edgecc-trace/1 always recorded. Slices are never written after
+   their iteration, so no copies are needed. */
+static void emit_trace_from_history(CodeBuf *cb,
+                                    const char **cross, int nc,
+                                    const char **inter, int ni) {
+    cb_indent(cb); cb_append(cb, "if _trace is not None:\n");
+    cb->indent++;
+    cb_indent(cb);
+    cb_append(cb, "_trace.append({\"kind\": \"generation\", \"gen\": 0, \"tensors\": {");
+    for (int c = 0; c < nc; c++) {
+        if (c) cb_append(cb, ", ");
+        cb_appendf(cb, "\"%s\": %s[0]", cross[c], cross[c]);
+    }
+    cb_append(cb, "}})\n");
+    cb_indent(cb); cb_append(cb, "for _g in range(1, _i + 2):\n");
+    cb->indent++;
+    cb_indent(cb);
+    cb_append(cb, "_trace.append({\"kind\": \"generation\", \"gen\": _g, \"tensors\": {");
+    int first = 1;
+    for (int c = 0; c < nc; c++) {
+        if (!first) cb_append(cb, ", ");
+        cb_appendf(cb, "\"%s\": %s[_g]", cross[c], cross[c]);
+        first = 0;
+    }
+    for (int m = 0; m < ni; m++) {
+        if (!first) cb_append(cb, ", ");
+        cb_appendf(cb, "\"%s\": %s[_g - 1]", inter[m], inter[m]);
+        first = 0;
+    }
+    cb_append(cb, "}})\n");
+    cb->indent -= 2;
+}
+
 char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) {
     if (!ir) return NULL;
     if (!kernel_name) kernel_name = "kernel";
@@ -875,6 +898,8 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
     const char *cross_gens[8]; int num_cross_gens = 0;
     double cross_gen_empty[8];
     const char *watch = NULL;
+    int stop_kind = STOP_EQUAL, stop_gen_a = 1, stop_gen_b = 0;
+    double watch_empty = 0.0;
     const char *intermediates[8];
     double intermediate_empty[8];
     int num_intermediates = 0;
@@ -888,6 +913,10 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
                 cross_gen_empty[j] = gl->cross_gens[j].empty_val;
             }
             watch = gl->watch;
+            stop_kind   = gl->stop_kind;
+            stop_gen_a  = gl->stop_gen_a;
+            stop_gen_b  = gl->stop_gen_b;
+            watch_empty = gl->watch_empty;
             num_intermediates = gl->num_intermediates;
             for (int j = 0; j < num_intermediates && j < 8; j++) {
                 intermediates[j] = gl->intermediates[j].name;
@@ -905,11 +934,13 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
         emit_trace = 0;
     }
 
-    /* Trace snapshot helper (deep-copies a tensor); only when capturing. */
-    if (emit_trace) {
+    /* Occupancy helper for `stop: ||X[g]|| == 0`; emitted only when used. */
+    if (iterative && stop_kind == STOP_OCCUPANCY) {
         cb_append(&cb,
-            "def _edgecc_snapshot(x):\n"
-            "    return [row[:] for row in x] if (x and isinstance(x[0], list)) else list(x)\n"
+            "def _edgecc_occupancy(x, empty):\n"
+            "    if isinstance(x, list):\n"
+            "        return sum(_edgecc_occupancy(v, empty) for v in x)\n"
+            "    return 0 if x == empty else 1\n"
             "\n");
     }
 
@@ -992,10 +1023,12 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
                 break;
             case IR_TENSOR_ALLOC:
                 /* Output tensor is allocated inside run(); but a generational
-                   tensor arrives as a parameter and is buffered by the gen loop. */
+                   tensor is built by the gen loop (from the caller's
+                   generation 0, or empty for an intermediate). */
                 if (output && strcmp(instr->data.tensor_alloc.name, output) == 0 &&
                     !(iterative &&
-                      name_in_list(instr->data.tensor_alloc.name, cross_gens, num_cross_gens))) {
+                      (name_in_list(instr->data.tensor_alloc.name, cross_gens, num_cross_gens) ||
+                       name_in_list(instr->data.tensor_alloc.name, intermediates, num_intermediates)))) {
                     cb_indent(&cb);
                     cb_appendf(&cb, "%s = ", instr->data.tensor_alloc.name);
                     emit_alloc(&cb, &instr->data.tensor_alloc, ir, i);
@@ -1031,110 +1064,68 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
                 break;
             case IR_GEN_LOOP_BEGIN: {
                 IRGenLoop *gloop = &instr->data.gen_loop;
+                /* Every generational tensor is a list indexed by generation.
+                   The caller supplies generation 0 of each cross-generational
+                   tensor; an intermediate starts with no generations. */
                 for (int c = 0; c < gloop->num_cross_gens; c++) {
                     cb_indent(&cb);
-                    cb_appendf(&cb, "%s_prev = %s\n",
+                    cb_appendf(&cb, "%s = [%s]\n",
                                gloop->cross_gens[c].name, gloop->cross_gens[c].name);
                 }
-                cb_indent(&cb); cb_append(&cb, "_it = 0\n");
-                if (emit_trace) {
-                    cb_indent(&cb); cb_append(&cb, "if _trace is not None:\n");
-                    cb.indent++;
+                for (int m = 0; m < gloop->num_intermediates; m++) {
                     cb_indent(&cb);
-                    cb_append(&cb, "_trace.append({\"kind\": \"generation\", \"gen\": 0, \"tensors\": {");
-                    for (int c = 0; c < gloop->num_cross_gens; c++) {
-                        if (c) cb_append(&cb, ", ");
-                        cb_appendf(&cb, "\"%s\": _edgecc_snapshot(%s_prev)",
-                                   gloop->cross_gens[c].name, gloop->cross_gens[c].name);
-                    }
-                    cb_append(&cb, "}})\n");
-                    cb.indent--;
+                    cb_appendf(&cb, "%s = []\n", gloop->intermediates[m].name);
                 }
+                cb_indent(&cb); cb_append(&cb, "_i = 0\n");
                 cb_indent(&cb); cb_append(&cb, "while True:\n");
                 cb.indent++;
-                for (int c = 0; c < gloop->num_cross_gens; c++) {
+                /* Each iteration first appends one empty slice per tensor it
+                   writes: cross-gens at i+1, intermediates at i. */
+                IRGenAlloc *allocs[16]; int na = 0;
+                for (int c = 0; c < gloop->num_cross_gens; c++) allocs[na++] = &gloop->cross_gens[c];
+                for (int m = 0; m < gloop->num_intermediates; m++) allocs[na++] = &gloop->intermediates[m];
+                for (int k = 0; k < na; k++) {
                     IRTensorAlloc tmp; memset(&tmp, 0, sizeof(tmp));
-                    tmp.ndims = gloop->cross_gens[c].spatial_ndims;
-                    tmp.empty_val = gloop->cross_gens[c].empty_val;
-                    for (int k = 0; k < tmp.ndims; k++) {
-                        tmp.dim_sizes[k] = gloop->cross_gens[c].spatial_dims[k];
-                        tmp.dim_names[k] = gloop->cross_gens[c].spatial_dim_names[k];
+                    tmp.ndims = allocs[k]->spatial_ndims;
+                    tmp.empty_val = allocs[k]->empty_val;
+                    for (int j = 0; j < tmp.ndims; j++) {
+                        tmp.dim_sizes[j] = allocs[k]->spatial_dims[j];
+                        tmp.dim_names[j] = allocs[k]->spatial_dim_names[j];
                     }
                     cb_indent(&cb);
-                    cb_appendf(&cb, "%s_next = ", gloop->cross_gens[c].name);
+                    cb_appendf(&cb, "%s.append(", allocs[k]->name);
                     emit_alloc(&cb, &tmp, ir, i);
-                    cb_append(&cb, "\n");
-                }
-                for (int m = 0; m < gloop->num_intermediates; m++) {
-                    IRTensorAlloc tmp; memset(&tmp, 0, sizeof(tmp));
-                    tmp.ndims = gloop->intermediates[m].spatial_ndims;
-                    tmp.empty_val = gloop->intermediates[m].empty_val;
-                    for (int k = 0; k < tmp.ndims; k++) {
-                        tmp.dim_sizes[k] = gloop->intermediates[m].spatial_dims[k];
-                        tmp.dim_names[k] = gloop->intermediates[m].spatial_dim_names[k];
-                    }
-                    cb_indent(&cb);
-                    cb_appendf(&cb, "%s = ", gloop->intermediates[m].name);
-                    emit_alloc(&cb, &tmp, ir, i);
-                    cb_append(&cb, "\n");
+                    cb_append(&cb, ")\n");
                 }
                 break;
             }
             case IR_GEN_LOOP_END: {
-                if (emit_trace) {
-                    cb_indent(&cb); cb_append(&cb, "if _trace is not None:\n");
-                    cb.indent++;
-                    cb_indent(&cb);
-                    cb_append(&cb, "_trace.append({\"kind\": \"generation\", \"gen\": _it + 1, \"tensors\": {");
-                    int _first = 1;
-                    for (int c = 0; c < num_cross_gens; c++) {
-                        if (!_first) cb_append(&cb, ", ");
-                        cb_appendf(&cb, "\"%s\": _edgecc_snapshot(%s_next)", cross_gens[c], cross_gens[c]);
-                        _first = 0;
-                    }
-                    for (int m = 0; m < num_intermediates; m++) {
-                        if (!_first) cb_append(&cb, ", ");
-                        cb_appendf(&cb, "\"%s\": _edgecc_snapshot(%s)", intermediates[m], intermediates[m]);
-                        _first = 0;
-                    }
-                    cb_append(&cb, "}})\n");
-                    cb.indent--;
-                }
-                if (num_cross_gens <= 1) {
-                    const char *t = watch;
-                    cb_indent(&cb);
-                    cb_appendf(&cb, "if %s_next == %s_prev:\n", t, t);
-                    cb.indent++;
-                    cb_indent(&cb); cb_append(&cb, "break\n");
-                    cb.indent--;
-                    cb_indent(&cb);
-                    cb_appendf(&cb, "%s_prev = %s_next\n", t, t);
-                    cb_indent(&cb); cb_append(&cb, "_it += 1\n");
-                    cb_indent(&cb); cb_append(&cb, "if _it >= __EDGECC_MAX_GEN__:\n");
-                    cb.indent++;
-                    cb_indent(&cb);
-                    cb_append(&cb, "raise RuntimeError(\"generational loop did not stabilize\")\n");
-                    cb.indent--;
-                    cb.indent--;
+                /* Compute-then-check: the generation that satisfies the stop
+                   predicate is kept, then the loop ends. */
+                char pa[160], pb[160];
+                gen_slice_name(pa, sizeof(pa), watch, stop_gen_a + 1);
+                cb_indent(&cb);
+                if (stop_kind == STOP_OCCUPANCY) {
+                    char *ev = format_double_literal(watch_empty);
+                    cb_appendf(&cb, "if _edgecc_occupancy(%s, %s) == 0:\n", pa, ev);
+                    free(ev);
                 } else {
-                    cb_indent(&cb);
-                    cb_appendf(&cb, "_done = %s_next == %s_prev\n", watch, watch);
-                    for (int c = 0; c < num_cross_gens; c++) {
-                        cb_indent(&cb);
-                        cb_appendf(&cb, "%s_prev = %s_next\n", cross_gens[c], cross_gens[c]);
-                    }
-                    cb_indent(&cb); cb_append(&cb, "if _done:\n");
-                    cb.indent++;
-                    cb_indent(&cb); cb_append(&cb, "break\n");
-                    cb.indent--;
-                    cb_indent(&cb); cb_append(&cb, "_it += 1\n");
-                    cb_indent(&cb); cb_append(&cb, "if _it >= __EDGECC_MAX_GEN__:\n");
-                    cb.indent++;
-                    cb_indent(&cb);
-                    cb_append(&cb, "raise RuntimeError(\"generational loop did not stabilize\")\n");
-                    cb.indent--;
-                    cb.indent--;
+                    gen_slice_name(pb, sizeof(pb), watch, stop_gen_b + 1);
+                    cb_appendf(&cb, "if %s == %s:\n", pa, pb);
                 }
+                cb.indent++;
+                cb_indent(&cb); cb_append(&cb, "break\n");
+                cb.indent--;
+                cb_indent(&cb); cb_append(&cb, "_i += 1\n");
+                cb_indent(&cb); cb_append(&cb, "if _i >= __EDGECC_MAX_GEN__:\n");
+                cb.indent++;
+                cb_indent(&cb);
+                cb_append(&cb, "raise RuntimeError(\"generational loop did not stop\")\n");
+                cb.indent--;
+                cb.indent--;   /* leave the while loop */
+                if (emit_trace)
+                    emit_trace_from_history(&cb, cross_gens, num_cross_gens,
+                                            intermediates, num_intermediates);
                 break;
             }
             case IR_LOAD: case IR_MAP: case IR_REDUCE:
@@ -1169,7 +1160,7 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
     if (output) {
         cb_indent(&cb);
         if (iterative && watch) {
-            cb_appendf(&cb, "return %s_prev\n", watch);
+            cb_appendf(&cb, "return %s\n", watch);   /* every generation */
         } else {
             cb_appendf(&cb, "return %s\n", output);
         }
@@ -1306,7 +1297,7 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
             cb_indent(&cb);
             cb_appendf(&cb,
                 "json.dump({\"schema\": \"edgecc-trace/1\", \"kernel\": \"%s\", "
-                "\"dims\": {\"N\": len(%s)}, \"gen_tensors\": [",
+                "\"dims\": {\"N\": len(%s[0])}, \"gen_tensors\": [",
                 kernel_name, output);
             {
                 int _first = 1;

@@ -12,7 +12,7 @@
 // matrix: T[a][c] == 1.0 iff c is reachable from a. Edges: 0->1, 1->2.
 //
 // Run:  ./build/edgecc examples/transitive_closure.edge -o out.py && python3 out.py
-// Output: [[1.0, 1.0, 1.0, 0.0], [0.0, 1.0, 1.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
+// Output (last generation): [[1.0, 1.0, 1.0, 0.0], [0.0, 1.0, 1.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
 dim N = 4;
 
 tensor G[R=N, C=N]        : float, empty = 0.0;

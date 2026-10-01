@@ -1,0 +1,13 @@
+// The paper's BFS with occupancy stop, on any loaded graph (run on the 0/1 pattern).
+dim N = *;
+tensor G[R=N, C=N]   : float, empty = 0.0;
+tensor T[gen I, R=N] : float, empty = inf;
+tensor F[gen I, R=N] : float, empty = inf;
+tensor P[gen I, R=N] : float, empty = 0.0;
+init G = load("graph.mtx");
+init F = seed(source=0, value=0.0);
+init P = seed(source=0, value=1.0);
+T[i, d]   = G[s,d] . F[i,s]   :: map(add, intersect) reduce(min, union);
+F[i+1, d] = T[i,d] . !P[i,d]  :: map(take_left, intersect) reduce(min, union);
+P[i+1, d] = P[i,d] . F[i+1,d] :: map(or, union) reduce(or, union);
+stop: ||F[i+1]|| == 0;

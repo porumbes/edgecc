@@ -15,7 +15,7 @@
 // {3,4}. Component {0,1,2} settles on label 3; component {3,4} on label 5.
 //
 // Run:  ./build/edgecc examples/connected_components.edge -o out.py && python3 out.py
-// Output: [3.0, 3.0, 3.0, 5.0, 5.0]
+// Output (last generation): [3.0, 3.0, 3.0, 5.0, 5.0]
 dim N = 5;
 
 tensor G[R=N, C=N]   : float, empty = 0.0;

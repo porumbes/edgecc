@@ -1,0 +1,13 @@
+dim N = 3;
+tensor G[R=N, C=N]   : float, empty = 0.0;
+tensor T[gen I, R=N] : float, empty = inf;
+tensor F[gen I, R=N] : float, empty = inf;
+tensor P[gen I, R=N] : float, empty = 0.0;
+init G = [[0.0,1.0,0.0],[0.0,0.0,1.0],[0.0,0.0,0.0]];
+init F = [0.0, inf, inf];
+init P = [1.0, 0.0, 0.0];
+T[i, d]   = G[s,d] . F[i,s]   :: map(add, intersect) reduce(min, union);
+F[i+1, d] = T[i,d] . !P[i,d]  :: map(take_left, intersect) reduce(min, union);
+P[i+1, d] = P[i,d] . F[i+1,d] :: map(or, union) reduce(or, union);
+stop: |F[i+1]| == 0;
+

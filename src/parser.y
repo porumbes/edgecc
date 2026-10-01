@@ -124,7 +124,7 @@ typedef struct { int merge; char *over; } ReduceArgs;
 }
 
 %token TOK_DIM TOK_TENSOR TOK_INIT TOK_MAP TOK_REDUCE TOK_EMPTY
-%token TOK_GEN TOK_STOP TOK_STABLE
+%token TOK_GEN TOK_STOP TOK_STABLE TOK_OROR TOK_EQEQ
 %token TOK_TYPE_INTEGER TOK_TYPE_FLOAT TOK_TYPE_BOOLEAN
 %token TOK_DOUBLE_COLON
 %token <int_val> TOK_INT_LIT TOK_BOOL_LIT
@@ -173,7 +173,28 @@ stmt:
 stop_stmt:
     TOK_STOP ':' TOK_STABLE '(' TOK_IDENT ')' ';'
     {
-        $$ = (void *)ast_stop_new($5);
+        $$ = (void *)ast_stop_stable_new($5);
+    }
+    | TOK_STOP ':' TOK_IDENT '(' TOK_IDENT ')' ';'
+    {
+        char buf[256];
+        snprintf(buf, sizeof(buf), "unknown stop predicate '%s' (expected 'stable')", $3);
+        yyerror(buf);
+        free($3); free($5);
+        YYERROR;
+    }
+    | TOK_STOP ':' TOK_OROR tensor_ref TOK_OROR TOK_EQEQ TOK_INT_LIT ';'
+    {
+        TensorRef *r = (TensorRef *)$4;
+        $$ = (void *)ast_stop_occupancy_new(*r, $7);
+        free(r);
+    }
+    | TOK_STOP ':' tensor_ref TOK_EQEQ tensor_ref ';'
+    {
+        TensorRef *a = (TensorRef *)$3;
+        TensorRef *b = (TensorRef *)$5;
+        $$ = (void *)ast_stop_equal_new(*a, *b);
+        free(a); free(b);
     }
     ;
 

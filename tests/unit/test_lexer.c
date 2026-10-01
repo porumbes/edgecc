@@ -67,6 +67,19 @@ TEST(test_stable_keyword) {
     yy_delete_buffer(buf);
 }
 
+TEST(test_oror_token) {
+    YY_BUFFER_STATE buf = yy_scan_string("||");
+    ASSERT_INT_EQ(TOK_OROR, yylex());
+    yy_delete_buffer(buf);
+}
+
+TEST(test_eqeq_token_vs_single_equals) {
+    YY_BUFFER_STATE buf = yy_scan_string("== =");
+    ASSERT_INT_EQ(TOK_EQEQ, yylex());
+    ASSERT_INT_EQ('=', yylex());
+    yy_delete_buffer(buf);
+}
+
 TEST(test_plus_token) {
     YY_BUFFER_STATE buf = yy_scan_string("+");
     ASSERT_INT_EQ('+', yylex());
@@ -159,6 +172,8 @@ int main(void) {
     RUN_TEST(test_gen_keyword);
     RUN_TEST(test_stop_keyword);
     RUN_TEST(test_stable_keyword);
+    RUN_TEST(test_oror_token);
+    RUN_TEST(test_eqeq_token_vs_single_equals);
     RUN_TEST(test_plus_token);
     RUN_TEST(test_bang_token);
     RUN_TEST(test_over_keyword);

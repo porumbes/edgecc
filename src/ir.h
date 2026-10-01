@@ -57,7 +57,7 @@ typedef struct {
     char *tensor_name;
     char **coords;
     int ncoords;
-    int gen_read;   /* 0: not cross-gen; 1: read at i (-> _prev); 2: read at i+1 (-> _next) */
+    int gen_read;   /* 0: not generational; 1: generation i (X[_i]); 2: generation i+1 (X[_i + 1]) */
     int negate;     /* 1 if this operand carried a unary `!` (existence complement) */
 } IRLoad;
 
@@ -87,7 +87,7 @@ typedef struct {
     char **coords;
     int ncoords;
     int src_reg;
-    int gen_write;  /* 1 if this stores into the generational tensor's next slice */
+    int gen_write;  /* same encoding as IRLoad.gen_read: 1 = intermediate (i), 2 = cross-gen (i+1) */
 } IRStore;
 
 typedef struct {
@@ -104,20 +104,24 @@ typedef struct {
 } IRSave;
 
 typedef struct {
-    IRGenAlloc cross_gens[8];         /* cross-generational tensors (each prev/next) */
+    IRGenAlloc cross_gens[8];         /* cross-generational tensors (written at i+1) */
     int num_cross_gens;
-    char *watch;                      /* the stop-watched cross-gen tensor name (owned) */
-    IRGenAlloc intermediates[8];      /* intra-generation intermediates (fresh each gen) */
+    char *watch;                      /* tensor named by the stop predicate (owned) */
+    int stop_kind;                    /* STOP_EQUAL or STOP_OCCUPANCY */
+    int stop_gen_a;                   /* offset of the (left) predicate reference: 0 = i, 1 = i+1 */
+    int stop_gen_b;                   /* STOP_EQUAL only */
+    double watch_empty;               /* empty value of the watched tensor (occupancy) */
+    IRGenAlloc intermediates[8];      /* intra-generation intermediates (written at i) */
     int num_intermediates;
     int max_gen;                      /* safety iteration cap */
 } IRGenLoop;
 
 typedef struct {
-    char *name; char **coords; int ncoords; double empty; int negate; int gen_read;
+    char *name; char **coords; int ncoords; double empty; int negate; int gen_read; /* gen kind, as IRLoad.gen_read */
 } IRFusedOperand;
 
 typedef struct {
-    char *out_name; char **out_coords; int out_ncoords; double empty_z; int gen_write;
+    char *out_name; char **out_coords; int out_ncoords; double empty_z; int gen_write; /* gen kind, as IRStore */
     IRFusedOperand inner1, inner2, outer;
     int inter_is_left2;
     OperatorType map1_op; MergeOp map1_merge;

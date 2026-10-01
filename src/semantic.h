@@ -62,7 +62,10 @@ typedef struct {
     int num_gen_tensors;
     char *gen_tensor;    /* alias = gen_tensors[0]; kept for diagnostics (borrowed) */
     char *gen_rank_var;  /* the index var bound to the gen rank, e.g. "i" (borrowed) */
-    char *stop_watch;    /* tensor named in `stop: stable(...)` (borrowed) */
+    char *stop_watch;    /* tensor named by the stop predicate (borrowed) */
+    int   stop_kind;     /* STOP_EQUAL or STOP_OCCUPANCY (stable(X) desugars to STOP_EQUAL) */
+    int   stop_gen_a;    /* generation offset of the (left) predicate reference: 0 = i, 1 = i+1 */
+    int   stop_gen_b;    /* STOP_EQUAL only: offset of the right reference */
     /* Per-Einsum index classification, in source order (cascade support). */
     EinsumClass einsum_class[MAX_EINSUMS];
     int num_einsums;

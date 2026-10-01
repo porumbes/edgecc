@@ -110,8 +110,18 @@ typedef struct {
     double seed_value;    /* value at source (valid when is_seed) */
 } InitData;
 
+typedef enum {
+    STOP_STABLE,      /* stop: stable(X);      sugar for X[i+1] == X[i], resolved in semantic */
+    STOP_EQUAL,       /* stop: X[g] == X[h];                                             */
+    STOP_OCCUPANCY    /* stop: ||X[g]|| == N;  N must be 0 (checked in semantic)         */
+} StopKind;
+
 typedef struct {
-    char *watch_tensor;
+    StopKind  kind;
+    char     *stable_tensor;  /* STOP_STABLE: the X in stable(X); else NULL */
+    TensorRef lhs;            /* STOP_EQUAL / STOP_OCCUPANCY; zeroed otherwise */
+    TensorRef rhs;            /* STOP_EQUAL only; zeroed otherwise */
+    int       occupancy_rhs;  /* STOP_OCCUPANCY: the integer after '==' */
 } StopData;
 
 typedef struct {
@@ -180,7 +190,9 @@ AstNode *ast_einsum_new(TensorRef output, TensorRef input1, TensorRef input2,
                          OperatorType map_op, MergeOp map_merge_op,
                          OperatorType reduce_op, MergeOp reduce_merge_op);
 AstNode *ast_einsum_fused_new(EinsumFusedData data);
-AstNode *ast_stop_new(char *watch_tensor);
+AstNode *ast_stop_stable_new(char *tensor);
+AstNode *ast_stop_equal_new(TensorRef lhs, TensorRef rhs);
+AstNode *ast_stop_occupancy_new(TensorRef ref, int rhs_value);
 AstNode *ast_init_load_new(char *tensor_name, char *path);
 AstNode *ast_init_seed_new(char *tensor_name, int source, double value);
 AstNode *ast_dim_decl_inferred_new(char *name);

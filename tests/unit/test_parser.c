@@ -278,9 +278,59 @@ TEST(test_parse_stop_stmt) {
     ASSERT_NOT_NULL(parse_result);
     AstNode *s = parse_result->data.program.statements[0];
     ASSERT_INT_EQ(NODE_STOP, s->type);
-    ASSERT_STR_EQ("F", s->data.stop.watch_tensor);
+    ASSERT_INT_EQ(STOP_STABLE, s->data.stop.kind);
+    ASSERT_STR_EQ("F", s->data.stop.stable_tensor);
     ast_free(parse_result);
     parse_result = NULL;
+    yy_delete_buffer(buf);
+}
+
+TEST(test_parse_stop_occupancy) {
+    YY_BUFFER_STATE buf = yy_scan_string("stop: ||F[i+1]|| == 0;");
+    ASSERT_INT_EQ(0, yyparse());
+    AstNode *s = parse_result->data.program.statements[0];
+    ASSERT_INT_EQ(NODE_STOP, s->type);
+    ASSERT_INT_EQ(STOP_OCCUPANCY, s->data.stop.kind);
+    ASSERT_STR_EQ("F", s->data.stop.lhs.tensor_name);
+    ASSERT_INT_EQ(1, s->data.stop.lhs.num_vars);
+    ASSERT_STR_EQ("i", s->data.stop.lhs.rank_vars[0]);
+    ASSERT_INT_EQ(1, s->data.stop.lhs.gen_offset);
+    ASSERT_INT_EQ(0, s->data.stop.occupancy_rhs);
+    ast_free(parse_result);
+    parse_result = NULL;
+    yy_delete_buffer(buf);
+}
+
+TEST(test_parse_stop_occupancy_nonzero_parses) {
+    /* Parses; rejected later by semantic analysis. */
+    YY_BUFFER_STATE buf = yy_scan_string("stop: ||F[i+1]|| == 3;");
+    ASSERT_INT_EQ(0, yyparse());
+    AstNode *s = parse_result->data.program.statements[0];
+    ASSERT_INT_EQ(3, s->data.stop.occupancy_rhs);
+    ast_free(parse_result);
+    parse_result = NULL;
+    yy_delete_buffer(buf);
+}
+
+TEST(test_parse_stop_equal) {
+    YY_BUFFER_STATE buf = yy_scan_string("stop: P[i+1] == P[i];");
+    ASSERT_INT_EQ(0, yyparse());
+    AstNode *s = parse_result->data.program.statements[0];
+    ASSERT_INT_EQ(STOP_EQUAL, s->data.stop.kind);
+    ASSERT_STR_EQ("P", s->data.stop.lhs.tensor_name);
+    ASSERT_INT_EQ(1, s->data.stop.lhs.gen_offset);
+    ASSERT_STR_EQ("P", s->data.stop.rhs.tensor_name);
+    ASSERT_STR_EQ("i", s->data.stop.rhs.rank_vars[0]);
+    ASSERT_INT_EQ(0, s->data.stop.rhs.gen_offset);
+    ast_free(parse_result);
+    parse_result = NULL;
+    yy_delete_buffer(buf);
+}
+
+TEST(test_parse_stop_unknown_predicate_fails) {
+    YY_BUFFER_STATE buf = yy_scan_string("stop: settled(P);");
+    ASSERT_TRUE(yyparse() != 0);
+    if (parse_result) { ast_free(parse_result); parse_result = NULL; }
     yy_delete_buffer(buf);
 }
 
@@ -361,6 +411,10 @@ int main(void) {
     RUN_TEST(test_parse_generational_rank);
     RUN_TEST(test_parse_offset_coord);
     RUN_TEST(test_parse_stop_stmt);
+    RUN_TEST(test_parse_stop_occupancy);
+    RUN_TEST(test_parse_stop_occupancy_nonzero_parses);
+    RUN_TEST(test_parse_stop_equal);
+    RUN_TEST(test_parse_stop_unknown_predicate_fails);
     RUN_TEST(test_parse_inferred_dim);
     RUN_TEST(test_parse_init_load);
     RUN_TEST(test_parse_init_seed);

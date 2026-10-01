@@ -1,0 +1,1 @@
+stop predicate: 'F' must name a whole generation, e.g. F[i+1]

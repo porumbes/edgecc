@@ -3,8 +3,8 @@
 
 Compiles every corpus program (with and without --emit-trace), walks the
 generated Python's AST, and requires every name the *compiler* introduces --
-i.e. not a user dim/tensor/rank variable -- to be either '_'-prefixed, a
-generational buffer (<T>_prev / <T>_next), or listed in PY_RESERVED. A new
+i.e. not a user dim/tensor/rank variable -- to be either '_'-prefixed, or
+listed in PY_RESERVED. A new
 codegen temporary that users could collide with fails this test until it is
 added to the list.
 
@@ -32,14 +32,12 @@ def user_names(edge_src):
     code = re.sub(r"//[^\n]*", "", edge_src)
     names = set(re.findall(r"\bdim\s+([A-Za-z_]\w*)", code))
     names |= set(re.findall(r"\btensor\s+([A-Za-z_]\w*)", code))
-    gen = set(re.findall(r"\btensor\s+([A-Za-z_]\w*)\s*\[[^\]]*\bgen\b", code))
     for line in code.split(";"):
         if "::" not in line:
             continue
         for idx in re.findall(r"\w+\s*\[([^\]]*)\]", line.split("::")[0]):
             names |= set(re.findall(r"[A-Za-z_]\w*", idx))
-    derived = {g + suffix for g in gen for suffix in ("_prev", "_next")}
-    return names, derived
+    return names
 
 
 class Collector(ast.NodeVisitor):
@@ -74,7 +72,7 @@ def main():
         out = os.path.join(tmp, "gen.py")
         for path in corpus:
             src = open(path).read()
-            users, derived = user_names(src)
+            users = user_names(src)
             for flags in ([], ["--emit-trace"]):
                 p = subprocess.run([edgecc, path, "-o", out] + flags, capture_output=True, text=True)
                 if p.returncode != 0:
@@ -82,7 +80,7 @@ def main():
                 compiled += 1
                 c = Collector()
                 c.visit(ast.parse(open(out).read()))
-                for name in c.names - users - derived:
+                for name in c.names - users:
                     if not name.startswith("_") and name not in reserved:
                         missing.setdefault(name, os.path.relpath(path, REPO))
 

@@ -35,6 +35,8 @@
 
 "->"                { return TOK_ARROW; }
 "::"                { return TOK_DOUBLE_COLON; }
+"||"                { return TOK_OROR; }
+"=="                { return TOK_EQEQ; }
 
 [0-9]+\.[0-9]+      { yylval.float_val = atof(yytext); return TOK_FLOAT_LIT; }
 [0-9]+              { yylval.int_val = atoi(yytext); return TOK_INT_LIT; }

@@ -101,7 +101,8 @@ TEST(test_codegen_intersect_union) {
     ast_free(ast);
 }
 
-/* Multi-dim generational buffers (cross-gen _next and intermediates) must be
+/* Multi-dim generational buffers (per-generation slices appended each
+   iteration, for cross-gen tensors and intermediates alike) must be
    sized by their declared dim names, per axis -- not by matching sizes. */
 TEST(test_codegen_generational_2d_alloc_uses_dim_names) {
     AstNode *ast = parse(
@@ -121,8 +122,8 @@ TEST(test_codegen_generational_2d_alloc_uses_dim_names) {
     IRProgram *ir = ir_lower(ast, sem.symtab);
     char *code = codegen_python(ir);
     ASSERT_NOT_NULL(code);
-    ASSERT_TRUE(strstr(code, "T_next = [[0.0] * M for _ in range(N)]") != NULL);
-    ASSERT_TRUE(strstr(code, "U = [[0.0] * M for _ in range(N)]") != NULL);
+    ASSERT_TRUE(strstr(code, "T.append([[0.0] * M for _ in range(N)])") != NULL);
+    ASSERT_TRUE(strstr(code, "U.append([[0.0] * M for _ in range(N)])") != NULL);
     free(code);
     ir_free(ir);
     semantic_result_free(&sem);
@@ -145,7 +146,7 @@ TEST(test_codegen_generational_2d_alloc_inferred_dim) {
     IRProgram *ir = ir_lower(ast, sem.symtab);
     char *code = codegen_python(ir);
     ASSERT_NOT_NULL(code);
-    ASSERT_TRUE(strstr(code, "T_next = [[0.0] * N for _ in range(N)]") != NULL);
+    ASSERT_TRUE(strstr(code, "T.append([[0.0] * N for _ in range(N)])") != NULL);
     free(code);
     ir_free(ir);
     semantic_result_free(&sem);
@@ -169,16 +170,19 @@ TEST(test_codegen_generational) {
     ASSERT_NOT_NULL(code);
     ASSERT_TRUE(strstr(code, "__EDGECC_MAX_GEN__ = 1000") != NULL);
     ASSERT_TRUE(strstr(code, "def run(G, F):") != NULL);
-    ASSERT_TRUE(strstr(code, "F_prev = F") != NULL);
+    ASSERT_TRUE(strstr(code, "F = [F]") != NULL);
+    ASSERT_TRUE(strstr(code, "_i = 0") != NULL);
     ASSERT_TRUE(strstr(code, "while True:") != NULL);
-    ASSERT_TRUE(strstr(code, "F_next = [0.0] * N") != NULL);
-    ASSERT_TRUE(strstr(code, "b_val = F_prev[s]") != NULL);
-    ASSERT_TRUE(strstr(code, "state = F_next[d]") != NULL);
-    ASSERT_TRUE(strstr(code, "if F_next == F_prev:") != NULL);
-    ASSERT_TRUE(strstr(code, "break") != NULL);
-    ASSERT_TRUE(strstr(code, "F_prev = F_next") != NULL);
-    ASSERT_TRUE(strstr(code, "raise RuntimeError") != NULL);
-    ASSERT_TRUE(strstr(code, "return F_prev") != NULL);
+    ASSERT_TRUE(strstr(code, "F.append([0.0] * N)") != NULL);
+    ASSERT_TRUE(strstr(code, "b_val = F[_i][s]") != NULL);
+    ASSERT_TRUE(strstr(code, "state = F[_i + 1][d]") != NULL);
+    ASSERT_TRUE(strstr(code, "if F[_i + 1] == F[_i]:") != NULL);
+    ASSERT_TRUE(strstr(code, "_i += 1") != NULL);
+    ASSERT_TRUE(strstr(code, "raise RuntimeError(\"generational loop did not stop\")") != NULL);
+    ASSERT_TRUE(strstr(code, "return F\n") != NULL);
+    ASSERT_TRUE(strstr(code, "_prev") == NULL);
+    ASSERT_TRUE(strstr(code, "_next") == NULL);
+    ASSERT_TRUE(strstr(code, "_edgecc_occupancy") == NULL);   /* only when used */
     free(code);
     ir_free(ir);
     semantic_result_free(&sem);
@@ -204,14 +208,15 @@ TEST(test_codegen_cascade_bellman_ford) {
     ASSERT_NOT_NULL(code);
     ASSERT_TRUE(strstr(code, "def run(W, D):") != NULL);
     ASSERT_TRUE(strstr(code, "\"output\": \"D\"") != NULL);
-    ASSERT_TRUE(strstr(code, "D_prev = D") != NULL);
-    ASSERT_TRUE(strstr(code, "while True:") != NULL);
-    ASSERT_TRUE(strstr(code, "D_next = [math.inf] * N") != NULL);
-    ASSERT_TRUE(strstr(code, "T = [math.inf] * N") != NULL);
-    ASSERT_TRUE(strstr(code, "b_val = T[d]") != NULL);
-    ASSERT_TRUE(strstr(code, "a_val = D_prev[d]") != NULL);
-    ASSERT_TRUE(strstr(code, "if D_next == D_prev:") != NULL);
-    ASSERT_TRUE(strstr(code, "return D_prev") != NULL);
+    ASSERT_TRUE(strstr(code, "D = [D]") != NULL);
+    ASSERT_TRUE(strstr(code, "T = []") != NULL);
+    ASSERT_TRUE(strstr(code, "D.append([math.inf] * N)") != NULL);
+    ASSERT_TRUE(strstr(code, "T.append([math.inf] * N)") != NULL);
+    ASSERT_TRUE(strstr(code, "state = T[_i][d]") != NULL);     /* T written at i */
+    ASSERT_TRUE(strstr(code, "b_val = T[_i][d]") != NULL);     /* T read at i */
+    ASSERT_TRUE(strstr(code, "a_val = D[_i][d]") != NULL);
+    ASSERT_TRUE(strstr(code, "if D[_i + 1] == D[_i]:") != NULL);
+    ASSERT_TRUE(strstr(code, "return D\n") != NULL);
     free(code);
     ir_free(ir);
     semantic_result_free(&sem);
@@ -236,15 +241,13 @@ TEST(test_codegen_two_cross_gen) {
     ASSERT_NOT_NULL(code);
 
     ASSERT_TRUE(strstr(code, "def run(G, F, P):") != NULL);
-    ASSERT_TRUE(strstr(code, "F_prev = F") != NULL);
-    ASSERT_TRUE(strstr(code, "P_prev = P") != NULL);
-    ASSERT_TRUE(strstr(code, "F_next = ") != NULL);
-    ASSERT_TRUE(strstr(code, "P_next = ") != NULL);
-    ASSERT_TRUE(strstr(code, "b_val = F_next[d]") != NULL);  /* P einsum reads F at i+1 (next) */
-    ASSERT_TRUE(strstr(code, "_done = P_next == P_prev") != NULL);
-    ASSERT_TRUE(strstr(code, "F_prev = F_next") != NULL);    /* both cross-gen buffers swap */
-    ASSERT_TRUE(strstr(code, "P_prev = P_next") != NULL);
-    ASSERT_TRUE(strstr(code, "return P_prev") != NULL);
+    ASSERT_TRUE(strstr(code, "F = [F]") != NULL);
+    ASSERT_TRUE(strstr(code, "P = [P]") != NULL);
+    ASSERT_TRUE(strstr(code, "F.append(") != NULL);
+    ASSERT_TRUE(strstr(code, "P.append(") != NULL);
+    ASSERT_TRUE(strstr(code, "b_val = F[_i + 1][d]") != NULL);  /* P einsum reads F at i+1 */
+    ASSERT_TRUE(strstr(code, "if P[_i + 1] == P[_i]:") != NULL);
+    ASSERT_TRUE(strstr(code, "return P\n") != NULL);
 
     free(code);
     ir_free(ir);
@@ -252,10 +255,8 @@ TEST(test_codegen_two_cross_gen) {
     ast_free(ast);
 }
 
-/* Two INDEPENDENT cross-gen tensors (no next-reads-next): both are double-
-   buffered and advanced each generation, but the loop terminates on the single
-   watched tensor (A). Guards the "advance all, gate watched" epilogue path
-   independently of the coupled BFS shape. */
+/* Two INDEPENDENT cross-gen tensors (no next-reads-next): both are stored in
+   full; the loop stops on the single watched tensor (A). */
 TEST(test_codegen_independent_cross_gen) {
     AstNode *ast = parse(
         "dim N = 2;\n"
@@ -275,13 +276,11 @@ TEST(test_codegen_independent_cross_gen) {
     ASSERT_NOT_NULL(code);
 
     ASSERT_TRUE(strstr(code, "def run(G, A, B):") != NULL);
-    ASSERT_TRUE(strstr(code, "A_next = ") != NULL);
-    ASSERT_TRUE(strstr(code, "B_next = ") != NULL);
-    ASSERT_TRUE(strstr(code, "_done = A_next == A_prev") != NULL);  /* gate on watched A */
-    ASSERT_TRUE(strstr(code, "A_prev = A_next") != NULL);           /* advance both buffers */
-    ASSERT_TRUE(strstr(code, "B_prev = B_next") != NULL);
-    ASSERT_TRUE(strstr(code, "_done = B_next") == NULL);            /* B is NOT the gate */
-    ASSERT_TRUE(strstr(code, "return A_prev") != NULL);
+    ASSERT_TRUE(strstr(code, "A.append(") != NULL);
+    ASSERT_TRUE(strstr(code, "B.append(") != NULL);
+    ASSERT_TRUE(strstr(code, "if A[_i + 1] == A[_i]:") != NULL);   /* gate on watched A */
+    ASSERT_TRUE(strstr(code, "if B[") == NULL);                    /* B is NOT the gate */
+    ASSERT_TRUE(strstr(code, "return A\n") != NULL);
 
     free(code);
     ir_free(ir);
@@ -449,11 +448,14 @@ TEST(test_codegen_trace_scaffolding) {
     SemanticResult sem = semantic_analyze(ast);
     IRProgram *ir = ir_lower(ast, sem.symtab);
     char *code = codegen_python_ex(ir, 1, "reachability_bfs");
-    ASSERT_TRUE(strstr(code, "def _edgecc_snapshot(") != NULL);
     ASSERT_TRUE(strstr(code, "_trace=None") != NULL);
-    ASSERT_TRUE(strstr(code, "\"kind\": \"generation\"") != NULL);
+    ASSERT_TRUE(strstr(code, "\"kind\": \"generation\", \"gen\": 0") != NULL);
+    ASSERT_TRUE(strstr(code, "for _g in range(1, _i + 2):") != NULL);
+    ASSERT_TRUE(strstr(code, "\"P\": P[_g]") != NULL);
     ASSERT_TRUE(strstr(code, "\"schema\": \"edgecc-trace/1\"") != NULL);
+    ASSERT_TRUE(strstr(code, "\"dims\": {\"N\": len(P[0])}") != NULL);
     ASSERT_TRUE(strstr(code, ".trace.json") != NULL);
+    ASSERT_TRUE(strstr(code, "_edgecc_snapshot") == NULL);   /* history needs no copies */
     free(code);
     ir_free(ir); semantic_result_free(&sem); ast_free(ast);
 }
@@ -548,6 +550,58 @@ TEST(test_codegen_fused_pull) {
     free(code); ir_free(ir); semantic_result_free(&sem); ast_free(ast);
 }
 
+TEST(test_codegen_occupancy_stop) {
+    AstNode *ast = parse(
+        "dim N = 3;\n"
+        "tensor G[R=N, C=N]   : float, empty = 0.0;\n"
+        "tensor T[gen I, R=N] : float, empty = inf;\n"
+        "tensor F[gen I, R=N] : float, empty = inf;\n"
+        "tensor P[gen I, R=N] : float, empty = 0.0;\n"
+        "init G = [[0.0,1.0,0.0],[0.0,0.0,1.0],[0.0,0.0,0.0]];\n"
+        "init F = [0.0, inf, inf];\n"
+        "init P = [1.0, 0.0, 0.0];\n"
+        "T[i, d]   = G[s,d] . F[i,s]   :: map(add, intersect) reduce(min, union);\n"
+        "F[i+1, d] = T[i,d] . !P[i,d]  :: map(take_left, intersect) reduce(min, union);\n"
+        "P[i+1, d] = P[i,d] . F[i+1,d] :: map(or, union) reduce(or, union);\n"
+        "stop: ||F[i+1]|| == 0;\n");
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    char *code = codegen_python(ir);
+    ASSERT_NOT_NULL(code);
+    ASSERT_TRUE(strstr(code, "def _edgecc_occupancy(x, empty):") != NULL);
+    ASSERT_TRUE(strstr(code, "if _edgecc_occupancy(F[_i + 1], math.inf) == 0:") != NULL);
+    ASSERT_TRUE(strstr(code, "\"output\": \"F\"") != NULL);
+    ASSERT_TRUE(strstr(code, "return F\n") != NULL);
+    free(code); ir_free(ir); semantic_result_free(&sem); ast_free(ast);
+}
+
+TEST(test_codegen_fused_generational_indexing) {
+    AstNode *ast = parse(
+        "dim N = 3;\n"
+        "tensor G[R=N, C=N]   : float, empty = 0.0;\n"
+        "tensor F[gen I, R=N] : float, empty = 0.0;\n"
+        "tensor P[gen I, R=N] : float, empty = 0.0;\n"
+        "init G = [[0.0,1.0,0.0],[0.0,0.0,1.0],[0.0,0.0,0.0]];\n"
+        "init F = [1.0, 0.0, 0.0];\n"
+        "init P = [1.0, 0.0, 0.0];\n"
+        "F[i+1, d] = (G[s,d] .1 F[i,s]) .2 !P[i,d] "
+        ":: map.1(and,intersect) reduce.1(or,union) map.2(take_left,intersect);\n"
+        "P[i+1, d] = P[i,d] . F[i+1,d] :: map(or,union) reduce(or,union);\n"
+        "stop: stable(P);\n");
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    char *code = codegen_python(ir);
+    ASSERT_NOT_NULL(code);
+    ASSERT_TRUE(strstr(code, "F[_i][s]") != NULL);        /* inner operand at i */
+    ASSERT_TRUE(strstr(code, "P[_i][d]") != NULL);        /* outer operand at i */
+    ASSERT_TRUE(strstr(code, "F[_i + 1][d]") != NULL);    /* fused output at i+1 */
+    ASSERT_TRUE(strstr(code, "_prev") == NULL);
+    ASSERT_TRUE(strstr(code, "_next") == NULL);
+    free(code); ir_free(ir); semantic_result_free(&sem); ast_free(ast);
+}
+
 int main(void) {
     RUN_TEST(test_codegen_fused_push);
     RUN_TEST(test_codegen_fused_pull);
@@ -570,5 +624,7 @@ int main(void) {
     RUN_TEST(test_codegen_default_no_trace);
     RUN_TEST(test_codegen_trace_on_nongenerational_warns_no_scaffold);
     RUN_TEST(test_codegen_trace_scaffolding);
+    RUN_TEST(test_codegen_occupancy_stop);
+    RUN_TEST(test_codegen_fused_generational_indexing);
     return test_report();
 }
