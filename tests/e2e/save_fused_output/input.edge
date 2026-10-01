@@ -1,0 +1,13 @@
+// A fused Einsum writes the watched, returned tensor F; save: F writes every
+// generation of F. Push BFS on the path 0->1->2 from source 0.
+dim N = 3;
+tensor G[R=N, C=N]   : float, empty = 0.0;
+tensor F[gen I, R=N] : float, empty = 0.0;
+tensor P[gen I, R=N] : float, empty = 0.0;
+init G = [[0.0,1.0,0.0],[0.0,0.0,1.0],[0.0,0.0,0.0]];
+init F = [1.0, 0.0, 0.0];
+init P = [1.0, 0.0, 0.0];
+F[i+1, d] = (G[s,d] .1 F[i,s]) .2 !P[i,d] :: map.1(and,intersect) reduce.1(or,union) map.2(take_left,intersect);
+P[i+1, d] = P[i,d] . F[i+1,d] :: map(or,union) reduce(or,union);
+stop: ||F[i+1]|| == 0;
+save: F -> "result.mtx";

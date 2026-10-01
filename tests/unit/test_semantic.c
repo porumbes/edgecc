@@ -693,8 +693,27 @@ TEST(test_semantic_gen_buffer_names_are_free) {
     semantic_result_free(&res); ast_free(ast);
 }
 
+/* A failed left reference must not also report the right one. */
+TEST(test_semantic_stop_equal_undeclared_reports_once) {
+    AstNode *ast = parse(
+        "dim N = 3;\n"
+        "tensor G[R=N, C=N]   : float, empty = 0.0;\n"
+        "tensor F[gen I, R=N] : float, empty = 0.0;\n"
+        "tensor P[gen I, R=N] : float, empty = 0.0;\n"
+        "init G = [[0.0,1.0,0.0],[0.0,0.0,1.0],[0.0,0.0,0.0]];\n"
+        "init F = [1.0, 0.0, 0.0];\n"
+        "init P = [1.0, 0.0, 0.0];\n"
+        "F[i+1, d] = G[s,d] . F[i,s]   :: map(and, intersect) reduce(or, union);\n"
+        "P[i+1, d] = P[i,d] . F[i+1,d] :: map(or, union) reduce(or, union);\n"
+        "stop: Q[i+1] == Q[i];\n");
+    SemanticResult res = semantic_analyze(ast);
+    ASSERT_INT_EQ(1, res.error_count);
+    semantic_result_free(&res); ast_free(ast);
+}
+
 int main(void) {
     RUN_TEST(test_valid_gemm);
+    RUN_TEST(test_semantic_stop_equal_undeclared_reports_once);
     RUN_TEST(test_semantic_stop_occupancy);
     RUN_TEST(test_semantic_stop_equal);
     RUN_TEST(test_semantic_stable_is_equal_sugar);

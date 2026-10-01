@@ -866,14 +866,19 @@ static int resolve_stop_ref(SemanticResult *res, const TensorRef *r, TensorEntry
     return off;
 }
 
-/* Find the stop clause (the last one, as before), check it against the
+/* Find the (single) stop clause, check it against the
    program's iterativeness, and resolve it into symtab->stop_*. */
 static void resolve_stop(SemanticResult *res, AstNode *program) {
     SymbolTable *st = res->symtab;
     ProgramData *pd = &program->data.program;
     AstNode *stop = NULL;
+    int num_stops = 0;
     for (int i = 0; i < pd->count; i++)
-        if (pd->statements[i]->type == NODE_STOP) stop = pd->statements[i];
+        if (pd->statements[i]->type == NODE_STOP) { stop = pd->statements[i]; num_stops++; }
+    if (num_stops > 1) {
+        add_error(res, "only one 'stop:' clause is allowed");
+        return;
+    }
 
     if (!stop) {
         if (st->is_iterative)
@@ -928,8 +933,9 @@ static void resolve_stop(SemanticResult *res, AstNode *program) {
         }
         case STOP_EQUAL: {
             int a = resolve_stop_ref(res, &sd->lhs, &ta);
+            if (a < 0) return;
             int b = resolve_stop_ref(res, &sd->rhs, &tb);
-            if (a < 0 || b < 0) return;
+            if (b < 0) return;
             if (ta != tb) {
                 add_error(res, "stop predicate: '==' compares two generations of the same tensor "
                                "('%s' vs '%s')", ta->name, tb->name);
@@ -1069,16 +1075,24 @@ SemanticResult semantic_analyze(AstNode *program) {
             add_error(&res, "save: unknown tensor '%s'", tgt);
             continue;
         }
-        int is_output = 0;
-        for (int j = 0; j < pd->count; j++) {
-            AstNode *st_j = pd->statements[j];
-            if (st_j->type == NODE_EINSUM &&
-                strcmp(st_j->data.einsum.output.tensor_name, tgt) == 0) {
-                is_output = 1; break;
+        /* run() returns one tensor: the stop-watched one (iterative) or the
+           output of the last Einsum. save must target exactly that tensor. */
+        const char *returned = NULL;
+        if (st->is_iterative) {
+            returned = st->stop_watch;
+        } else {
+            for (int j = 0; j < pd->count; j++) {
+                AstNode *st_j = pd->statements[j];
+                if (st_j->type == NODE_EINSUM)
+                    returned = st_j->data.einsum.output.tensor_name;
+                else if (st_j->type == NODE_EINSUM_FUSED)
+                    returned = st_j->data.einsum_fused.output.tensor_name;
             }
         }
-        if (!is_output) {
-            add_error(&res, "save: tensor '%s' is not a computed output", tgt);
+        if (!returned) continue;  /* earlier errors; don't pile on */
+        if (strcmp(tgt, returned) != 0) {
+            add_error(&res, "save: '%s' is not the tensor run() returns ('%s'); saving other "
+                            "tensors needs multi-output return (future work)", tgt, returned);
             continue;
         }
         TensorEntry *ste = symtab_find_tensor(st, tgt);
