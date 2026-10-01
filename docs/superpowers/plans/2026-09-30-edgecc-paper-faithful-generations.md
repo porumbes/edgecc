@@ -34,7 +34,7 @@
 - Modify: `src/parser.y` (token declarations, near `%token TOK_GEN TOK_STOP TOK_STABLE`)
 - Test: `tests/unit/test_lexer.c`
 
-- [ ] **Step 1: Declare the tokens and write failing lexer tests**
+- [x] **Step 1: Declare the tokens and write failing lexer tests**
 
 In `src/parser.y`, change `%token TOK_GEN TOK_STOP TOK_STABLE` to:
 ```
@@ -57,12 +57,12 @@ TEST(test_eqeq_token_vs_single_equals) {
 ```
 Register both with `RUN_TEST(...)` in `main()`.
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cmake -S . -B build >/dev/null && cmake --build build -j8 2>&1 | grep -E 'error|warning'; ./build/test_lexer | tail -3`
 Expected: `test_oror_token` and `test_eqeq_token_vs_single_equals` FAIL (the lexer returns `'|'`-less garbage / two `'='`).
 
-- [ ] **Step 3: Add the lexer rules**
+- [x] **Step 3: Add the lexer rules**
 
 In `src/lexer.l`, directly after the `"::"` rule:
 ```
@@ -70,12 +70,12 @@ In `src/lexer.l`, directly after the `"::"` rule:
 "=="                { return TOK_EQEQ; }
 ```
 
-- [ ] **Step 4: Verify pass**
+- [x] **Step 4: Verify pass**
 
 Run: `cmake --build build -j8 2>&1 | grep -E 'error|warning'; ./build/test_lexer | tail -1`
 Expected: all lexer tests pass, no warnings.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 ```bash
 git add src/lexer.l src/parser.y tests/unit/test_lexer.c
 git commit -m "lexer: add || and == tokens for stop predicates"
@@ -91,7 +91,7 @@ git commit -m "lexer: add || and == tokens for stop predicates"
 - Modify: `src/semantic.c` (`analyze_stop` — minimal adaptation so the build stays green; fully replaced in Task 3)
 - Test: `tests/unit/test_parser.c`; new negative test `tests/negative/stop_unknown_predicate/`
 
-- [ ] **Step 1: Write the failing parser tests**
+- [x] **Step 1: Write the failing parser tests**
 
 In `tests/unit/test_parser.c`, replace the body assertions of `test_parse_stop_stmt`:
 ```c
@@ -180,12 +180,12 @@ EOF
 echo "unknown stop predicate 'settled'" > tests/negative/stop_unknown_predicate/expected_errors.txt
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cmake --build build -j8 2>&1 | grep -E 'error' | head`
 Expected: compile errors in `test_parser.c` (`STOP_STABLE`, `stable_tensor`, `lhs` undefined). That is the failing state.
 
-- [ ] **Step 3: Redefine `StopData` and constructors**
+- [x] **Step 3: Redefine `StopData` and constructors**
 
 In `src/ast.h`, replace
 ```c
@@ -252,7 +252,7 @@ In `ast_free`, replace the `NODE_STOP` case body with (freeing a zeroed `TensorR
             break;
 ```
 
-- [ ] **Step 4: Grammar**
+- [x] **Step 4: Grammar**
 
 In `src/parser.y`, replace the whole `stop_stmt:` rule with:
 ```
@@ -285,7 +285,7 @@ stop_stmt:
     ;
 ```
 
-- [ ] **Step 5: Keep semantic compiling (temporary; replaced in Task 3)**
+- [x] **Step 5: Keep semantic compiling (temporary; replaced in Task 3)**
 
 In `src/semantic.c`, in `analyze_stop`, replace `const char *watch = node->data.stop.watch_tensor;` with:
 ```c
@@ -293,12 +293,12 @@ In `src/semantic.c`, in `analyze_stop`, replace `const char *watch = node->data.
     const char *watch = sd->kind == STOP_STABLE ? sd->stable_tensor : sd->lhs.tensor_name;
 ```
 
-- [ ] **Step 6: Verify**
+- [x] **Step 6: Verify**
 
 Run: `cmake --build build -j8 2>&1 | grep -iE 'error|warning|conflict'; ./build/test_parser | tail -1; ctest --test-dir build 2>&1 | tail -3; python3 tests/negative/run_negative.py build/edgecc tests/negative | grep -E 'stop_unknown|passed'`
 Expected: no warnings or Bison conflicts; parser tests all pass; full ctest passes; `PASS stop_unknown_predicate`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 ```bash
 git add src/ast.h src/ast.c src/parser.y src/semantic.c tests/unit/test_parser.c tests/negative/stop_unknown_predicate
 git commit -m "parser: stop predicates ||X[g]|| == 0 and X[g] == X[h]; stable(X) kept"
@@ -313,7 +313,7 @@ git commit -m "parser: stop predicates ||X[g]|| == 0 and X[g] == X[h]; stable(X)
 - Modify: `src/semantic.c` (`analyze_tensor_decl`, remove `analyze_stop`, new `resolve_stop`, save pass, post-pass cleanup)
 - Test: `tests/unit/test_semantic.c`; new negative tests (listed below); reconcile `tests/negative/gen_missing_stop/expected_errors.txt`
 
-- [ ] **Step 1: Write the failing semantic unit tests**
+- [x] **Step 1: Write the failing semantic unit tests**
 
 Add to `tests/unit/test_semantic.c` (before `main`), and `RUN_TEST` each:
 ```c
@@ -379,7 +379,7 @@ TEST(test_semantic_stop_on_intermediate_at_i) {
 }
 ```
 
-- [ ] **Step 2: Write the failing negative tests**
+- [x] **Step 2: Write the failing negative tests**
 
 Create them with this script (run from the worktree root). `BFS` and `BF` are the base programs; each test substitutes one line.
 ```bash
@@ -439,12 +439,12 @@ Reconcile the existing fixture whose message changes:
 echo "requires a 'stop:' clause" > tests/negative/gen_missing_stop/expected_errors.txt
 ```
 
-- [ ] **Step 3: Run to verify failure**
+- [x] **Step 3: Run to verify failure**
 
 Run: `cmake --build build -j8 2>&1 | grep -E 'error' | head; python3 tests/negative/run_negative.py build/edgecc tests/negative | grep -E 'FAIL|passed'`
 Expected: `test_semantic.c` fails to compile (`stop_kind`, `STOP_OCCUPANCY` members missing) and the 13 new/reconciled negative tests FAIL.
 
-- [ ] **Step 4: Symbol-table fields**
+- [x] **Step 4: Symbol-table fields**
 
 In `src/semantic.h`, replace the `stop_watch` field line with:
 ```c
@@ -454,7 +454,7 @@ In `src/semantic.h`, replace the `stop_watch` field line with:
     int   stop_gen_b;    /* STOP_EQUAL only: offset of the right reference */
 ```
 
-- [ ] **Step 5: Gen-first rule**
+- [x] **Step 5: Gen-first rule**
 
 In `src/semantic.c` `analyze_tensor_decl`, inside `if (d->ranks[i].is_generational) {`, directly after the existing "more than one generational rank" check, add:
 ```c
@@ -463,7 +463,7 @@ In `src/semantic.c` `analyze_tensor_decl`, inside `if (d->ranks[i].is_generation
                           d->ranks[i].rank_name, d->name);
 ```
 
-- [ ] **Step 6: Replace `analyze_stop` with post-pass `resolve_stop`**
+- [x] **Step 6: Replace `analyze_stop` with post-pass `resolve_stop`**
 
 Delete the whole `analyze_stop` function. In `semantic_analyze`'s statement switch, change the `NODE_STOP` case to:
 ```c
@@ -598,7 +598,7 @@ static void resolve_stop(SemanticResult *res, AstNode *program) {
 }
 ```
 
-- [ ] **Step 7: Post-pass cleanup**
+- [x] **Step 7: Post-pass cleanup**
 
 In `semantic_analyze`, directly after `validate_cascade_ordering(&res, program);`, add `resolve_stop(&res, program);`. Then delete these now-superseded blocks that follow it:
 - `if (st->is_iterative && st->stop_watch == NULL) { ... requires a 'stop: stable(...)' clause ... }`
@@ -607,7 +607,7 @@ In `semantic_analyze`, directly after `validate_cascade_ordering(&res, program);
 
 Keep `SymbolTable *st = res.symtab;` (later code uses it) and the "no cross-generational tensor" check.
 
-- [ ] **Step 8: Save rule**
+- [x] **Step 8: Save rule**
 
 In the save pass, directly after the `if (!is_output) { ... continue; }` block, add:
 ```c
@@ -619,13 +619,13 @@ In the save pass, directly after the `if (!is_output) { ... continue; }` block, 
         }
 ```
 
-- [ ] **Step 9: Verify**
+- [x] **Step 9: Verify**
 
 Run: `cmake --build build -j8 2>&1 | grep -E 'error|warning'; ./build/test_semantic | tail -1; python3 tests/negative/run_negative.py build/edgecc tests/negative | grep -E 'FAIL|passed'; ctest --test-dir build 2>&1 | tail -3`
 Expected: all semantic tests pass; all negative tests pass (including the 13 new/reconciled); full ctest passes (codegen still uses `stop_watch` and the old loop, so e2e output is unchanged at this point).
 Also run `grep -rn "not a cross-generational tensor" tests/` — expected: no hits (no fixture depended on the removed message).
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 ```bash
 git add src/semantic.h src/semantic.c tests/unit/test_semantic.c tests/negative
 git commit -m "semantic: resolve stop predicates; gen rank must be first; reject 3-D generational save"
@@ -640,7 +640,7 @@ git commit -m "semantic: resolve stop predicates; gen rank must be first; reject
 - Modify: `src/ir.c` (`gen_read_kind` → `gen_kind`; stores; fused; `ir_lower`; `ir_dump`)
 - Test: `tests/unit/test_ir.c`
 
-- [ ] **Step 1: Write failing IR tests / update the ones that encode the old encoding**
+- [x] **Step 1: Write failing IR tests / update the ones that encode the old encoding**
 
 In `tests/unit/test_ir.c`:
 - In the Bellman-Ford cascade test (the one asserting `ASSERT_INT_EQ(1, cross_writes);`), change the counting to distinguish the two kinds:
@@ -726,12 +726,12 @@ TEST(test_ir_occupancy_stop) {
 ```
 Add `#include <math.h>` at the top of `test_ir.c` if not present, and `RUN_TEST` both new tests.
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cmake --build build -j8 2>&1 | grep -E 'error' | head`
 Expected: compile errors (`stop_kind`, `stop_gen_a`, `watch_empty` not members of `IRGenLoop`).
 
-- [ ] **Step 3: IR header**
+- [x] **Step 3: IR header**
 
 In `src/ir.h`:
 - `IRLoad.gen_read` comment → `/* 0: not generational; 1: generation i (X[_i]); 2: generation i+1 (X[_i + 1]) */`
@@ -754,7 +754,7 @@ typedef struct {
 } IRGenLoop;
 ```
 
-- [ ] **Step 4: Lowering**
+- [x] **Step 4: Lowering**
 
 In `src/ir.c`, replace `gen_read_kind` with:
 ```c
@@ -787,7 +787,7 @@ In `ir_lower`, after `gl->data.gen_loop.watch = ...;` add:
         gl->data.gen_loop.watch_empty = wte ? wte->empty_val : 0.0;
 ```
 
-- [ ] **Step 5: Dump**
+- [x] **Step 5: Dump**
 
 In `ir_dump`: LOAD flag `instr->data.load.gen_read ? " [gen_read]" : ""` →
 `instr->data.load.gen_read == 2 ? " [gen i+1]" : instr->data.load.gen_read == 1 ? " [gen i]" : ""`;
@@ -807,13 +807,13 @@ STORE flag likewise with `gen_write`. In `IR_GEN_LOOP_BEGIN`, replace the final 
                 }
 ```
 
-- [ ] **Step 6: Verify**
+- [x] **Step 6: Verify**
 
 Run: `cmake --build build -j8 2>&1 | grep -E 'error|warning'; ./build/test_ir | tail -1; ./build/edgecc examples/bellman_ford.edge -o /dev/null --dump-ir | grep -E 'GEN_LOOP|gen i'`
 Expected: all IR tests pass; the dump shows `stop=D[i+1]==D[i]` and `[gen i]` / `[gen i+1]` markers.
 Note: e2e tests for generational programs that use intermediates now FAIL (codegen still emits `_prev`/`_next` but intermediates now carry kind 1 and the old codegen maps kind 1 to `_prev`). That is expected; Task 5 fixes codegen. Do not commit a red suite for long: go straight to Task 5 after committing.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 ```bash
 git add src/ir.h src/ir.c tests/unit/test_ir.c
 git commit -m "ir: uniform generation kinds for all generational tensors; stop predicate on the gen loop"
@@ -827,7 +827,7 @@ git commit -m "ir: uniform generation kinds for all generational tensors; stop p
 - Modify: `src/codegen.c`
 - Test: `tests/unit/test_codegen.c`
 
-- [ ] **Step 1: Rewrite the codegen tests that encode the old loop, add new ones**
+- [x] **Step 1: Rewrite the codegen tests that encode the old loop, add new ones**
 
 In `tests/unit/test_codegen.c` replace the assertion blocks as follows (keep each test's program text).
 
@@ -958,12 +958,12 @@ TEST(test_codegen_fused_generational_indexing) {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cmake --build build -j8 2>&1 | grep -E 'error|warning'; ./build/test_codegen | grep -cE 'FAIL'`
 Expected: many FAILs (old loop still emitted).
 
-- [ ] **Step 3: Slice naming helper; use it everywhere `_prev`/`_next` were formed**
+- [x] **Step 3: Slice naming helper; use it everywhere `_prev`/`_next` were formed**
 
 In `src/codegen.c`, add near `emit_tensor_access`:
 ```c
@@ -990,7 +990,7 @@ Replace the body of `fused_operand_name` with `gen_slice_name(out, cap, op->name
     gen_slice_name(z_name, sizeof(z_name), fu->out_name, fu->gen_write);
 ```
 
-- [ ] **Step 4: Capture the predicate; occupancy helper; drop the snapshot helper**
+- [x] **Step 4: Capture the predicate; occupancy helper; drop the snapshot helper**
 
 In `codegen_python_ex`, in the gen-loop metadata scan, add `int stop_kind = STOP_EQUAL, stop_gen_a = 1, stop_gen_b = 0; double watch_empty = 0.0;` to the declarations above the loop, and inside the `IR_GEN_LOOP_BEGIN` branch after `watch = gl->watch;`:
 ```c
@@ -1012,7 +1012,7 @@ Replace the `_edgecc_snapshot` helper block (`if (emit_trace) { cb_append(&cb, "
     }
 ```
 
-- [ ] **Step 5: Allocation exclusion for intermediates**
+- [x] **Step 5: Allocation exclusion for intermediates**
 
 In the `IR_TENSOR_ALLOC` case inside `run()`, change the condition's exclusion from
 `!(iterative && name_in_list(instr->data.tensor_alloc.name, cross_gens, num_cross_gens))`
@@ -1024,7 +1024,7 @@ to
 ```
 and update the comment to: "a generational tensor is built by the gen loop (from the caller's generation 0, or empty for an intermediate)."
 
-- [ ] **Step 6: Replace the gen-loop emission**
+- [x] **Step 6: Replace the gen-loop emission**
 
 Add this helper above `codegen_python_ex`:
 ```c
@@ -1137,7 +1137,7 @@ Replace the entire `case IR_GEN_LOOP_END: { ... break; }` block with:
             }
 ```
 
-- [ ] **Step 7: Return the full tensor; fix the trace's spatial size**
+- [x] **Step 7: Return the full tensor; fix the trace's spatial size**
 
 Replace
 ```c
@@ -1153,7 +1153,7 @@ with
 ```
 In the trace `json.dump` line, change `"\"dims\": {\"N\": len(%s)}, \"gen_tensors\": ["` to `"\"dims\": {\"N\": len(%s[0])}, \"gen_tensors\": ["` (the returned tensor is a list of generations; `N` is a slice's length).
 
-- [ ] **Step 8: Verify**
+- [x] **Step 8: Verify**
 
 Run:
 ```bash
@@ -1168,7 +1168,7 @@ python3 -c "import math; e={'inf': math.inf}; n=eval(open('/tmp/new.out').read()
 Expected: all unit binaries pass; trace and viz tests pass unchanged; the last command prints `... generations; last == main: True` (`../premerge-gate/build/edgecc` is the `main` build).
 The 14 generational e2e tests and the reference suite still FAIL on output shape: fixed in Task 6.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 ```bash
 git add src/codegen.c tests/unit/test_codegen.c
 git commit -m "codegen: store every generation (no ping-pong); stop predicates; return the full tensor"
@@ -1183,7 +1183,7 @@ git commit -m "codegen: store every generation (no ping-pong); stop predicates; 
 - Modify: `tests/reference/run_reference.py`
 - Modify: example header comments in `examples/bellman_ford.edge`, `examples/bellman_ford_2stage.edge`, `examples/connected_components.edge`, `examples/reachability.edge`, `examples/transitive_closure.edge`
 
-- [ ] **Step 1: Write the guarded migration script (not committed)**
+- [x] **Step 1: Write the guarded migration script (not committed)**
 
 Create `build/migrate_expected.py` (`build/` is gitignored):
 ```python
@@ -1224,17 +1224,17 @@ for inp in sorted(glob.glob("tests/e2e/*/input.edge")):
 sys.exit(1 if refused else 0)
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `python3 build/migrate_expected.py; echo "exit=$?"`
 Expected: 14 `migrated ...` lines, no `REFUSE`, `exit=0`. If anything is refused, STOP and investigate: it means the change altered a result, not just its shape.
 
-- [ ] **Step 3: Hand-verify one history**
+- [x] **Step 3: Hand-verify one history**
 
 Run: `cat tests/e2e/reachability_bfs/expected_output.txt; cat tests/e2e/reachability_bfs/input.edge | grep -E 'init|stop'`
 Check by hand that generation 0 equals the `init` of the watched tensor, each generation adds exactly the vertices reachable in one more step, and the last two generations are equal (stable stop). Record the check in the commit message.
 
-- [ ] **Step 4: Reference harness compares the last generation**
+- [x] **Step 4: Reference harness compares the last generation**
 
 In `tests/reference/run_reference.py`:
 - Add `gen=True` to every `CASES` entry except `diag_g2`.
@@ -1249,7 +1249,7 @@ with
                 exp = case["ref"](G)
 ```
 
-- [ ] **Step 5: Example header comments**
+- [x] **Step 5: Example header comments**
 
 In each of the five examples listed above, change the `// Output:` label to `// Output (last generation):` (the value shown is still correct: it is the final generation; `run()` now returns every generation). Verify each still matches:
 ```bash
@@ -1261,12 +1261,12 @@ done
 ```
 Expected: each printed `last=` value matches the comment.
 
-- [ ] **Step 6: Full suite**
+- [x] **Step 6: Full suite**
 
 Run: `ctest --test-dir build --output-on-failure 2>&1 | tail -4`
 Expected: 100% pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 ```bash
 git add tests/e2e tests/reference/run_reference.py examples
 git commit -m "test: generational e2e outputs are full histories (guarded: last generation unchanged)
@@ -1288,7 +1288,7 @@ out[-1] for generational kernels."
 - Modify: `CLAUDE.md` (Names paragraph)
 - Test: `tests/unit/test_semantic.c`
 
-- [ ] **Step 1: Write the failing positive test**
+- [x] **Step 1: Write the failing positive test**
 
 Add to `tests/unit/test_semantic.c` (and `RUN_TEST` it):
 ```c
@@ -1310,12 +1310,12 @@ TEST(test_semantic_gen_buffer_names_are_free) {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cmake --build build -j8 2>&1 | grep error; ./build/test_semantic | grep -A1 gen_buffer_names`
 Expected: FAIL (`tensor 'F_next' is reserved ... (buffer of a generational tensor)`).
 
-- [ ] **Step 3: Remove the reservation**
+- [x] **Step 3: Remove the reservation**
 
 In `src/semantic.c`: delete the `is_gen_buffer_name` function and its comment; in `check_reserved`, replace the `why` computation with:
 ```c
@@ -1330,12 +1330,12 @@ In `tests/reserved/run_reserved_names.py`, make `user_names` return only `names`
 In `CLAUDE.md`, in the **Names** paragraph, delete `, and a
 tensor may not be named `<T>_prev`/`<T>_next` for a generational `T`` (keep the sentence ending with "…may not reuse a dim or tensor name.").
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run: `cmake --build build -j8 2>&1 | grep -E 'error|warning'; ./build/test_semantic | tail -1; python3 tests/reserved/run_reserved_names.py build/edgecc; ctest --test-dir build 2>&1 | tail -3`
 Expected: semantic tests pass; `reserved-name check: ... 0 unlisted names`; full ctest passes.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 ```bash
 git add -A src/semantic.c tests/unit/test_semantic.c tests/negative tests/reserved CLAUDE.md
 git commit -m "semantic: retire the <T>_prev/<T>_next name reservation (codegen no longer emits them)"
@@ -1350,7 +1350,7 @@ git commit -m "semantic: retire the <T>_prev/<T>_next name reservation (codegen 
 - Create: `tests/e2e/bfs_paper/{input.edge,expected_output.txt}`
 - Create: `tests/e2e/save_generational/{input.edge,expected_output.txt,roundtrip_check,needs_scipy}`
 
-- [ ] **Step 1: Write the demonstrator and its hand-verified expected history**
+- [x] **Step 1: Write the demonstrator and its hand-verified expected history**
 
 `examples/bfs_paper.edge`:
 ```
@@ -1419,12 +1419,12 @@ echo "1.0 0.0 0.0 1.0 1.0 0.0 1.0 1.0 1.0 1.0 1.0 1.0" > roundtrip_check
 cd -
 ```
 
-- [ ] **Step 2: Run**
+- [x] **Step 2: Run**
 
 Run: `python3 tests/e2e/run_e2e.py build/edgecc | grep -E 'bfs_paper|save_generational|passed'`
 Expected: `PASS bfs_paper`, `PASS save_generational`. If `bfs_paper` fails, compare the printed history against the hand derivation above generation by generation before changing anything.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 ```bash
 git add examples/bfs_paper.edge tests/e2e/bfs_paper tests/e2e/save_generational
 git commit -m "examples: the paper's BFS with occupancy stop; e2e for saving a generational tensor"
@@ -1438,7 +1438,7 @@ git commit -m "examples: the paper's BFS with occupancy stop; e2e for saving a g
 - Create: `tests/reference/kernels/bfs_paper.edge`
 - Modify: `tests/reference/run_reference.py`
 
-- [ ] **Step 1: Kernel**
+- [x] **Step 1: Kernel**
 
 `tests/reference/kernels/bfs_paper.edge`:
 ```
@@ -1457,7 +1457,7 @@ P[i+1, d] = P[i,d] . F[i+1,d] :: map(or, union) reduce(or, union);
 stop: ||F[i+1]|| == 0;
 ```
 
-- [ ] **Step 2: History references and comparator**
+- [x] **Step 2: History references and comparator**
 
 In `tests/reference/run_reference.py`, add after `ref_closure`:
 ```python
@@ -1503,7 +1503,7 @@ def paper_bfs_inputs(G):
     return {"G": G, "F": seed(n, 0.0, INF), "P": seed(n, 1.0, 0.0)}
 ```
 
-- [ ] **Step 3: Cases**
+- [x] **Step 3: Cases**
 
 In `CASES`, for the five `bfs_*` reachability kernels (`bfs_push_fused`, `bfs_pull_fused`, `bfs_push_fused_rhs`, `bfs_neg_cascade`, `bfs_naive`) replace `ref=ref_reach, cmp=same_support` with `ref=ref_reach_history, cmp=history(same_support), history=True` (and drop their `gen=True`). For `bfs_depth` use `ref=ref_depth_history, cmp=history(close), history=True`. Add:
 ```python
@@ -1513,14 +1513,14 @@ In `CASES`, for the five `bfs_*` reachability kernels (`bfs_push_fused`, `bfs_pu
 In `main()`, the Task 6 `out[-1]` line stays as is (`history` cases have no `gen=True`, so they compare the full list).
 Remove `ref_reach` if it is now unused.
 
-- [ ] **Step 4: Verify, then prove the history oracle can fail**
+- [x] **Step 4: Verify, then prove the history oracle can fail**
 
 Run: `python3 tests/reference/run_reference.py build/edgecc | tail -3`
 Expected: all checks pass (13 kernels + `bfs_paper`, 15 graphs).
 Sabotage check: temporarily change `bfs_paper.edge`'s stop to `stop: stable(P);` and rerun.
 Expected: `bfs_paper` FAILs on every graph (the kernel now returns the watched tensor `P` instead of `F`, so the frontier-history comparison cannot match). For a second, subtler sabotage, change `map(take_left, intersect)` to `map(take_left, union)` in the `F` Einsum (visited vertices are no longer filtered out of the frontier) and confirm failures again. Restore the file and confirm it passes.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 ```bash
 git add tests/reference
 git commit -m "test(reference): check whole generational histories against scipy hop distances"
@@ -1533,7 +1533,7 @@ git commit -m "test(reference): check whole generational histories against scipy
 **Files:**
 - Modify: `CLAUDE.md`, `docs/roadmap.md`
 
-- [ ] **Step 1: CLAUDE.md — generational section**
+- [x] **Step 1: CLAUDE.md — generational section**
 
 In `CLAUDE.md` "### Generational (iterative) ranks":
 - Replace the first paragraph ("A single Einsum may iterate …") and its following paragraph ("Generated `run()` loops internally with a **fresh (empty) output slice each generation** … See `…generational-ranks-a-design.md`.") with:
@@ -1564,7 +1564,7 @@ memory (e.g. ping-ponging two buffers) is a future liveness optimization. See
 - In "## v2 Scope Limitations", replace "occupancy (`‖F‖≡0`) termination; " with "" (occupancy termination is now supported as `stop: ||F[i+1]|| == 0;`).
 - In "### Visualization", after "records every generational tensor's value per generation," add "(built after the loop from the stored generations)".
 
-- [ ] **Step 2: roadmap.md**
+- [x] **Step 2: roadmap.md**
 
 - Update `**Last updated:**` to today's date.
 - Change the row `| Generational ranks (\`gen\`, \`stop: stable\`) | ✅ |` to `| Generational ranks (\`gen\`): every generation stored, as in the paper | ✅ |` and add after it `| Stop predicates: occupancy \`\|\|F[i+1]\|\| == 0\`, equality, \`stable(X)\` sugar | ✅ |`.
@@ -1573,7 +1573,7 @@ memory (e.g. ping-ponging two buffers) is a future liveness optimization. See
 - In "### Partial 🚧" BFS line, remove "and occupancy (`‖F‖≡0`) termination".
 - In "### Planned ❌ (by area)" → Tooling, add "liveness-based reclamation of generational storage (ping-pong)".
 
-- [ ] **Step 3: Verify and commit**
+- [x] **Step 3: Verify and commit**
 
 Run: `ctest --test-dir build 2>&1 | tail -2; grep -n '_prev\|double-buffer' CLAUDE.md docs/roadmap.md`
 Expected: suite passes; grep finds nothing (or only historical spec references).
@@ -1586,12 +1586,12 @@ git commit -m "docs: paper-faithful generational tensors and stop predicates"
 
 ## Task 11: Finish
 
-- [ ] **Step 1: Gate**
+- [x] **Step 1: Gate**
 
 Run: `tools/premerge.sh`
 Expected: `GATE PASSED`. Fix anything it finds (failing test first), then rerun.
 
-- [ ] **Step 2: Reconcile the spec**
+- [x] **Step 2: Reconcile the spec**
 
 Append a "## Deviations and findings (recorded at Finish)" section to the spec listing anything that differed from it during implementation (at minimum: the trace test's `dims.N` now uses a slice's length; any pre-existing bug the gate found). Tick every box in this plan (`sed -i '' 's/^- \[ \] /- [x] /' docs/superpowers/plans/2026-09-30-edgecc-paper-faithful-generations.md`). Commit:
 ```bash
@@ -1599,7 +1599,7 @@ git add docs/superpowers
 git commit -m "docs: record deviations for paper-faithful generations; tick plan"
 ```
 
-- [ ] **Step 3: Merge without touching the repo-root checkout**
+- [x] **Step 3: Merge without touching the repo-root checkout**
 
 `main` is checked out in `.worktrees/premerge-gate` (the repo root belongs to the exploration session and is on another branch). From this worktree:
 ```bash
@@ -1613,6 +1613,6 @@ cmake --build ../premerge-gate/build -j8 2>&1 | grep -E 'error|warning'; ctest -
 ```
 Expected: merge commit created; suite passes on `main`.
 
-- [ ] **Step 4: Memory and handoff**
+- [x] **Step 4: Memory and handoff**
 
 Update the BFS-milestone memory (occupancy stop done; remaining: multi-output `run()`, `ANY`/parent pointers, `<<`, >1 generational rank) and note that generational tensors now store every generation. Tell the user `main` moved (the exploration session should merge `main` into its branch and rebuild when convenient, since every generational program's output is now a full history).

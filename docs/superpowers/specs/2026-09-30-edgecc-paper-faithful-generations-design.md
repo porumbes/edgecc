@@ -213,6 +213,34 @@ longer emits those names. New codegen names (`_i`, `_edgecc_occupancy`) are
    same thing as (b). Only (c) would require new work (per-generation inputs
    plus an implicit-`i` rule) — a separate feature, not part of this branch.
 
+## Deviations and findings (recorded at Finish, 2026-09-30)
+
+- **Additional rules (beyond the Validation table), each with a negative test:**
+  a stop predicate must name a generational tensor that some Einsum writes
+  ("not written by any Einsum") — otherwise codegen would index an unstored
+  input; exactly one `stop:` clause is allowed (previously the last one
+  silently won, which now decides what `run()` returns); an `==` predicate
+  whose left side fails to resolve reports once, not twice.
+- **`save:` must target the tensor `run()` returns** (the stop-watched tensor,
+  or the last Einsum's output for a non-generational program). Found by the
+  final review: saving any other tensor wrote its untouched generation-0 input
+  or raised `NameError` in `__main__` — a pre-existing bug the new docs would
+  have advertised. The same rule makes `save:` of a fused Einsum's output work
+  (it was rejected as "not a computed output"). Saving other tensors waits for
+  multi-output return.
+- **Trace:** `dims.N` is `len(W[0])` (the returned tensor is a list of
+  generations). Traces are byte-identical to `main`'s on the programs checked.
+- **Plan error:** the IR task (uniform generation kinds) broke one codegen unit
+  test and 6 e2e tests until the codegen task landed; the plan wrongly said no
+  codegen test would be affected. The two commits are adjacent.
+- **Reference suite:** the history-check cases do not need a marker key
+  (`history=True` was dropped as unread). The `take_left, union` sabotage of
+  the paper BFS kernel survives on 3 of 15 graphs, all shallow with no edge back
+  into the visited set (the mask never matters there); 12 of 15 catch it.
+- **Verification:** all 29 generational programs that `main` can compile give
+  `out[-1]` equal to `main`'s output; the 14 migrated e2e expected outputs were
+  written only after a guard confirmed their last generation was unchanged.
+
 ## Out of scope
 
 Multi-output `run()` (next piece); `and`/`or` predicate combinations and
