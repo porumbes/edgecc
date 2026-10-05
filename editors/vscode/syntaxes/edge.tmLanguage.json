@@ -23,9 +23,10 @@
     },
     "literals": {
       "patterns": [
+        { "match": "-inf\\b", "name": "constant.language.edge" },
         { "match": "\\b(true|false|inf)\\b", "name": "constant.language.edge" },
-        { "match": "\\b[0-9]+\\.[0-9]+\\b", "name": "constant.numeric.float.edge" },
-        { "match": "\\b[0-9]+\\b", "name": "constant.numeric.integer.edge" },
+        { "match": "-?\\b[0-9]+\\.[0-9]+\\b", "name": "constant.numeric.float.edge" },
+        { "match": "-?\\b[0-9]+\\b", "name": "constant.numeric.integer.edge" },
         { "match": "\\b(integer|float|boolean)\\b", "name": "storage.type.edge" }
       ]
     },
