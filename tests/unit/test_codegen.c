@@ -384,7 +384,7 @@ TEST(test_codegen_shared_dim_assert) {
         "tensor F[R=N]      : float, empty = 0.0;\n"
         "tensor Z[R=N]      : float, empty = 0.0;\n"
         "init G = load(\"g.mtx\");\n"
-        "init F = load(\"f.mtx\");\n"
+        "init F = [1.0, 0.0];\n"
         "Z[d] = G[s,d] . F[s] :: map(mul, intersect) reduce(add, union);\n"
     );
     SemanticResult sem = semantic_analyze(ast);

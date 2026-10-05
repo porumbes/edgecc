@@ -1,0 +1,7 @@
+// Matrix Market is 2-D; loading into a 3-D tensor must fail at compile time (DFT gap G9).
+dim H = 2;
+dim TWO = 2;
+tensor A[M=H, B=TWO, D=TWO] : float, empty = 0.0;
+tensor Z[M=H, B=TWO]        : float, empty = 0.0;
+init A = load("a.mtx");
+Z[m,b] = A[m,b,d] . A[m,b,d] :: map(mul, intersect) reduce(add, union);

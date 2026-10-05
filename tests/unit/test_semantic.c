@@ -380,7 +380,7 @@ TEST(test_semantic_records_inferred_dim) {
         "tensor F[R=N] : float, empty = 0.0;\n"
         "tensor Z[R=N] : float, empty = 0.0;\n"
         "init G = load(\"g.mtx\");\n"
-        "init F = load(\"f.mtx\");\n"
+        "init F = [1.0, 0.0];\n"
         "Z[d] = G[s,d] . F[s] :: map(mul, intersect) reduce(add, union);\n");
     ASSERT_INT_EQ(0, r.error_count);
     semantic_result_free(&r);

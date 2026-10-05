@@ -293,8 +293,16 @@ static void analyze_init(SemanticResult *res, AstNode *node) {
     te->has_init = 1;
     te->loaded_from_file = d->is_load;
 
-    /* load("...") inits have no literal data; skip shape checking. */
-    if (d->is_load) return;
+    /* load("...") inits have no literal data; skip shape checking. Matrix
+       Market is 2-D and is densified as-is, so the target must be 2-D (the
+       generational axis, if any, is not a data dimension). */
+    if (d->is_load) {
+        int spatial = te->num_ranks - (te->gen_axis >= 0 ? 1 : 0);
+        if (spatial != 2)
+            add_error(res, "load: tensor '%s' must be 2-D (Matrix Market is 2-D), got %d-D",
+                      d->tensor_name, spatial);
+        return;
+    }
 
     /* seed(source=I, value=V) inits have no literal data; validate and skip
        shape checking. The seed materializes a single scalar at index I. */
