@@ -1,0 +1,26 @@
+// 9 intra-generation intermediates exceeds the limit (DFT gap G4).
+dim N = 2;
+tensor G[R=N, C=N] : float, empty = 0.0;
+tensor T0[gen I, R=N] : float, empty = 0.0;
+tensor T1[gen I, R=N] : float, empty = 0.0;
+tensor T2[gen I, R=N] : float, empty = 0.0;
+tensor T3[gen I, R=N] : float, empty = 0.0;
+tensor T4[gen I, R=N] : float, empty = 0.0;
+tensor T5[gen I, R=N] : float, empty = 0.0;
+tensor T6[gen I, R=N] : float, empty = 0.0;
+tensor T7[gen I, R=N] : float, empty = 0.0;
+tensor T8[gen I, R=N] : float, empty = 0.0;
+tensor D[gen I, R=N] : float, empty = 0.0;
+init G = [[0.0, 1.0], [0.0, 0.0]];
+init D = [1.0, 0.0];
+T0[i, d] = G[s,d] . D[i, s] :: map(and, intersect) reduce(or, union);
+T1[i, d] = T0[i, d] . D[i, d] :: map(or, union) reduce(or, union);
+T2[i, d] = T1[i, d] . D[i, d] :: map(or, union) reduce(or, union);
+T3[i, d] = T2[i, d] . D[i, d] :: map(or, union) reduce(or, union);
+T4[i, d] = T3[i, d] . D[i, d] :: map(or, union) reduce(or, union);
+T5[i, d] = T4[i, d] . D[i, d] :: map(or, union) reduce(or, union);
+T6[i, d] = T5[i, d] . D[i, d] :: map(or, union) reduce(or, union);
+T7[i, d] = T6[i, d] . D[i, d] :: map(or, union) reduce(or, union);
+T8[i, d] = T7[i, d] . D[i, d] :: map(or, union) reduce(or, union);
+D[i+1, d] = D[i, d] . T8[i, d] :: map(or, union) reduce(or, union);
+stop: stable(D);

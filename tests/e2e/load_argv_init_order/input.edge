@@ -1,0 +1,9 @@
+// Positional argv binds to loaded inputs in init order (= meta "file_inputs"),
+// even when the Einsum uses them in a different order (DFT gap G7).
+dim N = *;
+tensor A[R=N, C=N] : float, empty = 0.0;
+tensor B[R=N, C=N] : float, empty = 0.0;
+tensor Z[R=N, C=N] : float, empty = 0.0;
+init B = load("b.mtx");
+init A = load("a.mtx");
+Z[r,c] = A[r,k] . B[k,c] :: map(mul, intersect) reduce(add, union);

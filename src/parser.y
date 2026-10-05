@@ -541,6 +541,14 @@ tensor_ref:
     TOK_IDENT '[' ident_list ']'
     {
         StrList *sl = (StrList *)$3;
+        int noffsets = 0;
+        for (int i = 0; i < sl->count; i++) if (sl->offsets[i] != 0) noffsets++;
+        if (noffsets > 1) {
+            yyerror("at most one rank offset per tensor reference");
+            for (int i = 0; i < sl->count; i++) free(sl->items[i]);
+            free(sl->items); free(sl->offsets); free(sl); free($1);
+            YYERROR;
+        }
         TensorRef *ref = malloc(sizeof(TensorRef));
         *ref = tensor_ref_new($1, sl->items, sl->count);
         for (int i = 0; i < sl->count; i++) {

@@ -1,0 +1,1 @@
+rank offset on 'F' is only allowed on its generational rank

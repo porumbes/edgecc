@@ -1,4 +1,5 @@
 #include "test_helpers.h"
+#include <math.h>
 #include "parser.tab.h"
 
 /* Flex interface */
@@ -33,6 +34,20 @@ TEST(test_int_literal) {
     YY_BUFFER_STATE buf = yy_scan_string("42");
     ASSERT_INT_EQ(TOK_INT_LIT, yylex());
     ASSERT_INT_EQ(42, yylval.int_val);
+    yy_delete_buffer(buf);
+}
+
+TEST(test_negative_literals) {
+    YY_BUFFER_STATE buf = yy_scan_string("-2.5 -7 -inf -> 3");
+    ASSERT_INT_EQ(TOK_FLOAT_LIT, yylex());
+    ASSERT_TRUE(yylval.float_val < -2.49 && yylval.float_val > -2.51);
+    ASSERT_INT_EQ(TOK_INT_LIT, yylex());
+    ASSERT_INT_EQ(-7, yylval.int_val);
+    ASSERT_INT_EQ(TOK_FLOAT_LIT, yylex());
+    ASSERT_TRUE(yylval.float_val < 0 && isinf(yylval.float_val));
+    ASSERT_INT_EQ(TOK_ARROW, yylex());
+    ASSERT_INT_EQ(TOK_INT_LIT, yylex());
+    ASSERT_INT_EQ(3, yylval.int_val);
     yy_delete_buffer(buf);
 }
 
@@ -186,5 +201,6 @@ int main(void) {
     RUN_TEST(test_star_token);
     RUN_TEST(test_arrow_token);
     RUN_TEST(test_string_literal);
+    RUN_TEST(test_negative_literals);
     return test_report();
 }

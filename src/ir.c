@@ -201,7 +201,7 @@ static void emit_einsum_fused(IRProgram *ir, AstNode *node, SymbolTable *st, int
     fu->a2_has_reduce = f->a2_has_reduce; fu->reduce2_op = f->reduce2_op; fu->reduce2_merge = f->reduce2_merge;
     fu->reduce2_identity = compute_op_identity(f->reduce2_op, out_te->datatype);
 
-    for (int i = 0; i < ec->num_free_indices && i < 8; i++) {
+    for (int i = 0; i < ec->num_free_indices; i++) {
         fu->free_names[fu->num_free] = dup_str(ec->free_indices[i].name);
         fu->free_sizes[fu->num_free] = ec->free_indices[i].size;
         const char *dn = dim_name_for_index_fused(f, out_te, i1, i2, ou, ec->free_indices[i].name);
@@ -212,7 +212,7 @@ static void emit_einsum_fused(IRProgram *ir, AstNode *node, SymbolTable *st, int
     if (ec->num_a1_reduce > 0) { red = ec->a1_reduce; nred = ec->num_a1_reduce; fu->reduce_on_action = 1; }
     else if (ec->num_a2_reduce > 0) { red = ec->a2_reduce; nred = ec->num_a2_reduce; fu->reduce_on_action = 2; }
     else { fu->reduce_on_action = 0; }
-    for (int i = 0; i < nred && i < 8; i++) {
+    for (int i = 0; i < nred; i++) {
         fu->red_names[fu->num_red] = dup_str(red[i].name);
         fu->red_sizes[fu->num_red] = red[i].size;
         const char *dn = dim_name_for_index_fused(f, out_te, i1, i2, ou, red[i].name);
@@ -338,7 +338,7 @@ IRProgram *ir_lower(AstNode *program, SymbolTable *symtab) {
         IRInstr *gl = ir_emit(ir, IR_GEN_LOOP_BEGIN);
         gl->data.gen_loop.max_gen = 1000;
         int nc = 0;
-        for (int m = 0; m < symtab->num_gen_tensors && nc < 8; m++) {
+        for (int m = 0; m < symtab->num_gen_tensors && nc < MAX_GEN_TENSORS; m++) {
             TensorEntry *te = symtab_find_tensor(symtab, symtab->gen_tensors[m]);
             if (te) fill_gen_alloc(&gl->data.gen_loop.cross_gens[nc++], te);
         }
@@ -350,7 +350,7 @@ IRProgram *ir_lower(AstNode *program, SymbolTable *symtab) {
         TensorEntry *wte = symtab->stop_watch ? symtab_find_tensor(symtab, symtab->stop_watch) : NULL;
         gl->data.gen_loop.watch_empty = wte ? wte->empty_val : 0.0;
         int ni = 0;
-        for (int m = 0; m < symtab->num_intermediates && ni < 8; m++) {
+        for (int m = 0; m < symtab->num_intermediates && ni < MAX_GEN_TENSORS; m++) {
             TensorEntry *te = symtab_find_tensor(symtab, symtab->intermediates[m]);
             if (te) fill_gen_alloc(&gl->data.gen_loop.intermediates[ni++], te);
         }

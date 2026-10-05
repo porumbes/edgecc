@@ -1,0 +1,7 @@
+// dim sizes must be positive (dim N = -4 compiled and ran range(-4)).
+dim N = -4;
+dim M = 0;
+tensor A[R=N] : float, empty = 0.0;
+tensor Z[R=N] : float, empty = 0.0;
+init A = [1.0, 2.0];
+Z[i] = A[i] . A[i] :: map(mul, intersect) reduce(add, union);

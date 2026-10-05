@@ -1,0 +1,8 @@
+// A 1-D load would densify to N x 1 and crash at runtime; reject it (DFT gap G9).
+dim N = *;
+tensor G[R=N, C=N] : float, empty = 0.0;
+tensor F[R=N]      : float, empty = 0.0;
+tensor Z[R=N]      : float, empty = 0.0;
+init G = load("g.mtx");
+init F = load("f.mtx");
+Z[d] = G[s,d] . F[s] :: map(mul, intersect) reduce(add, union);

@@ -384,7 +384,7 @@ TEST(test_codegen_shared_dim_assert) {
         "tensor F[R=N]      : float, empty = 0.0;\n"
         "tensor Z[R=N]      : float, empty = 0.0;\n"
         "init G = load(\"g.mtx\");\n"
-        "init F = load(\"f.mtx\");\n"
+        "init F = [1.0, 0.0];\n"
         "Z[d] = G[s,d] . F[s] :: map(mul, intersect) reduce(add, union);\n"
     );
     SemanticResult sem = semantic_analyze(ast);
@@ -602,6 +602,33 @@ TEST(test_codegen_fused_generational_indexing) {
     free(code); ir_free(ir); semantic_result_free(&sem); ast_free(ast);
 }
 
+TEST(test_codegen_file_inputs_init_order) {
+    /* meta "file_inputs", the -h usage, and argv binding all follow init order
+       (B then A), not first-use order (A then B). DFT gap G7. */
+    AstNode *ast = parse(
+        "dim N = *;\n"
+        "tensor A[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor B[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor Z[R=N, C=N] : float, empty = 0.0;\n"
+        "init B = load(\"b.mtx\");\n"
+        "init A = load(\"a.mtx\");\n"
+        "Z[r,c] = A[r,k] . B[k,c] :: map(mul, intersect) reduce(add, union);\n"
+    );
+    SemanticResult sem = semantic_analyze(ast);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    char *code = codegen_python(ir);
+    ASSERT_NOT_NULL(code);
+    ASSERT_TRUE(strstr(code, "\"file_inputs\": [\"B\", \"A\"]") != NULL);
+    ASSERT_TRUE(strstr(code, "usage: <prog> [B.mtx A.mtx]") != NULL);
+    ASSERT_TRUE(strstr(code, "B = _edgecc_load(_argv[0])") != NULL);
+    ASSERT_TRUE(strstr(code, "A = _edgecc_load(_argv[1])") != NULL);
+    ASSERT_TRUE(strstr(code, "Z = run(A, B)") != NULL);   /* run() signature unchanged */
+    free(code);
+    ir_free(ir);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
 int main(void) {
     RUN_TEST(test_codegen_fused_push);
     RUN_TEST(test_codegen_fused_pull);
@@ -626,5 +653,6 @@ int main(void) {
     RUN_TEST(test_codegen_trace_scaffolding);
     RUN_TEST(test_codegen_occupancy_stop);
     RUN_TEST(test_codegen_fused_generational_indexing);
+    RUN_TEST(test_codegen_file_inputs_init_order);
     return test_report();
 }

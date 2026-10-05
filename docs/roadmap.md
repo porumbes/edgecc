@@ -1,6 +1,6 @@
 # edgecc roadmap & feature status
 
-**Last updated:** 2026-09-30
+**Last updated:** 2026-10-04
 
 Legend:  ✅ implemented · 🚧 partial · ❌ planned
 
@@ -30,7 +30,7 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 | Matrix Market `load` / `save` (densify-on-load) | ✅ |
 | Inferred dims (`dim N = *`) | ✅ |
 | `seed(source, value)` source vectors (auto-size to loaded graph) | ✅ |
-| Multi-source seed · 1-D vector `.mtx` load · diagonal/`I` preprocessing | ❌ |
+| Multi-source seed · 1-D / N-D load (today `load` must be 2-D) · diagonal/`I` preprocessing | ❌ |
 | Sparse tensor storage + sparse compute (CSR/CSC/COO) | ❌ |
 | Non-`.mtx` formats · EDGE-native input CLI | ❌ |
 | **Visualization** | |
@@ -64,6 +64,7 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 - **`seed(source=I, value=V)`** source vectors sized to a loaded graph (unblocks BFS/SSSP on real graphs).
 - **SuiteSparse data:** `data/suitesparse/` (vendored karate/lesmis/GD98_a) + `tools/fetch_suitesparse.py` (manifest + sha256).
 - **Visualization:** `tools/edgecc_viz.py` with six layouts; non-spring layouts fall back to spring on failure.
+- **Robustness (DFT gaps, batch A):** negative literals; lexer errors fail the compile; no silent caps (any number of `run()` inputs, up to 64 Einsums, hard errors past the other limits); argv/`-h`/`file_inputs` share `init` order; `load` targets rank-checked (2-D); warning for read-but-never-initialized tensors.
 - **Tooling/tests:** CLI flags; VS Code extension (Tier 1); 14 ctest targets (unit, e2e, negative, iterative, trace, viz, fetch-helper, reference, fuzz, reserved-names); `tools/premerge.sh` gate (normal + UBSan suites, long mutation fuzz) required before merging.
 
 ### Partial 🚧

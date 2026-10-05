@@ -1,0 +1,22 @@
+// More than 8 run() inputs must all survive codegen (DFT gap G4).
+dim N = 2;
+tensor A0[R=N] : float, empty = 0.0;
+tensor A1[R=N] : float, empty = 0.0;
+tensor A2[R=N] : float, empty = 0.0;
+tensor A3[R=N] : float, empty = 0.0;
+tensor A4[R=N] : float, empty = 0.0;
+tensor A5[R=N] : float, empty = 0.0;
+tensor A6[R=N] : float, empty = 0.0;
+tensor A7[R=N] : float, empty = 0.0;
+tensor A8[R=N] : float, empty = 0.0;
+tensor Z[R=N] : float, empty = 0.0;
+init A0 = [1.0, 2.0];
+A1[i] = A0[i] . A0[i] :: map(add, intersect) reduce(add, union);
+A2[i] = A1[i] . A0[i] :: map(add, intersect) reduce(add, union);
+A3[i] = A2[i] . A0[i] :: map(add, intersect) reduce(add, union);
+A4[i] = A3[i] . A0[i] :: map(add, intersect) reduce(add, union);
+A5[i] = A4[i] . A0[i] :: map(add, intersect) reduce(add, union);
+A6[i] = A5[i] . A0[i] :: map(add, intersect) reduce(add, union);
+A7[i] = A6[i] . A0[i] :: map(add, intersect) reduce(add, union);
+A8[i] = A7[i] . A0[i] :: map(add, intersect) reduce(add, union);
+Z[i] = A8[i] . A0[i] :: map(add, intersect) reduce(add, union);

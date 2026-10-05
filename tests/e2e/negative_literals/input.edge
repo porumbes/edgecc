@@ -1,0 +1,8 @@
+// Negative literals keep their sign (G1): floats, ints, and -inf.
+dim N = 3;
+tensor A[R=N] : float, empty = 0.0;
+tensor B[R=N] : float, empty = 0.0;
+tensor Z[R=N] : float, empty = 0.0;
+init A = [1.0, -2.0, -0.5];
+init B = [-inf, -3, 4.0];
+Z[i] = A[i] . B[i] :: map(add, intersect) reduce(add, union);

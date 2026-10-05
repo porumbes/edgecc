@@ -1,0 +1,1 @@
+rank offset on 'A' is only allowed on its generational rank
