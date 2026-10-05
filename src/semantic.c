@@ -27,6 +27,26 @@ static void add_error(SemanticResult *res, const char *fmt, ...) {
     res->errors[res->error_count++] = buf;
 }
 
+/* Record a warning (kept for tests) and print it to stderr. */
+static void add_warning(SemanticResult *res, const char *fmt, ...) {
+    if (res->warning_count >= res->warning_capacity) {
+        int new_cap = res->warning_capacity == 0 ? 4 : res->warning_capacity * 2;
+        res->warnings = realloc(res->warnings, sizeof(char *) * new_cap);
+        res->warning_capacity = new_cap;
+    }
+    va_list args;
+    va_start(args, fmt);
+    va_list args2;
+    va_copy(args2, args);
+    int len = vsnprintf(NULL, 0, fmt, args2);
+    va_end(args2);
+    char *buf = malloc(len + 1);
+    vsnprintf(buf, len + 1, fmt, args);
+    va_end(args);
+    res->warnings[res->warning_count++] = buf;
+    fprintf(stderr, "warning: %s\n", buf);
+}
+
 /* ---- Reserved identifiers ----
  * Dim names, tensor names, and rank variables are emitted verbatim into the
  * generated Python, so they must not collide with Python keywords, the
@@ -752,6 +772,51 @@ static void analyze_einsum(SemanticResult *res, AstNode *node, int eidx) {
        before a later Einsum reads it;
    (2) a cross-generational tensor read at i+1 must already be written at i+1 by
        an earlier Einsum (next-reads-next). */
+/* Collect an Einsum statement's operand refs and output name; 0 if not an Einsum. */
+static int einsum_operands(AstNode *stmt, TensorRef *ins[3], const char **out_name) {
+    if (stmt->type == NODE_EINSUM) {
+        ins[0] = &stmt->data.einsum.input1; ins[1] = &stmt->data.einsum.input2;
+        *out_name = stmt->data.einsum.output.tensor_name;
+        return 2;
+    }
+    if (stmt->type == NODE_EINSUM_FUSED) {
+        ins[0] = &stmt->data.einsum_fused.inner1;
+        ins[1] = &stmt->data.einsum_fused.inner2;
+        ins[2] = &stmt->data.einsum_fused.outer;
+        *out_name = stmt->data.einsum_fused.output.tensor_name;
+        return 3;
+    }
+    return 0;
+}
+
+/* A tensor that an Einsum reads but that has no `init` and is never written
+   becomes a run() input that __main__ fills with its empty value. That is
+   legal (a driver may supply it), but is usually a typo or a missing init. */
+static void warn_uninitialized_reads(SemanticResult *res, AstNode *program) {
+    SymbolTable *st = res->symtab;
+    ProgramData *pd = &program->data.program;
+    const char *warned[MAX_TENSORS]; int nwarned = 0;
+    for (int i = 0; i < pd->count; i++) {
+        TensorRef *ins[3]; const char *onm;
+        int nins = einsum_operands(pd->statements[i], ins, &onm);
+        for (int k = 0; k < nins; k++) {
+            const char *nm = ins[k]->tensor_name;
+            TensorEntry *te = symtab_find_tensor(st, nm);
+            if (te == NULL || te->has_init) continue;
+            int written = 0;
+            for (int j = 0; j < pd->count && !written; j++) {
+                TensorRef *unused[3]; const char *wn;
+                if (einsum_operands(pd->statements[j], unused, &wn) && strcmp(wn, nm) == 0)
+                    written = 1;
+            }
+            if (written || name_present((char *const *)warned, nwarned, nm)) continue;
+            if (nwarned < MAX_TENSORS) warned[nwarned++] = nm;
+            add_warning(res, "tensor '%s' is read but never initialized or written; "
+                             "__main__ will pass it as empty", nm);
+        }
+    }
+}
+
 static void validate_cascade_ordering(SemanticResult *res, AstNode *program) {
     SymbolTable *st = res->symtab;
     if (!st->is_iterative) return;
@@ -1019,6 +1084,7 @@ SemanticResult semantic_analyze(AstNode *program) {
 
     validate_cascade_ordering(&res, program);
     resolve_stop(&res, program);
+    warn_uninitialized_reads(&res, program);
 
     /* Stop-clause presence and target checks live in resolve_stop above. */
     SymbolTable *st = res.symtab;
@@ -1150,6 +1216,11 @@ void semantic_result_free(SemanticResult *res) {
         free(res->errors[i]);
     }
     free(res->errors);
+    for (int i = 0; i < res->warning_count; i++) free(res->warnings[i]);
+    free(res->warnings);
+    res->warnings = NULL;
+    res->warning_count = 0;
+    res->warning_capacity = 0;
     free(res->symtab);
     res->errors = NULL;
     res->symtab = NULL;

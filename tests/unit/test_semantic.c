@@ -711,6 +711,51 @@ TEST(test_semantic_stop_equal_undeclared_reports_once) {
     semantic_result_free(&res); ast_free(ast);
 }
 
+TEST(test_semantic_warns_uninitialized_read) {
+    /* A is read, has no init, and no Einsum writes it: warn (DFT gap G10). */
+    SemanticResult r = analyze_source(
+        "dim N = 2;\n"
+        "tensor A[R=N] : float, empty = 0.0;\n"
+        "tensor Z[R=N] : float, empty = 0.0;\n"
+        "Z[i] = A[i] . A[i] :: map(mul, intersect) reduce(add, union);\n");
+    ASSERT_INT_EQ(0, r.error_count);
+    ASSERT_INT_EQ(1, r.warning_count);
+    ASSERT_TRUE(strstr(r.warnings[0], "tensor 'A' is read but never initialized or written") != NULL);
+    semantic_result_free(&r);
+}
+
+TEST(test_semantic_no_warning_when_initialized_or_written) {
+    /* A has an init; B is written by an earlier Einsum before being read. */
+    SemanticResult r = analyze_source(
+        "dim N = 2;\n"
+        "tensor A[R=N] : float, empty = 0.0;\n"
+        "tensor B[R=N] : float, empty = 0.0;\n"
+        "tensor Z[R=N] : float, empty = 0.0;\n"
+        "init A = [1.0, 2.0];\n"
+        "B[i] = A[i] . A[i] :: map(mul, intersect) reduce(add, union);\n"
+        "Z[i] = B[i] . A[i] :: map(add, intersect) reduce(add, union);\n");
+    ASSERT_INT_EQ(0, r.error_count);
+    ASSERT_INT_EQ(0, r.warning_count);
+    semantic_result_free(&r);
+}
+
+TEST(test_semantic_warns_uninitialized_fused_operand) {
+    /* The outer operand C of a fused Einsum is never initialized. */
+    SemanticResult r = analyze_source(
+        "dim N = 2;\n"
+        "tensor A[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor X[R=N] : float, empty = 0.0;\n"
+        "tensor C[R=N] : float, empty = 0.0;\n"
+        "tensor Z[R=N] : float, empty = 0.0;\n"
+        "init A = [[1.0, 0.0], [0.0, 1.0]];\n"
+        "init X = [1.0, 2.0];\n"
+        "Z[d] = (A[s,d] .1 X[s]) .2 C[d] :: map.1(mul, intersect) reduce.1(add, union) map.2(add, union);\n");
+    ASSERT_INT_EQ(0, r.error_count);
+    ASSERT_INT_EQ(1, r.warning_count);
+    ASSERT_TRUE(strstr(r.warnings[0], "tensor 'C'") != NULL);
+    semantic_result_free(&r);
+}
+
 int main(void) {
     RUN_TEST(test_valid_gemm);
     RUN_TEST(test_semantic_stop_equal_undeclared_reports_once);
@@ -759,5 +804,8 @@ int main(void) {
     RUN_TEST(test_semantic_fused_generational);
     RUN_TEST(test_semantic_gen_rank_var_not_name_checked);
     RUN_TEST(test_semantic_gen_buffer_names_are_free);
+    RUN_TEST(test_semantic_warns_uninitialized_read);
+    RUN_TEST(test_semantic_no_warning_when_initialized_or_written);
+    RUN_TEST(test_semantic_warns_uninitialized_fused_operand);
     return test_report();
 }

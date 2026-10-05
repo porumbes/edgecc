@@ -81,6 +81,9 @@ typedef struct {
     int error_count;
     char **errors;
     int error_capacity;
+    int warning_count;   /* warnings are also printed to stderr as they are found */
+    char **warnings;
+    int warning_capacity;
     SymbolTable *symtab;
 } SemanticResult;
 
