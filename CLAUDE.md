@@ -98,7 +98,10 @@ Z[m,n] = A[k,m] . B[k,n] :: map(mul, intersect) reduce(add, union);
 ```
 
 Numeric literals may be negative (`-2.0`, `-7`, `-inf`). Any lexer error (an
-unexpected character) fails the compile with exit 1 and no output file.
+unexpected character) fails the compile with exit 1 and no output file. A
+`dim` size must be positive, a tensor may have at most one `init`, and a rank
+offset (`i+1`) is only allowed on a tensor's generational rank (one per
+reference, never negative).
 
 ### Generational (iterative) ranks
 
