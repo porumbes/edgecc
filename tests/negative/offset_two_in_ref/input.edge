@@ -1,0 +1,8 @@
+// Two offsets in one reference: the parser kept only the last one.
+dim N = 4;
+tensor G[R=N, C=N] : float, empty = 0.0;
+tensor F[gen I, R=N] : float, empty = 0.0;
+init G = [[0,1,0,0],[0,0,1,0],[0,0,0,1],[0,0,0,0]];
+init F = [1.0, 0.0, 0.0, 0.0];
+F[i+1, d] = G[s,d] . F[i+1, s+1] :: map(mul, intersect) reduce(max, union);
+stop: stable(F);

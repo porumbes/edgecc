@@ -196,6 +196,8 @@ static void analyze_dim_decl(SemanticResult *res, AstNode *node) {
         add_error(res, "too many dims (max %d)", MAX_DIMS);
         return;
     }
+    if (!d->is_inferred && d->size <= 0)
+        add_error(res, "dim '%s' must be positive, got %d", d->name, d->size);
     st->dims[st->num_dims].name = d->name;
     st->dims[st->num_dims].size = d->size;
     st->dims[st->num_dims].is_inferred = d->is_inferred;
@@ -308,6 +310,10 @@ static void analyze_init(SemanticResult *res, AstNode *node) {
     TensorEntry *te = symtab_find_tensor(st, d->tensor_name);
     if (te == NULL) {
         add_error(res, "init references undeclared tensor '%s'", d->tensor_name);
+        return;
+    }
+    if (te->has_init) {
+        add_error(res, "duplicate init for tensor '%s'", d->tensor_name);
         return;
     }
     te->has_init = 1;
@@ -447,7 +453,7 @@ static void analyze_einsum_fused(SemanticResult *res, AstNode *node, int eidx) {
                         if (strcmp(st->intermediates[m], out_te->name) == 0) seen = 1;
                     if (!seen && st->num_intermediates < MAX_TENSORS)
                         st->intermediates[st->num_intermediates++] = out_te->name;
-                } else {
+                } else if (eff_off > 1) {
                     add_error(res, "generational tensor '%s' written at unsupported offset +%d (only i and i+1 are allowed)", out_te->name, eff_off);
                 }
             }
@@ -647,7 +653,7 @@ static void analyze_einsum(SemanticResult *res, AstNode *node, int eidx) {
                         if (strcmp(st->intermediates[m], out_te->name) == 0) seen = 1;
                     if (!seen && st->num_intermediates < MAX_TENSORS)
                         st->intermediates[st->num_intermediates++] = out_te->name;
-                } else {
+                } else if (eff_off > 1) {
                     add_error(res,
                         "generational tensor '%s' written at unsupported offset +%d "
                         "(only i and i+1 are allowed)", out_te->name, eff_off);
@@ -772,21 +778,48 @@ static void analyze_einsum(SemanticResult *res, AstNode *node, int eidx) {
        before a later Einsum reads it;
    (2) a cross-generational tensor read at i+1 must already be written at i+1 by
        an earlier Einsum (next-reads-next). */
-/* Collect an Einsum statement's operand refs and output name; 0 if not an Einsum. */
-static int einsum_operands(AstNode *stmt, TensorRef *ins[3], const char **out_name) {
+/* Collect an Einsum statement's operand refs and output ref; 0 if not an Einsum. */
+static int einsum_operands(AstNode *stmt, TensorRef *ins[3], TensorRef **out) {
     if (stmt->type == NODE_EINSUM) {
         ins[0] = &stmt->data.einsum.input1; ins[1] = &stmt->data.einsum.input2;
-        *out_name = stmt->data.einsum.output.tensor_name;
+        *out = &stmt->data.einsum.output;
         return 2;
     }
     if (stmt->type == NODE_EINSUM_FUSED) {
         ins[0] = &stmt->data.einsum_fused.inner1;
         ins[1] = &stmt->data.einsum_fused.inner2;
         ins[2] = &stmt->data.einsum_fused.outer;
-        *out_name = stmt->data.einsum_fused.output.tensor_name;
+        *out = &stmt->data.einsum_fused.output;
         return 3;
     }
     return 0;
+}
+
+/* A `var+N` offset is only meaningful on a tensor's generational rank, and N
+   must be non-negative (i or i+1; larger offsets are rejected per Einsum).
+   Offsets anywhere else used to be silently ignored. A generational output
+   written with an offset on the wrong axis is reported by the per-Einsum check. */
+static void validate_rank_offsets(SemanticResult *res, AstNode *program) {
+    ProgramData *pd = &program->data.program;
+    for (int i = 0; i < pd->count; i++) {
+        TensorRef *refs[4]; TensorRef *out;
+        int n = einsum_operands(pd->statements[i], refs, &out);
+        if (n == 0) continue;
+        refs[n] = out;
+        for (int k = 0; k <= n; k++) {
+            TensorRef *r = refs[k];
+            if (r->gen_axis < 0) continue;
+            TensorEntry *te = symtab_find_tensor(res->symtab, r->tensor_name);
+            if (te == NULL) continue;
+            if (r->gen_offset < 0) {
+                add_error(res, "negative rank offset on '%s' (only i and i+1 are allowed)",
+                          r->tensor_name);
+            } else if (r->gen_axis != te->gen_axis && !(r == out && te->gen_axis >= 0)) {
+                add_error(res, "rank offset on '%s' is only allowed on its generational rank",
+                          r->tensor_name);
+            }
+        }
+    }
 }
 
 /* A tensor that an Einsum reads but that has no `init` and is never written
@@ -797,16 +830,16 @@ static void warn_uninitialized_reads(SemanticResult *res, AstNode *program) {
     ProgramData *pd = &program->data.program;
     const char *warned[MAX_TENSORS]; int nwarned = 0;
     for (int i = 0; i < pd->count; i++) {
-        TensorRef *ins[3]; const char *onm;
-        int nins = einsum_operands(pd->statements[i], ins, &onm);
+        TensorRef *ins[3]; TensorRef *out;
+        int nins = einsum_operands(pd->statements[i], ins, &out);
         for (int k = 0; k < nins; k++) {
             const char *nm = ins[k]->tensor_name;
             TensorEntry *te = symtab_find_tensor(st, nm);
             if (te == NULL || te->has_init) continue;
             int written = 0;
             for (int j = 0; j < pd->count && !written; j++) {
-                TensorRef *unused[3]; const char *wn;
-                if (einsum_operands(pd->statements[j], unused, &wn) && strcmp(wn, nm) == 0)
+                TensorRef *unused[3]; TensorRef *w;
+                if (einsum_operands(pd->statements[j], unused, &w) && strcmp(w->tensor_name, nm) == 0)
                     written = 1;
             }
             if (written || name_present((char *const *)warned, nwarned, nm)) continue;
@@ -1081,7 +1114,11 @@ SemanticResult semantic_analyze(AstNode *program) {
 
     if (einsum_index == 0)
         add_error(&res, "program has no Einsum statement (nothing to compute)");
+    /* The whole-program passes below keep per-Einsum buffers sized for at most
+       MAX_EINSUMS statements; the "too many Einsums" error is already recorded. */
+    if (einsum_index > MAX_EINSUMS) return res;
 
+    validate_rank_offsets(&res, program);
     validate_cascade_ordering(&res, program);
     resolve_stop(&res, program);
     warn_uninitialized_reads(&res, program);

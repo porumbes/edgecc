@@ -1,0 +1,6 @@
+// i+-1 must not silently compile as i.
+dim N = 4;
+tensor F[gen I, R=N] : float, empty = 0.0;
+init F = [1.0, 0.0, 0.0, 0.0];
+F[i+1, d] = F[i+-1, d] . F[i, d] :: map(max, union) reduce(max, union);
+stop: stable(F);

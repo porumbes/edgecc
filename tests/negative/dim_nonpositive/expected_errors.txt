@@ -1,0 +1,2 @@
+dim 'N' must be positive, got -4
+dim 'M' must be positive, got 0

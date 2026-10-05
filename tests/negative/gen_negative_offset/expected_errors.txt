@@ -1,0 +1,1 @@
+negative rank offset on 'F' (only i and i+1 are allowed)

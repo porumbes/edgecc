@@ -1,0 +1,7 @@
+// Two inits for one tensor: ambiguous, and overflowed codegen's load list.
+dim N = *;
+tensor A[R=N, C=N] : float, empty = 0.0;
+tensor Z[R=N] : float, empty = 0.0;
+init A = load("a.mtx");
+init A = load("b.mtx");
+Z[i] = A[i,k] . A[k,i] :: map(mul, intersect) reduce(add, union);
