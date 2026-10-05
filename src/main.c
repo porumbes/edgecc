@@ -9,6 +9,7 @@
 extern int yyparse(void);
 extern AstNode *parse_result;
 extern FILE *yyin;
+extern int lex_error_count;
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
@@ -44,6 +45,12 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     fclose(in);
+
+    if (lex_error_count > 0) {
+        fprintf(stderr, "error: %d lexer error(s)\n", lex_error_count);
+        if (parse_result) ast_free(parse_result);
+        return 1;
+    }
 
     if (!parse_result) {
         fprintf(stderr, "error: no AST produced\n");

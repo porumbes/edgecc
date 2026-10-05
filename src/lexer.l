@@ -2,6 +2,9 @@
 #include "ast.h"
 #include "parser.tab.h"
 #include <string.h>
+
+/* Count of unexpected characters seen; main.c fails the compile if nonzero. */
+int lex_error_count = 0;
 %}
 
 %option noyywrap
@@ -32,14 +35,15 @@
 "true"              { yylval.int_val = 1; return TOK_BOOL_LIT; }
 "false"             { yylval.int_val = 0; return TOK_BOOL_LIT; }
 "inf"               { yylval.float_val = 1.0/0.0; return TOK_FLOAT_LIT; }
+"-inf"              { yylval.float_val = -1.0/0.0; return TOK_FLOAT_LIT; }
 
 "->"                { return TOK_ARROW; }
 "::"                { return TOK_DOUBLE_COLON; }
 "||"                { return TOK_OROR; }
 "=="                { return TOK_EQEQ; }
 
-[0-9]+\.[0-9]+      { yylval.float_val = atof(yytext); return TOK_FLOAT_LIT; }
-[0-9]+              { yylval.int_val = atoi(yytext); return TOK_INT_LIT; }
+-?[0-9]+\.[0-9]+    { yylval.float_val = atof(yytext); return TOK_FLOAT_LIT; }
+-?[0-9]+            { yylval.int_val = atoi(yytext); return TOK_INT_LIT; }
 
 \"[^\"\n]*\"        {
                       int n = (int)strlen(yytext);
@@ -53,6 +57,6 @@
 
 [=\.\,\;\:\[\]\(\)+*!]  { return yytext[0]; }
 
-.                   { fprintf(stderr, "lexer error: unexpected character '%c'\n", yytext[0]); }
+.                   { fprintf(stderr, "lexer error: unexpected character '%c'\n", yytext[0]); lex_error_count++; }
 
 %%
