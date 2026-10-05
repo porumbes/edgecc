@@ -7,7 +7,8 @@
 #define MAX_DIMS 64
 #define MAX_TENSORS 64
 #define MAX_INDICES 16
-#define MAX_EINSUMS 16
+#define MAX_EINSUMS 64
+#define MAX_GEN_TENSORS 8   /* per kind: cross-generational, intermediate */
 
 typedef struct {
     char *name;

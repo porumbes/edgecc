@@ -104,14 +104,14 @@ typedef struct {
 } IRSave;
 
 typedef struct {
-    IRGenAlloc cross_gens[8];         /* cross-generational tensors (written at i+1) */
+    IRGenAlloc cross_gens[MAX_GEN_TENSORS];    /* cross-generational tensors (written at i+1) */
     int num_cross_gens;
     char *watch;                      /* tensor named by the stop predicate (owned) */
     int stop_kind;                    /* STOP_EQUAL or STOP_OCCUPANCY */
     int stop_gen_a;                   /* offset of the (left) predicate reference: 0 = i, 1 = i+1 */
     int stop_gen_b;                   /* STOP_EQUAL only */
     double watch_empty;               /* empty value of the watched tensor (occupancy) */
-    IRGenAlloc intermediates[8];      /* intra-generation intermediates (written at i) */
+    IRGenAlloc intermediates[MAX_GEN_TENSORS]; /* intra-generation intermediates (written at i) */
     int num_intermediates;
     int max_gen;                      /* safety iteration cap */
 } IRGenLoop;
@@ -128,8 +128,8 @@ typedef struct {
     int a1_has_reduce; OperatorType reduce1_op; MergeOp reduce1_merge; double reduce1_identity;
     OperatorType map2_op; MergeOp map2_merge;
     int a2_has_reduce; OperatorType reduce2_op; MergeOp reduce2_merge; double reduce2_identity;
-    char *free_names[8]; int free_sizes[8]; char *free_dimnames[8]; int num_free;
-    char *red_names[8];  int red_sizes[8];  char *red_dimnames[8];  int num_red;
+    char *free_names[MAX_INDICES]; int free_sizes[MAX_INDICES]; char *free_dimnames[MAX_INDICES]; int num_free;
+    char *red_names[MAX_INDICES];  int red_sizes[MAX_INDICES];  char *red_dimnames[MAX_INDICES];  int num_red;
     int reduce_on_action;   /* 1 if action 1 reduces, 2 if action 2 reduces, 0 if neither */
 } IRFused;
 

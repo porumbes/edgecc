@@ -258,8 +258,9 @@ static void emit_merge_guard(CodeBuf *cb, MergeOp m,
 }
 
 typedef struct {
-    char *names[8];
+    char **names;   /* grows on demand; no cap on the number of inputs */
     int count;
+    int cap;
 } TensorNameList;
 
 /* Collect distinct input tensor names (those appearing in IR_LOAD, in load order).
@@ -268,11 +269,17 @@ static void add_input_name(TensorNameList *inputs, const char *n) {
     if (!n) return;
     for (int j = 0; j < inputs->count; j++)
         if (strcmp(inputs->names[j], n) == 0) return;
-    if (inputs->count < 8) inputs->names[inputs->count++] = strdup(n);
+    if (inputs->count == inputs->cap) {
+        inputs->cap = inputs->cap ? 2 * inputs->cap : 8;
+        inputs->names = realloc(inputs->names, (size_t)inputs->cap * sizeof(char *));
+    }
+    inputs->names[inputs->count++] = strdup(n);
 }
 
 static void collect_io(IRProgram *ir, TensorNameList *inputs, char **output) {
+    inputs->names = NULL;
     inputs->count = 0;
+    inputs->cap = 0;
     *output = NULL;
     for (int i = 0; i < ir->count; i++) {
         IRInstr *instr = &ir->instrs[i];
@@ -294,7 +301,10 @@ static void collect_io(IRProgram *ir, TensorNameList *inputs, char **output) {
 
 static void free_tensor_name_list(TensorNameList *l) {
     for (int i = 0; i < l->count; i++) free(l->names[i]);
+    free(l->names);
+    l->names = NULL;
     l->count = 0;
+    l->cap = 0;
 }
 
 /* Format an operator application as a Python expression into `out`.
@@ -895,20 +905,20 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
 
     /* Detect generational mode and capture the gen-loop metadata. */
     int iterative = 0;
-    const char *cross_gens[8]; int num_cross_gens = 0;
-    double cross_gen_empty[8];
+    const char *cross_gens[MAX_GEN_TENSORS]; int num_cross_gens = 0;
+    double cross_gen_empty[MAX_GEN_TENSORS];
     const char *watch = NULL;
     int stop_kind = STOP_EQUAL, stop_gen_a = 1, stop_gen_b = 0;
     double watch_empty = 0.0;
-    const char *intermediates[8];
-    double intermediate_empty[8];
+    const char *intermediates[MAX_GEN_TENSORS];
+    double intermediate_empty[MAX_GEN_TENSORS];
     int num_intermediates = 0;
     for (int i = 0; i < ir->count; i++) {
         if (ir->instrs[i].type == IR_GEN_LOOP_BEGIN) {
             IRGenLoop *gl = &ir->instrs[i].data.gen_loop;
             iterative = 1;
             num_cross_gens = gl->num_cross_gens;
-            for (int j = 0; j < num_cross_gens && j < 8; j++) {
+            for (int j = 0; j < num_cross_gens; j++) {
                 cross_gens[j] = gl->cross_gens[j].name;
                 cross_gen_empty[j] = gl->cross_gens[j].empty_val;
             }
@@ -918,7 +928,7 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
             stop_gen_b  = gl->stop_gen_b;
             watch_empty = gl->watch_empty;
             num_intermediates = gl->num_intermediates;
-            for (int j = 0; j < num_intermediates && j < 8; j++) {
+            for (int j = 0; j < num_intermediates; j++) {
                 intermediates[j] = gl->intermediates[j].name;
                 intermediate_empty[j] = gl->intermediates[j].empty_val;
             }
@@ -947,15 +957,14 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
     /* Cascade I/O: intermediates are neither parameters nor the return value;
        the returned tensor is the cross-generational one. */
     if (iterative) {
-        TensorNameList filtered;
-        filtered.count = 0;
+        int kept = 0;
         for (int i = 0; i < inputs.count; i++) {
             if (name_in_list(inputs.names[i], intermediates, num_intermediates)) {
                 free(inputs.names[i]); continue;
             }
-            filtered.names[filtered.count++] = inputs.names[i];
+            inputs.names[kept++] = inputs.names[i];
         }
-        inputs = filtered;
+        inputs.count = kept;
         if (watch) {
             if (output) free(output);
             output = strdup(watch);
@@ -1173,7 +1182,8 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
     cb.indent = 1;
 
     /* Map input index -> load path (NULL if literal). */
-    const char *load_path_of[8] = {0};
+    const char **load_path_of = calloc(inputs.count ? (size_t)inputs.count : 1,
+                                       sizeof(const char *));
     for (int i = 0; i < ir->count; i++) {
         if (ir->instrs[i].type == IR_TENSOR_INIT &&
             ir->instrs[i].data.tensor_init.is_load) {
@@ -1343,6 +1353,7 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
                    ir->instrs[i].data.save.path);
     }
 
+    free(load_path_of);
     free(output);
     free_tensor_name_list(&inputs);
     return cb.buf;

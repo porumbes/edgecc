@@ -1,0 +1,11 @@
+// A fused action-1 reduce over 10 indices (more than the old IR cap of 8; DFT gap G4).
+// sum(X) * sum(Y) = 32 * 32 = 1024, then scaled by C.
+dim T = 2;
+tensor X[A=T, B=T, C=T, D=T, E=T] : float, empty = 0.0;
+tensor Y[F=T, G=T, H=T, J=T, K=T] : float, empty = 0.0;
+tensor C[R=T] : float, empty = 0.0;
+tensor Z[R=T] : float, empty = 0.0;
+init X = [[[[[1.0, 1.0], [1.0, 1.0]], [[1.0, 1.0], [1.0, 1.0]]], [[[1.0, 1.0], [1.0, 1.0]], [[1.0, 1.0], [1.0, 1.0]]]], [[[[1.0, 1.0], [1.0, 1.0]], [[1.0, 1.0], [1.0, 1.0]]], [[[1.0, 1.0], [1.0, 1.0]], [[1.0, 1.0], [1.0, 1.0]]]]];
+init Y = [[[[[1.0, 1.0], [1.0, 1.0]], [[1.0, 1.0], [1.0, 1.0]]], [[[1.0, 1.0], [1.0, 1.0]], [[1.0, 1.0], [1.0, 1.0]]]], [[[[1.0, 1.0], [1.0, 1.0]], [[1.0, 1.0], [1.0, 1.0]]], [[[1.0, 1.0], [1.0, 1.0]], [[1.0, 1.0], [1.0, 1.0]]]]];
+init C = [1.0, 2.0];
+Z[z] = (X[a,b,c,d,e] .1 Y[f,g,h,j,k]) .2 C[z] :: map.1(mul, intersect) reduce.1(add, union) map.2(mul, intersect);

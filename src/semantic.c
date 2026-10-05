@@ -982,10 +982,17 @@ SemanticResult semantic_analyze(AstNode *program) {
                 analyze_init(&res, stmt);
                 break;
             case NODE_EINSUM:
-                analyze_einsum(&res, stmt, einsum_index++);
-                break;
             case NODE_EINSUM_FUSED:
-                analyze_einsum_fused(&res, stmt, einsum_index++);
+                if (einsum_index >= MAX_EINSUMS) {
+                    if (einsum_index == MAX_EINSUMS)
+                        add_error(&res, "too many Einsums (max %d)", MAX_EINSUMS);
+                    einsum_index++;
+                    break;
+                }
+                if (stmt->type == NODE_EINSUM)
+                    analyze_einsum(&res, stmt, einsum_index++);
+                else
+                    analyze_einsum_fused(&res, stmt, einsum_index++);
                 break;
             case NODE_STOP:
                 /* Resolved after all Einsums (needs the generational rank variable). */
@@ -1013,6 +1020,11 @@ SemanticResult semantic_analyze(AstNode *program) {
         add_error(&res, "generational program has no cross-generational tensor "
                         "(write one at offset i+1, e.g. F[i+1, ...])");
     }
+    if (st->num_gen_tensors > MAX_GEN_TENSORS)
+        add_error(&res, "too many cross-generational tensors (max %d)", MAX_GEN_TENSORS);
+    if (st->num_intermediates > MAX_GEN_TENSORS)
+        add_error(&res, "too many intermediate tensors in a generational cascade (max %d)",
+                  MAX_GEN_TENSORS);
     /* Every cross-generational tensor needs a generation-0 init. */
     for (int m = 0; m < st->num_gen_tensors; m++) {
         TensorEntry *cg = symtab_find_tensor(st, st->gen_tensors[m]);
