@@ -299,6 +299,27 @@ static void collect_io(IRProgram *ir, TensorNameList *inputs, char **output) {
     }
 }
 
+/* Loaded inputs in `init` statement order: the one order shared by the meta
+   "file_inputs" list, the -h usage string, and positional argv binding.
+   Returns the count; fills names/paths (borrowed) up to the input count. */
+static int collect_file_inputs(IRProgram *ir, TensorNameList *inputs,
+                               const char **names, const char **paths) {
+    int n = 0;
+    for (int i = 0; i < ir->count; i++) {
+        if (ir->instrs[i].type != IR_TENSOR_INIT || !ir->instrs[i].data.tensor_init.is_load)
+            continue;
+        for (int j = 0; j < inputs->count; j++) {
+            if (strcmp(ir->instrs[i].data.tensor_init.name, inputs->names[j]) == 0) {
+                names[n] = inputs->names[j];
+                paths[n] = ir->instrs[i].data.tensor_init.path;
+                n++;
+                break;
+            }
+        }
+    }
+    return n;
+}
+
 static void free_tensor_name_list(TensorNameList *l) {
     for (int i = 0; i < l->count; i++) free(l->names[i]);
     free(l->names);
@@ -984,17 +1005,14 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
     }
     cb_append(&cb, "],\n");
     cb_appendf(&cb, "    \"output\": \"%s\",\n", output ? output : "");
+    size_t fi_cap = inputs.count ? (size_t)inputs.count : 1;
+    const char **file_in_names = calloc(fi_cap, sizeof(const char *));
+    const char **file_in_paths = calloc(fi_cap, sizeof(const char *));
+    int num_file_ins = collect_file_inputs(ir, &inputs, file_in_names, file_in_paths);
     cb_append(&cb, "    \"file_inputs\": [");
-    {
-        int first = 1;
-        for (int i = 0; i < ir->count; i++) {
-            if (ir->instrs[i].type == IR_TENSOR_INIT &&
-                ir->instrs[i].data.tensor_init.is_load) {
-                if (!first) cb_append(&cb, ", ");
-                cb_appendf(&cb, "\"%s\"", ir->instrs[i].data.tensor_init.name);
-                first = 0;
-            }
-        }
+    for (int i = 0; i < num_file_ins; i++) {
+        if (i > 0) cb_append(&cb, ", ");
+        cb_appendf(&cb, "\"%s\"", file_in_names[i]);
     }
     cb_append(&cb, "],\n");
     cb_append(&cb, "}\n\n");
@@ -1233,26 +1251,17 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
         cb.indent++;
         cb_indent(&cb);
         cb_append(&cb, "print(\"usage: <prog> [");
-        {
-            int first = 1;
-            for (int j = 0; j < inputs.count; j++) {
-                if (!load_path_of[j]) continue;
-                if (!first) cb_append(&cb, " ");
-                cb_appendf(&cb, "%s.mtx", inputs.names[j]);
-                first = 0;
-            }
-        }
+        for (int k = 0; k < num_file_ins; k++)
+            cb_appendf(&cb, "%s%s.mtx", k > 0 ? " " : "", file_in_names[k]);
         cb_append(&cb, "]\"); sys.exit(0)\n");
         cb.indent--;
         {
-            int k = 0;
-            for (int j = 0; j < inputs.count; j++) {
-                if (!load_path_of[j]) continue;
+            int k = num_file_ins;
+            for (int j = 0; j < num_file_ins; j++) {
                 cb_indent(&cb);
                 cb_appendf(&cb,
                     "%s = _edgecc_load(_argv[%d]) if len(_argv) > %d else _edgecc_load(\"%s\")\n",
-                    inputs.names[j], k, k, load_path_of[j]);
-                k++;
+                    file_in_names[j], j, j, file_in_paths[j]);
             }
             if (k > 0) {
                 cb_indent(&cb);
@@ -1354,6 +1363,8 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
     }
 
     free(load_path_of);
+    free(file_in_names);
+    free(file_in_paths);
     free(output);
     free_tensor_name_list(&inputs);
     return cb.buf;
