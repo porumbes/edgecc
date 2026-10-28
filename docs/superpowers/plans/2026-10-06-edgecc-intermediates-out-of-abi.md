@@ -1,6 +1,6 @@
 # Intermediates out of the `run()` ABI — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Every tensor an Einsum writes starts empty and is allocated inside `run()`; only tensors that are read but never written are `run()` parameters (DFT gaps G5/G6).
 
