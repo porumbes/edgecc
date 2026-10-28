@@ -263,17 +263,18 @@ typedef struct {
     int cap;
 } TensorNameList;
 
-/* Collect distinct input tensor names (those appearing in IR_LOAD, in load order).
- * Output tensor name is the operand of IR_STORE. Caller-owned. */
-static void add_input_name(TensorNameList *inputs, const char *n) {
+/* Append a copy of tensor name `n` to `list` unless it is already present
+ * (distinct names, first-seen order). Used for both the read and the written
+ * name lists. Caller-owned. */
+static void add_input_name(TensorNameList *list, const char *n) {
     if (!n) return;
-    for (int j = 0; j < inputs->count; j++)
-        if (strcmp(inputs->names[j], n) == 0) return;
-    if (inputs->count == inputs->cap) {
-        inputs->cap = inputs->cap ? 2 * inputs->cap : 8;
-        inputs->names = realloc(inputs->names, (size_t)inputs->cap * sizeof(char *));
+    for (int j = 0; j < list->count; j++)
+        if (strcmp(list->names[j], n) == 0) return;
+    if (list->count == list->cap) {
+        list->cap = list->cap ? 2 * list->cap : 8;
+        list->names = realloc(list->names, (size_t)list->cap * sizeof(char *));
     }
-    inputs->names[inputs->count++] = strdup(n);
+    list->names[list->count++] = strdup(n);
 }
 
 static int name_in_tnl(const TensorNameList *l, const char *name) {

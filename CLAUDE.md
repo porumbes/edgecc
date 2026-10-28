@@ -33,7 +33,7 @@ cd build && ctest --output-on-failure
 
 This runs:
 - **Unit tests** per pipeline stage: `test_lexer`, `test_parser`, `test_semantic`, `test_ir`, `test_codegen`
-- **E2E tests** (`tests/e2e/run_e2e.py`): compiles `.edge` files, runs generated Python, compares stdout against expected output
+- **E2E tests** (`tests/e2e/run_e2e.py`): compiles `.edge` files, runs generated Python, compares stdout against expected output. Optional marker files in a test dir: `needs_scipy` (skip without scipy) and `run_twice` (re-runs `run()` on the same inputs and requires an identical result)
 - **Negative tests** (`tests/negative/run_negative.py`): invalid programs that must produce specific error messages
 - **Iterative E2E tests** (`tests/e2e/iterative/run_iterative.py`): drives a generated kernel in a loop with feedback until a watched tensor stabilizes (e.g., BFS). Requires PyYAML (`pip install pyyaml`); skipped if missing.
 - **Reference tests** (`tests/reference/run_reference.py`, ctest `reference_tests`): kernels in `tests/reference/kernels/` (written with `dim N = *` + `load` + `seed` so one kernel runs on any graph) are run on the vendored SuiteSparse graphs plus seeded random directed weighted graphs and compared against **independent** implementations (scipy.sparse.csgraph / numpy), never against another edgecc form. Add a case to `CASES` for any new semantics with a known graph-algorithm meaning. Skipped without scipy.
@@ -101,7 +101,7 @@ Numeric literals may be negative (`-2.0`, `-7`, `-inf`). Any lexer error (an
 unexpected character) fails the compile with exit 1 and no output file. A
 `dim` size must be positive, a tensor may have at most one `init`, and a rank
 offset (`i+1`) is only allowed on a tensor's generational rank (one per
-reference, never negative). A tensor written by an Einsum may not have an `init` and may not be read before its first write (outputs start empty).
+reference, never negative). A non-generational tensor written by an Einsum may not have an `init`, may not be read before its first write (outputs start empty), and may not be read by an Einsum that writes it (an in-place update needs a generational rank).
 
 ### Generational (iterative) ranks
 
@@ -311,7 +311,7 @@ if __name__ == "__main__":
     print(F1)
 ```
 
-The `if __name__ == "__main__"` block constructs inputs from `init` declarations and prints the output. A tensor that an Einsum reads but that has no `init` and is never written becomes a `run()` input that `__main__` fills with its `empty` value; edgecc prints a warning for it. `run()`'s parameters are exactly the tensors that are read but never written; every tensor an Einsum writes (the returned output and all intermediates) starts empty and is allocated inside `run()` (the paper: "all output tensors are initially empty"), so it may not have an `init` and may not be read before the first Einsum that writes it. Each `run()` call starts from fresh buffers. For a generational program, `run()` returns the watched tensor as a list of generations (`F[0]` is the caller's generation-0 input), and `__main__` prints it. Iterative drivers import the module and call `run()` repeatedly with feedback applied between iterations (see `tests/e2e/iterative/run_iterative.py`).
+The `if __name__ == "__main__"` block constructs inputs from `init` declarations and prints the output. A tensor that an Einsum reads but that has no `init` and is never written becomes a `run()` input that `__main__` fills with its `empty` value; edgecc prints a warning for it. `run()`'s parameters are exactly the tensors that are read but never written; every tensor an Einsum writes (the returned output and all intermediates) starts empty and is allocated inside `run()` (the paper: "all output tensors are initially empty"), so a non-generational written tensor may not have an `init` and may not be read before the first Einsum that writes it (a cross-generational tensor's `init` supplies its generation 0). Each `run()` call starts from fresh buffers. For a generational program, `run()` returns the watched tensor as a list of generations (`F[0]` is the caller's generation-0 input), and `__main__` prints it. Iterative drivers import the module and call `run()` repeatedly with feedback applied between iterations (see `tests/e2e/iterative/run_iterative.py`).
 
 When a program uses `load`/`save`, the module also defines `_edgecc_load`/`_edgecc_save` helpers (scipy, lazily imported), `__edgecc_meta__` gains a `"file_inputs"` list, and inferred dims (`dim N = *`) are derived inside `run()` from the input shapes (e.g. `N = len(G)`) rather than emitted as module constants.
 

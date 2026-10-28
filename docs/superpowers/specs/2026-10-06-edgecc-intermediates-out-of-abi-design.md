@@ -1,7 +1,7 @@
 # edgecc intermediates out of the `run()` ABI — design
 
 **Date:** 2026-10-06
-**Status:** approved in brainstorming (2026-10-04 – 2026-10-06); pending written-spec review
+**Status:** implemented (2026-10-28)
 **Branch:** `feature/intermediates-abi`
 **Origin:** DFT exploration gaps G5 and G6 (`docs/dft/compiler-gaps.md` on
 `dft-exploration`), batch B of the agreed A → B → C order.
@@ -70,6 +70,9 @@ allocated once, both Einsums write into it in source order.
 - **E3: non-generational write in a generational program.** `in a generational
   program every Einsum must write a generational tensor; 'G2' is not (compute it
   in a separate program)`.
+- **E4: self-read (added at final review; see Deviations).** `tensor 'B' is read
+  and written by the same Einsum (use a generational rank)`, for
+  non-generational programs.
 
 **Decision (2026-10-06, user):** E3 rejects rather than (B) recomputing the
 tensor fresh every generation or (C) hoisting loop-invariant Einsums before the
@@ -159,3 +162,5 @@ Test-first throughout (each new test fails on `main` first).
 - Task 1 also reconciled `test_semantic_fused_pull_classification` (a tenth unit-test program, not in the plan's list) the same way as the nine listed: its written tensors no longer carry an `init`.
 - The spec called for a "Python-level check" that `run()` starts from fresh buffers without naming a mechanism; Task 2 added an optional `run_twice` marker file to the e2e harness (`tests/e2e/run_e2e.py`) that calls `run()` twice and compares the results.
 - DFT acceptance (all seven kernel invocations, with the first run without `--direct` as the G6 test) passed against this branch's compiler; no kernel was rejected by E1/E2/E3 and no `[G4 hack]` line appeared.
+- **E4 added after the final whole-branch review.** `tensor 'B' is read and written by the same Einsum (use a generational rank)`, for non-generational programs, whenever any operand of an Einsum (plain or fused, including a `!X` operand) names that Einsum's own output, first write or not. Without it, a later write that reads its own output (`B[i] = A·A;` then `B[d] = B[s] . M[s,d]`) compiled and read elements the same loop had already overwritten (loop-order-dependent results). That bug predates this branch; E1/E2 only caught the first-write case. E4 replaces E2 for a self-read (E2 still reports reads of a tensor first written by a later Einsum). Tests: `tests/negative/self_read_later_write/`, `tests/negative/self_update_nongen/` (now E4 + E1), unit tests in `test_semantic.c`.
+- **E3 is reported once per tensor**, like E1/E2/E4: two Einsums writing the same non-generational tensor in a generational program used to print two identical errors.
