@@ -276,16 +276,26 @@ static void add_input_name(TensorNameList *inputs, const char *n) {
     inputs->names[inputs->count++] = strdup(n);
 }
 
-static void collect_io(IRProgram *ir, TensorNameList *inputs, char **output) {
-    inputs->names = NULL;
-    inputs->count = 0;
-    inputs->cap = 0;
+static int name_in_tnl(const TensorNameList *l, const char *name) {
+    for (int i = 0; i < l->count; i++)
+        if (strcmp(l->names[i], name) == 0) return 1;
+    return 0;
+}
+
+/* Read tensors (IR loads, in load order) go to `inputs`; every tensor an
+   Einsum stores to goes to `written`; the last stored tensor is `output`.
+   Caller frees both lists and the output string. */
+static void collect_io(IRProgram *ir, TensorNameList *inputs, TensorNameList *written,
+                       char **output) {
+    inputs->names = NULL;  inputs->count = 0;  inputs->cap = 0;
+    written->names = NULL; written->count = 0; written->cap = 0;
     *output = NULL;
     for (int i = 0; i < ir->count; i++) {
         IRInstr *instr = &ir->instrs[i];
         if (instr->type == IR_LOAD) {
             add_input_name(inputs, instr->data.load.tensor_name);
         } else if (instr->type == IR_STORE) {
+            add_input_name(written, instr->data.store.tensor_name);
             if (*output) free(*output);
             *output = strdup(instr->data.store.tensor_name);
         } else if (instr->type == IR_FUSED) {
@@ -293,6 +303,7 @@ static void collect_io(IRProgram *ir, TensorNameList *inputs, char **output) {
             add_input_name(inputs, fu->inner1.name);
             add_input_name(inputs, fu->inner2.name);
             add_input_name(inputs, fu->outer.name);
+            add_input_name(written, fu->out_name);
             if (*output) free(*output);
             *output = strdup(fu->out_name);
         }
@@ -920,9 +931,9 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
     cb_append(&cb, "\n");
 
     /* Discover inputs and output */
-    TensorNameList inputs;
+    TensorNameList inputs, written;
     char *output = NULL;
-    collect_io(ir, &inputs, &output);
+    collect_io(ir, &inputs, &written, &output);
 
     /* Detect generational mode and capture the gen-loop metadata. */
     int iterative = 0;
@@ -990,6 +1001,19 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
             if (output) free(output);
             output = strdup(watch);
         }
+    } else {
+        /* Non-generational: a tensor written by an Einsum starts empty inside
+           run() (paper: output tensors are initially empty), so it is never a
+           parameter, even when it is also read. Semantic analysis rejects an
+           init on it and a read before its first write. */
+        int kept = 0;
+        for (int i = 0; i < inputs.count; i++) {
+            if (name_in_tnl(&written, inputs.names[i])) {
+                free(inputs.names[i]); continue;
+            }
+            inputs.names[kept++] = inputs.names[i];
+        }
+        inputs.count = kept;
     }
 
     if (iterative) {
@@ -1049,13 +1073,15 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
                 /* already emitted at module scope */
                 break;
             case IR_TENSOR_ALLOC:
-                /* Output tensor is allocated inside run(); but a generational
-                   tensor is built by the gen loop (from the caller's
-                   generation 0, or empty for an intermediate). */
-                if (output && strcmp(instr->data.tensor_alloc.name, output) == 0 &&
-                    !(iterative &&
-                      (name_in_list(instr->data.tensor_alloc.name, cross_gens, num_cross_gens) ||
-                       name_in_list(instr->data.tensor_alloc.name, intermediates, num_intermediates)))) {
+                /* Every tensor an Einsum writes is allocated (empty) inside
+                   run(); a generational tensor is instead built by the gen loop
+                   (from the caller's generation 0, or empty for an
+                   intermediate). */
+                if ((!iterative && name_in_tnl(&written, instr->data.tensor_alloc.name)) ||
+                    (output && strcmp(instr->data.tensor_alloc.name, output) == 0 &&
+                     !(iterative &&
+                       (name_in_list(instr->data.tensor_alloc.name, cross_gens, num_cross_gens) ||
+                        name_in_list(instr->data.tensor_alloc.name, intermediates, num_intermediates))))) {
                     cb_indent(&cb);
                     cb_appendf(&cb, "%s = ", instr->data.tensor_alloc.name);
                     emit_alloc(&cb, &instr->data.tensor_alloc, ir, i);
@@ -1367,5 +1393,6 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
     free(file_in_paths);
     free(output);
     free_tensor_name_list(&inputs);
+    free_tensor_name_list(&written);
     return cb.buf;
 }

@@ -632,6 +632,64 @@ TEST(test_codegen_file_inputs_init_order) {
     ast_free(ast);
 }
 
+TEST(test_codegen_intermediate_not_a_param) {
+    /* B is written by an Einsum: allocated empty inside run(), not a parameter,
+       and not allocated by __main__ (spec: intermediates out of the run() ABI). */
+    AstNode *ast = parse(
+        "dim N = 2;\n"
+        "tensor A[R=N] : float, empty = 0.0;\n"
+        "tensor B[R=N] : float, empty = 0.0;\n"
+        "tensor Z[R=N] : float, empty = 0.0;\n"
+        "init A = [1.0, 2.0];\n"
+        "B[i] = A[i] . A[i] :: map(mul, intersect) reduce(add, union);\n"
+        "Z[i] = B[i] . A[i] :: map(add, intersect) reduce(add, union);\n"
+    );
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    char *code = codegen_python(ir);
+    ASSERT_NOT_NULL(code);
+    ASSERT_TRUE(strstr(code, "\"inputs\": [\"A\"]") != NULL);
+    ASSERT_TRUE(strstr(code, "def run(A):\n    B = [0.0] * N\n    Z = [0.0] * N\n") != NULL);
+    ASSERT_TRUE(strstr(code, "Z = run(A)") != NULL);
+    char *main_block = strstr(code, "if __name__ == \"__main__\":");
+    ASSERT_NOT_NULL(main_block);
+    ASSERT_TRUE(strstr(main_block, "B = ") == NULL);
+    free(code);
+    ir_free(ir);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
+TEST(test_codegen_fused_intermediate_not_a_param) {
+    /* T is written by a fused Einsum and read by the next one. */
+    AstNode *ast = parse(
+        "dim N = 3;\n"
+        "tensor G[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor F[R=N] : float, empty = 0.0;\n"
+        "tensor P[R=N] : float, empty = 0.0;\n"
+        "tensor T[R=N] : float, empty = 0.0;\n"
+        "tensor Z[R=N] : float, empty = 0.0;\n"
+        "init G = [[0,1,0],[0,0,1],[0,0,0]];\n"
+        "init F = [1.0,0.0,0.0];\n"
+        "init P = [1.0,0.0,0.0];\n"
+        "T[d] = (G[s,d] .1 F[s]) .2 !P[d] "
+        ":: map.1(and,intersect) reduce.1(or,union) map.2(take_left,intersect);\n"
+        "Z[d] = T[d] . F[d] :: map(or, union) reduce(or, union);\n"
+    );
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    char *code = codegen_python(ir);
+    ASSERT_NOT_NULL(code);
+    ASSERT_TRUE(strstr(code, "def run(G, F, P):") != NULL);
+    ASSERT_TRUE(strstr(code, "    T = [0.0] * N\n") != NULL);
+    free(code);
+    ir_free(ir);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
 int main(void) {
     RUN_TEST(test_codegen_fused_push);
     RUN_TEST(test_codegen_fused_pull);
@@ -657,5 +715,7 @@ int main(void) {
     RUN_TEST(test_codegen_occupancy_stop);
     RUN_TEST(test_codegen_fused_generational_indexing);
     RUN_TEST(test_codegen_file_inputs_init_order);
+    RUN_TEST(test_codegen_intermediate_not_a_param);
+    RUN_TEST(test_codegen_fused_intermediate_not_a_param);
     return test_report();
 }
