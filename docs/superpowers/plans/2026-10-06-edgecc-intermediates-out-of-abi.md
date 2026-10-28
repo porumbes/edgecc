@@ -663,7 +663,7 @@ git add CLAUDE.md docs/roadmap.md docs/superpowers
 git commit -m "docs: intermediates out of the run() ABI (batch B) — CLAUDE.md, roadmap, spec deviations, plan ticked"
 ```
 
-- [ ] **Step 6: Merge from the `main` worktree**
+- [x] **Step 6: Merge from the `main` worktree**
 
 ```bash
 cd ../premerge-gate          # .worktrees/premerge-gate has main checked out
@@ -672,6 +672,6 @@ make -C build && ctest --test-dir build 2>&1 | tail -3
 ```
 Expected: `100% tests passed`.
 
-- [ ] **Step 7: Memory and hand-off**
+- [x] **Step 7: Memory and hand-off**
 
 Update the auto-memory `project_resume_state.md` (main's new hash, batch B done, next = batch C multi-output `run()`), and tell the user that `main` moved so the DFT session can merge it, drop `--direct` where it only worked around G6, and retire the `[G4 hack]` in `dft_ref.py`.
