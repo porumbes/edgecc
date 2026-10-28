@@ -762,6 +762,76 @@ TEST(test_semantic_warns_uninitialized_fused_operand) {
     semantic_result_free(&r);
 }
 
+static int count_errors_containing(SemanticResult *r, const char *needle) {
+    int n = 0;
+    for (int i = 0; i < r->error_count; i++)
+        if (strstr(r->errors[i], needle) != NULL) n++;
+    return n;
+}
+
+TEST(test_semantic_self_read_is_e4_not_e2) {
+    /* D is read and written by its only Einsum: E4 (not E2) plus E1 for the init. */
+    SemanticResult r = analyze_source(
+        "dim N = 3;\n"
+        "tensor G[R=N, C=N] : float, empty = inf;\n"
+        "tensor D[R=N] : float, empty = inf;\n"
+        "init G = [[inf, 1.0, inf], [inf, inf, 2.0], [inf, inf, inf]];\n"
+        "init D = [0.0, inf, inf];\n"
+        "D[d] = G[s,d] . D[s] :: map(add, intersect) reduce(min, union);\n");
+    ASSERT_INT_EQ(2, r.error_count);
+    ASSERT_INT_EQ(1, count_errors_containing(&r, "read and written by the same Einsum"));
+    ASSERT_INT_EQ(1, count_errors_containing(&r, "must not have an init"));
+    ASSERT_INT_EQ(0, count_errors_containing(&r, "read before the Einsum"));
+    semantic_result_free(&r);
+}
+
+TEST(test_semantic_self_read_reported_once_per_tensor) {
+    /* B self-read twice in one Einsum and again in a later one: one E4. */
+    SemanticResult r = analyze_source(
+        "dim N = 2;\n"
+        "tensor A[R=N] : float, empty = 0.0;\n"
+        "tensor B[R=N] : float, empty = 0.0;\n"
+        "init A = [1.0, 2.0];\n"
+        "B[i] = A[i] . A[i] :: map(mul, intersect) reduce(add, union);\n"
+        "B[i] = B[i] . B[i] :: map(mul, intersect) reduce(add, union);\n"
+        "B[i] = B[i] . A[i] :: map(mul, intersect) reduce(add, union);\n");
+    ASSERT_INT_EQ(1, r.error_count);
+    ASSERT_INT_EQ(1, count_errors_containing(&r, "tensor 'B' is read and written by the same Einsum"));
+    semantic_result_free(&r);
+}
+
+TEST(test_semantic_self_read_fused_negated_operand) {
+    /* The outer `!B` operand of a fused Einsum names its own output. */
+    SemanticResult r = analyze_source(
+        "dim N = 2;\n"
+        "tensor A[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor X[R=N] : float, empty = 0.0;\n"
+        "tensor B[R=N] : float, empty = 0.0;\n"
+        "init A = [[1.0, 0.0], [0.0, 1.0]];\n"
+        "init X = [1.0, 2.0];\n"
+        "B[d] = (A[s,d] .1 X[s]) .2 !B[d] :: map.1(mul, intersect) reduce.1(add, union) map.2(take_left, intersect);\n");
+    ASSERT_INT_EQ(1, r.error_count);
+    ASSERT_INT_EQ(1, count_errors_containing(&r, "tensor 'B' is read and written by the same Einsum"));
+    semantic_result_free(&r);
+}
+
+TEST(test_semantic_gen_nongen_write_reported_once_per_tensor) {
+    /* Two Einsums write the non-generational G2 in a generational program: one E3. */
+    SemanticResult r = analyze_source(
+        "dim N = 2;\n"
+        "tensor G[R=N, C=N]  : float, empty = 0.0;\n"
+        "tensor G2[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor F[gen I, R=N] : float, empty = 0.0;\n"
+        "init G = [[0,1],[0,0]];\n"
+        "init F = [1.0, 0.0];\n"
+        "G2[s,d] = G[s,k] . G[k,d] :: map(mul, intersect) reduce(add, union);\n"
+        "G2[s,d] = G[s,k] . G[k,d] :: map(mul, intersect) reduce(max, union);\n"
+        "F[i+1, d] = G2[s,d] . F[i, s] :: map(mul, intersect) reduce(max, union);\n"
+        "stop: stable(F);\n");
+    ASSERT_INT_EQ(1, count_errors_containing(&r, "every Einsum must write a generational tensor"));
+    semantic_result_free(&r);
+}
+
 int main(void) {
     RUN_TEST(test_valid_gemm);
     RUN_TEST(test_semantic_stop_equal_undeclared_reports_once);
@@ -813,5 +883,9 @@ int main(void) {
     RUN_TEST(test_semantic_warns_uninitialized_read);
     RUN_TEST(test_semantic_no_warning_when_initialized_or_written);
     RUN_TEST(test_semantic_warns_uninitialized_fused_operand);
+    RUN_TEST(test_semantic_self_read_is_e4_not_e2);
+    RUN_TEST(test_semantic_self_read_reported_once_per_tensor);
+    RUN_TEST(test_semantic_self_read_fused_negated_operand);
+    RUN_TEST(test_semantic_gen_nongen_write_reported_once_per_tensor);
     return test_report();
 }
