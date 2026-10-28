@@ -1,0 +1,1 @@
+tensor 'B' is read and written by the same Einsum (use a generational rank)

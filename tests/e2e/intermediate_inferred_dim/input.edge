@@ -1,0 +1,9 @@
+// dim N = * plus an intermediate: __main__ used to allocate P with N before N
+// existed (G6, NameError). P is now allocated inside run(), after N = len(G).
+dim N = *;
+tensor G[R=N, C=N] : float, empty = 0.0;
+tensor P[R=N, C=N] : float, empty = 0.0;
+tensor Z[R=N, C=N] : float, empty = 0.0;
+init G = load("g.mtx");
+P[r,c] = G[r,k] . G[k,c] :: map(mul, intersect) reduce(add, union);
+Z[r,c] = P[r,k] . G[k,c] :: map(mul, intersect) reduce(add, union);

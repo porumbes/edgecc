@@ -1,0 +1,8 @@
+// A non-generational tensor read and written by the same Einsum: its init was
+// silently discarded (D reset to empty before the read). Use a gen rank instead.
+dim N = 3;
+tensor G[R=N, C=N] : float, empty = inf;
+tensor D[R=N] : float, empty = inf;
+init G = [[inf, 1.0, inf], [inf, inf, 2.0], [inf, inf, inf]];
+init D = [0.0, inf, inf];
+D[d] = G[s,d] . D[s] :: map(add, intersect) reduce(min, union);

@@ -68,6 +68,31 @@ def run_test(test_dir, edgecc_bin):
             print(f"  FAIL {name}: expected '{expected}', got '{actual}'")
             return False
 
+        # Optional repeatability check: a `run_twice` marker re-runs the program's
+        # __main__ in-process (output captured), then calls run() again on the
+        # same input objects and requires the same result, so run() must not
+        # keep state in its arguments.
+        if os.path.exists(os.path.join(test_dir, "run_twice")):
+            snippet = (
+                "import contextlib, io, runpy, sys\n"
+                "path = sys.argv[1]\n"
+                "sys.argv = sys.argv[1:]\n"
+                "with contextlib.redirect_stdout(io.StringIO()):\n"
+                "    g = runpy.run_path(path, run_name='__main__')\n"
+                "m = g['__edgecc_meta__']\n"
+                "first = g[m['output']]\n"
+                "second = g['run'](*[g[n] for n in m['inputs']])\n"
+                "if first != second:\n"
+                "    sys.exit('run() is not repeatable: %r then %r' % (first, second))\n"
+            )
+            result = subprocess.run(
+                [sys.executable, "-c", snippet, tmp_py, *extra_args],
+                capture_output=True, text=True, timeout=20, cwd=test_dir
+            )
+            if result.returncode != 0:
+                print(f"  FAIL {name}: {result.stderr.strip()}")
+                return False
+
         # Round-trip check: re-read a saved .mtx and compare to expected values.
         rt = os.path.join(test_dir, "roundtrip_check")
         if os.path.exists(rt) and HAVE_SCIPY:

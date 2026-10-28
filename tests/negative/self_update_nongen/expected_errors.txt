@@ -1,0 +1,2 @@
+tensor 'D' is read and written by the same Einsum (use a generational rank)
+tensor 'D' is written by an Einsum and must not have an init (output tensors start empty)

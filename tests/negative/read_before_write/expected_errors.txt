@@ -1,0 +1,1 @@
+tensor 'B' is read before the Einsum that writes it
