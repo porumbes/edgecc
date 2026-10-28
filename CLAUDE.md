@@ -75,6 +75,9 @@ sub-pieces (e.g. "full BFS" became C1, C2, `!`, fusion).
    one implementer at a time, each task reviewed for spec compliance, then
    code quality. Bugs found along the way get a failing test before the fix;
    small ones are fixed in place, bigger ones are recorded as future work.
+   Review findings that are not fixed (deferred minors, parked findings, issues
+   a reviewer set aside) go in "Known issues & tech debt" in `docs/roadmap.md`
+   before the merge; the commit that fixes one deletes its entry.
 
 ## Architecture
 

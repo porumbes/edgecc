@@ -65,7 +65,7 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 - **SuiteSparse data:** `data/suitesparse/` (vendored karate/lesmis/GD98_a) + `tools/fetch_suitesparse.py` (manifest + sha256).
 - **Visualization:** `tools/edgecc_viz.py` with six layouts; non-spring layouts fall back to spring on failure.
 - **Robustness (DFT gaps, batch A):** negative literals; lexer errors fail the compile; no silent caps (any number of `run()` inputs, up to 64 Einsums, hard errors past the other limits); argv/`-h`/`file_inputs` share `init` order; `load` targets rank-checked (2-D); warning for read-but-never-initialized tensors.
-- **Intermediates out of the ABI (DFT gaps, batch B):** `run()` takes only read-but-never-written tensors; written tensors start empty inside `run()` (fixes `dim N = *` + intermediate); no `init` on, or read before, a written tensor; non-generational writes rejected in generational programs.
+- **Intermediates out of the ABI (DFT gaps, batch B):** `run()` takes only read-but-never-written tensors; written tensors start empty inside `run()` (fixes `dim N = *` + intermediate); no `init` on, or read before, a written tensor; an Einsum may not read its own non-generational output; non-generational writes rejected in generational programs.
 - **Tooling/tests:** CLI flags; VS Code extension (Tier 1); 14 ctest targets (unit, e2e, negative, iterative, trace, viz, fetch-helper, reference, fuzz, reserved-names); `tools/premerge.sh` gate (normal + UBSan suites, long mutation fuzz) required before merging.
 
 ### Partial 🚧
@@ -78,6 +78,35 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 - **File I/O:** sparse tensor storage + sparse compute (CSR/CSC/COO); non-`.mtx` formats; EDGE-native input-path CLI.
 - **Visualization:** `--active-edges-only` edge filter (highest-value next addition for dense graphs); `arf` layout; within-ring/layer crossing minimization; per-scalar (inner-loop) stepping; interactive scrubbing; animation export (GIF/MP4); contact-sheet/filmstrip; light/print themes; non-generational-kernel viz.
 - **Tooling:** compiler optimizations of any kind; liveness-based reclamation of generational storage (ping-pong); VS Code Tier-2 (context-aware completions); Neovim port.
+
+### Known issues & tech debt
+Open items found in review but not fixed. Add new ones here; delete an entry in the
+commit that fixes it. (Origin in parentheses.)
+
+- **Semantics to settle**
+  - Two Einsums writing the same non-generational tensor accumulate into one buffer
+    (`B = A.A; B = A.A` gives 2·A²). The paper means several Einsums covering different
+    regions of the output; edgecc keeps the old accumulate behaviour for now. (batch B
+    final review)
+  - The self-read rule (E4) matches by tensor name, regardless of index pattern. So an
+    elementwise `B[i] = B[i] . A[i]`, which would be loop-order safe, is rejected too.
+    (batch B final review)
+  - Generational `run()` returns the watched tensor with generation 0 being the caller's
+    own list object (aliasing, not a copy). Mutating the result mutates the caller's
+    input. (batch B final review)
+- **Test gaps**
+  - E1 (no `init` on a written tensor) is only tested with a literal init. `load(...)` and
+    `seed(...)` take the same `has_init` path and were checked by hand only. (batch B)
+  - No e2e test combines an intermediate with `save:` of the returned tensor (needs a
+    `roundtrip_check`); checked by hand only. (batch B)
+  - The e2e `run_twice` check compares results with `!=`, so it would fail on NaN
+    outputs. (batch B)
+- **Code cleanup** (`src/codegen.c`, `src/semantic.c`)
+  - Three linear name-search helpers (`name_in_tnl`, `name_in_list`, the loop inside
+    `add_input_name`); the generational and non-generational input filters repeat the
+    same keep/free compaction loop. (batch B)
+  - The once-per-tensor dedupe arrays for E2/E3/E4 are capped at `MAX_TENSORS`; past the
+    cap a message could repeat (unreachable today). (batch B)
 
 > Design specs and implementation plans for shipped and in-flight features live under
 > `docs/superpowers/specs/` and `docs/superpowers/plans/`.
