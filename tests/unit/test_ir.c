@@ -408,10 +408,11 @@ TEST(test_ir_fused_push_node) {
         "tensor F[R=N] : float, empty = 0.0;\n"
         "tensor G[R=N, C=N] : float, empty = 0.0;\n"
         "tensor P[R=N] : float, empty = 0.0;\n"
+        "tensor Z[R=N] : float, empty = 0.0;\n"
         "init G = [[0,0,0],[0,0,0],[0,0,0]];\n"
         "init F = [1.0,0.0,0.0];\n"
         "init P = [1.0,0.0,0.0];\n"
-        "F[d] = (G[s,d] .1 F[s]) .2 P[d] "
+        "Z[d] = (G[s,d] .1 F[s]) .2 P[d] "
         ":: map.1(and,intersect) reduce.1(or,union) map.2(take_left,intersect);\n");
     SemanticResult sem = semantic_analyze(ast);
     IRProgram *ir = ir_lower(ast, sem.symtab);

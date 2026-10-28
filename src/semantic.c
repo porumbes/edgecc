@@ -850,6 +850,60 @@ static void warn_uninitialized_reads(SemanticResult *res, AstNode *program) {
     }
 }
 
+/* Output tensors start empty (paper, §Initialization): a tensor written by an
+   Einsum is not an input. For non-generational tensors:
+     E1  it may not have an init;
+     E2  it may not be read before the first Einsum that writes it.
+   E3: in a generational program every Einsum writes a generational tensor
+   (hoisting loop-invariant Einsums out of the loop is future work). */
+static int written_by_some_einsum(ProgramData *pd, const char *name) {
+    for (int j = 0; j < pd->count; j++) {
+        TensorRef *unused[3]; TensorRef *w;
+        if (einsum_operands(pd->statements[j], unused, &w) &&
+            strcmp(w->tensor_name, name) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+static void validate_written_tensors(SemanticResult *res, AstNode *program) {
+    SymbolTable *st = res->symtab;
+    ProgramData *pd = &program->data.program;
+    char *seen[MAX_EINSUMS];   int nseen = 0;       /* written so far, source order */
+    char *e2_done[MAX_TENSORS]; int ne2 = 0;        /* E2 reported once per tensor */
+    for (int i = 0; i < pd->count; i++) {
+        TensorRef *ins[3]; TensorRef *out;
+        int nins = einsum_operands(pd->statements[i], ins, &out);
+        if (nins == 0) continue;
+
+        if (!st->is_iterative) {
+            for (int k = 0; k < nins; k++) {
+                char *nm = ins[k]->tensor_name;
+                TensorEntry *te = symtab_find_tensor(st, nm);
+                if (te == NULL || te->gen_axis >= 0) continue;
+                if (name_present(seen, nseen, nm) || name_present(e2_done, ne2, nm)) continue;
+                if (!written_by_some_einsum(pd, nm)) continue;
+                if (ne2 < MAX_TENSORS) e2_done[ne2++] = nm;
+                add_error(res, "tensor '%s' is read before the Einsum that writes it", nm);
+            }
+        }
+
+        TensorEntry *ote = symtab_find_tensor(st, out->tensor_name);
+        if (ote == NULL || ote->gen_axis >= 0) continue;
+        if (st->is_iterative) {
+            add_error(res, "in a generational program every Einsum must write a "
+                           "generational tensor; '%s' is not (compute it in a "
+                           "separate program)", out->tensor_name);
+            continue;
+        }
+        if (name_present(seen, nseen, out->tensor_name)) continue;
+        if (ote->has_init)
+            add_error(res, "tensor '%s' is written by an Einsum and must not have an "
+                           "init (output tensors start empty)", out->tensor_name);
+        if (nseen < MAX_EINSUMS) seen[nseen++] = out->tensor_name;
+    }
+}
+
 static void validate_cascade_ordering(SemanticResult *res, AstNode *program) {
     SymbolTable *st = res->symtab;
     if (!st->is_iterative) return;
@@ -1119,6 +1173,7 @@ SemanticResult semantic_analyze(AstNode *program) {
     if (einsum_index > MAX_EINSUMS) return res;
 
     validate_rank_offsets(&res, program);
+    validate_written_tensors(&res, program);
     validate_cascade_ordering(&res, program);
     resolve_stop(&res, program);
     warn_uninitialized_reads(&res, program);

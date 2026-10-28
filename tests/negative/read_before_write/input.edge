@@ -1,0 +1,8 @@
+// B is read by the first Einsum but only written by the second (was a NameError).
+dim N = 2;
+tensor A[R=N] : float, empty = 0.0;
+tensor B[R=N] : float, empty = 0.0;
+tensor Z[R=N] : float, empty = 0.0;
+init A = [1.0, 2.0];
+Z[i] = B[i] . A[i] :: map(add, intersect) reduce(add, union);
+B[i] = A[i] . A[i] :: map(mul, intersect) reduce(add, union);

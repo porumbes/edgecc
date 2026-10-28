@@ -1,0 +1,1 @@
+tensor 'B' is written by an Einsum and must not have an init (output tensors start empty)

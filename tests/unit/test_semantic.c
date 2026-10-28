@@ -427,9 +427,10 @@ TEST(test_semantic_seed_rank1_ok) {
         "dim N = *;\n"
         "tensor G[R=N, C=N] : float, empty = 0.0;\n"
         "tensor D[R=N]      : float, empty = inf;\n"
+        "tensor Z[R=N]      : float, empty = inf;\n"
         "init G = load(\"g.mtx\");\n"
         "init D = seed(source=0, value=0.0);\n"
-        "D[d] = G[s,d] . D[s] :: map(add, intersect) reduce(min, union);\n"
+        "Z[d] = G[s,d] . D[s] :: map(add, intersect) reduce(min, union);\n"
     );
     SemanticResult sem = semantic_analyze(ast);
     ASSERT_INT_EQ(0, sem.error_count);
@@ -442,9 +443,10 @@ TEST(test_semantic_seed_2d_rejected) {
         "dim N = *;\n"
         "tensor G[R=N, C=N] : float, empty = 0.0;\n"
         "tensor D[R=N, C=N] : float, empty = inf;\n"
+        "tensor Z[R=N, C=N] : float, empty = inf;\n"
         "init G = load(\"g.mtx\");\n"
         "init D = seed(source=0, value=0.0);\n"
-        "D[a,b] = G[a,b] . G[a,b] :: map(add, intersect) reduce(min, union);\n"
+        "Z[a,b] = G[a,b] . G[a,b] :: map(add, intersect) reduce(min, union);\n"
     );
     SemanticResult sem = semantic_analyze(ast);
     ASSERT_TRUE(sem.error_count > 0);
@@ -476,10 +478,11 @@ TEST(test_semantic_fused_push_classification) {
         "tensor F[R=N] : float, empty = 0.0;\n"
         "tensor G[R=N, C=N] : float, empty = 0.0;\n"
         "tensor P[R=N] : float, empty = 0.0;\n"
+        "tensor Z[R=N] : float, empty = 0.0;\n"
         "init G = [[0,0,0],[0,0,0],[0,0,0]];\n"
         "init F = [1.0,0.0,0.0];\n"
         "init P = [1.0,0.0,0.0];\n"
-        "F[d] = (G[s,d] .1 F[s]) .2 P[d] "
+        "Z[d] = (G[s,d] .1 F[s]) .2 P[d] "
         ":: map.1(and,intersect) reduce.1(or,union) map.2(take_left,intersect);\n");
     SemanticResult sem = semantic_analyze(ast);
     ASSERT_INT_EQ(0, sem.error_count);
@@ -499,10 +502,11 @@ TEST(test_semantic_fused_missing_reduce_errors) {
         "tensor F[R=N] : float, empty = 0.0;\n"
         "tensor G[R=N, C=N] : float, empty = 0.0;\n"
         "tensor P[R=N] : float, empty = 0.0;\n"
+        "tensor Z[R=N] : float, empty = 0.0;\n"
         "init G = [[0,0,0],[0,0,0],[0,0,0]];\n"
         "init F = [1.0,0.0,0.0];\n"
         "init P = [1.0,0.0,0.0];\n"
-        "F[d] = (G[s,d] .1 F[s]) .2 P[d] "
+        "Z[d] = (G[s,d] .1 F[s]) .2 P[d] "
         ":: map.1(and,intersect) map.2(take_left,intersect);\n");
     SemanticResult sem = semantic_analyze(ast);
     ASSERT_TRUE(sem.error_count > 0);
@@ -514,10 +518,11 @@ TEST(test_semantic_fused_bad_over_errors) {
         "tensor F[R=N] : float, empty = 0.0;\n"
         "tensor G[R=N, C=N] : float, empty = 0.0;\n"
         "tensor P[R=N] : float, empty = 0.0;\n"
+        "tensor Z[R=N] : float, empty = 0.0;\n"
         "init G = [[0,0,0],[0,0,0],[0,0,0]];\n"
         "init F = [1.0,0.0,0.0];\n"
         "init P = [1.0,0.0,0.0];\n"
-        "F[d] = (G[s,d] .1 F[s]) .2 P[d] "
+        "Z[d] = (G[s,d] .1 F[s]) .2 P[d] "
         ":: map.1(and,intersect) reduce.1(or,union, over=d) map.2(take_left,intersect);\n");
     SemanticResult sem = semantic_analyze(ast);
     ASSERT_TRUE(sem.error_count > 0);
@@ -597,12 +602,13 @@ TEST(test_semantic_fused_pull_classification) {
         "tensor F[R=N] : float, empty = 0.0;\n"
         "tensor G[R=N, C=N] : float, empty = 0.0;\n"
         "tensor P[R=N] : float, empty = 0.0;\n"
+        "tensor Z[R=N] : float, empty = 0.0;\n"
         "init G = [[0,0,0],[0,0,0],[0,0,0]];\n"
         "init F = [1.0,0.0,0.0];\n"
         "init P = [1.0,0.0,0.0];\n"
         /* pull shape: paren on right (inter_is_left2==0), s survives into the
            outer operand F[s] so action 2 (not action 1) reduces it. */
-        "F[d] = F[s] .2 (G[s,d] .1 P[s]) "
+        "Z[d] = F[s] .2 (G[s,d] .1 P[s]) "
         ":: map.1(and,intersect) map.2(and,intersect) reduce.2(or,union, over=s);\n");
     SemanticResult sem = semantic_analyze(ast);
     ASSERT_INT_EQ(0, sem.error_count);

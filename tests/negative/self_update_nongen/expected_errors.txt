@@ -1,0 +1,2 @@
+tensor 'D' is read before the Einsum that writes it
+tensor 'D' is written by an Einsum and must not have an init (output tensors start empty)

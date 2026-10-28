@@ -13,7 +13,6 @@ tensor Z[D=O] : float, empty = 0.0;
 
 init A = [1, 2, 3];
 init B = [1, 2, 3, 4];
-init Z = [0];
 
 
 Z[n] = A[k] . B[m] :: map(mul) reduce(add);

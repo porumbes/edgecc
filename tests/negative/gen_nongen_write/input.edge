@@ -1,0 +1,11 @@
+// A non-generational write inside a generational program ran every generation,
+// accumulating into the caller's buffer. Rejected for now (hoisting is future work).
+dim N = 4;
+tensor G[R=N, C=N]  : float, empty = 0.0;
+tensor G2[R=N, C=N] : float, empty = 0.0;
+tensor F[gen I, R=N] : float, empty = 0.0;
+init G = [[0,1,0,0],[0,0,1,0],[0,0,0,1],[0,0,0,0]];
+init F = [1.0, 0.0, 0.0, 0.0];
+G2[s,d] = G[s,k] . G[k,d] :: map(mul, intersect) reduce(add, union);
+F[i+1, d] = G2[s,d] . F[i, s] :: map(mul, intersect) reduce(max, union);
+stop: stable(F);

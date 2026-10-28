@@ -1,0 +1,1 @@
+in a generational program every Einsum must write a generational tensor; 'G2' is not (compute it in a separate program)

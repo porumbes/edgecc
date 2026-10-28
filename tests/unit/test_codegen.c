@@ -465,9 +465,10 @@ TEST(test_codegen_seed_init) {
         "dim N = *;\n"
         "tensor G[R=N, C=N] : float, empty = 0.0;\n"
         "tensor D[R=N]      : float, empty = inf;\n"
+        "tensor Z[R=N]      : float, empty = inf;\n"
         "init G = load(\"g.mtx\");\n"
         "init D = seed(source=2, value=0.0);\n"
-        "D[d] = G[s,d] . D[s] :: map(add, intersect) reduce(min, union);\n"
+        "Z[d] = G[s,d] . D[s] :: map(add, intersect) reduce(min, union);\n"
     );
     SemanticResult sem = semantic_analyze(ast);
     IRProgram *ir = ir_lower(ast, sem.symtab);
@@ -514,10 +515,11 @@ TEST(test_codegen_fused_push) {
         "tensor F[R=N] : float, empty = 0.0;\n"
         "tensor G[R=N, C=N] : float, empty = 0.0;\n"
         "tensor P[R=N] : float, empty = 0.0;\n"
+        "tensor Z[R=N] : float, empty = 0.0;\n"
         "init G = [[0,0,0],[0,0,0],[0,0,0]];\n"
         "init F = [1.0,0.0,0.0];\n"
         "init P = [1.0,0.0,0.0];\n"
-        "F[d] = (G[s,d] .1 F[s]) .2 !P[d] "
+        "Z[d] = (G[s,d] .1 F[s]) .2 !P[d] "
         ":: map.1(and,intersect) reduce.1(or,union) map.2(take_left,intersect);\n");
     SemanticResult sem = semantic_analyze(ast);
     IRProgram *ir = ir_lower(ast, sem.symtab);
@@ -536,10 +538,11 @@ TEST(test_codegen_fused_pull) {
         "tensor F[R=N] : float, empty = 0.0;\n"
         "tensor G[R=N, C=N] : float, empty = 0.0;\n"
         "tensor P[R=N] : float, empty = 0.0;\n"
+        "tensor Z[R=N] : float, empty = 0.0;\n"
         "init G = [[0,0,0],[0,0,0],[0,0,0]];\n"
         "init F = [1.0,0.0,0.0];\n"
         "init P = [1.0,0.0,0.0];\n"
-        "F[d] = (G[s,d] .1 !P[d]) .2 F[s] "
+        "Z[d] = (G[s,d] .1 !P[d]) .2 F[s] "
         ":: map.1(and,intersect) map.2(and,intersect) reduce.2(or,union);\n");
     SemanticResult sem = semantic_analyze(ast);
     IRProgram *ir = ir_lower(ast, sem.symtab);
