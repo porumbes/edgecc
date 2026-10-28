@@ -153,3 +153,9 @@ Test-first throughout (each new test fails on `main` first).
 - The `<<` update operator (accumulating into an existing tensor), which is the
   paper's sanctioned way to start from non-empty values.
 - Sparse storage, memory reuse of intermediates (liveness).
+
+## Deviations and findings (recorded at Finish, 2026-10-28)
+
+- Task 1 also reconciled `test_semantic_fused_pull_classification` (a tenth unit-test program, not in the plan's list) the same way as the nine listed: its written tensors no longer carry an `init`.
+- The spec called for a "Python-level check" that `run()` starts from fresh buffers without naming a mechanism; Task 2 added an optional `run_twice` marker file to the e2e harness (`tests/e2e/run_e2e.py`) that calls `run()` twice and compares the results.
+- DFT acceptance (all seven kernel invocations, with the first run without `--direct` as the G6 test) passed against this branch's compiler; no kernel was rejected by E1/E2/E3 and no `[G4 hack]` line appeared.

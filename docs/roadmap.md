@@ -1,6 +1,6 @@
 # edgecc roadmap & feature status
 
-**Last updated:** 2026-10-04
+**Last updated:** 2026-10-28
 
 Legend:  ✅ implemented · 🚧 partial · ❌ planned
 
@@ -65,6 +65,7 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 - **SuiteSparse data:** `data/suitesparse/` (vendored karate/lesmis/GD98_a) + `tools/fetch_suitesparse.py` (manifest + sha256).
 - **Visualization:** `tools/edgecc_viz.py` with six layouts; non-spring layouts fall back to spring on failure.
 - **Robustness (DFT gaps, batch A):** negative literals; lexer errors fail the compile; no silent caps (any number of `run()` inputs, up to 64 Einsums, hard errors past the other limits); argv/`-h`/`file_inputs` share `init` order; `load` targets rank-checked (2-D); warning for read-but-never-initialized tensors.
+- **Intermediates out of the ABI (DFT gaps, batch B):** `run()` takes only read-but-never-written tensors; written tensors start empty inside `run()` (fixes `dim N = *` + intermediate); no `init` on, or read before, a written tensor; non-generational writes rejected in generational programs.
 - **Tooling/tests:** CLI flags; VS Code extension (Tier 1); 14 ctest targets (unit, e2e, negative, iterative, trace, viz, fetch-helper, reference, fuzz, reserved-names); `tools/premerge.sh` gate (normal + UBSan suites, long mutation fuzz) required before merging.
 
 ### Partial 🚧
@@ -72,7 +73,7 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 - **BFS (paper-faithful):** masking / pruned / depth BFS work, and unary `¬` (as `!`) now expresses the mask directly (`A . !B :: map(take_left, intersect)`); the full 3-step formulation still needs multi-output return, and `ANY`/parent-pointer.
 
 ### Planned ❌ (by area)
-- **Language:** `<<` update op; compute labels; general N-ary nesting & matrix-chain (both-actions-reduce) beyond the two-action fused form; nested cascades / multiple generational ranks; anonymous tensors; unary functions; user-defined compute ops; the 7 remaining merge ops.
+- **Language:** hoisting loop-invariant Einsums out of a generational loop; `<<` update op; compute labels; general N-ary nesting & matrix-chain (both-actions-reduce) beyond the two-action fused form; nested cascades / multiple generational ranks; anonymous tensors; unary functions; user-defined compute ops; the 7 remaining merge ops.
 - **Seeding & data:** multi-source `seed` (keyword syntax already extensible); 1-D vector `.mtx` loading; diagonal/reflexive-adjacency (`+I`) preprocessing; iterative-driver graph loading; one-kernel-over-many-graphs sweep runner; expanded committed SuiteSparse test set.
 - **File I/O:** sparse tensor storage + sparse compute (CSR/CSC/COO); non-`.mtx` formats; EDGE-native input-path CLI.
 - **Visualization:** `--active-edges-only` edge filter (highest-value next addition for dense graphs); `arf` layout; within-ring/layer crossing minimization; per-scalar (inner-loop) stepping; interactive scrubbing; animation export (GIF/MP4); contact-sheet/filmstrip; light/print themes; non-generational-kernel viz.

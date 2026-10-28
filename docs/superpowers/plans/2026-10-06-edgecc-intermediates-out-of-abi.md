@@ -1,6 +1,6 @@
 # Intermediates out of the `run()` ABI — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Every tensor an Einsum writes starts empty and is allocated inside `run()`; only tensors that are read but never written are `run()` parameters (DFT gaps G5/G6).
 
@@ -46,7 +46,7 @@
 - Consumes: `einsum_operands(AstNode *stmt, TensorRef *ins[3], TensorRef **out)` (returns operand count, 0 for non-Einsum statements), `symtab_find_tensor`, `add_error`, `name_present(char *const names[], int n, const char *x)`, `TensorEntry.has_init`, `TensorEntry.gen_axis`, `SymbolTable.is_iterative` — all already in `src/semantic.c` / `src/semantic.h`.
 - Produces: `static void validate_written_tensors(SemanticResult *res, AstNode *program)` (file-local). Later tasks rely only on its guarantees: in a valid generational program every Einsum output is generational; in a valid non-generational program no written tensor has an init and none is read before its first write.
 
-- [ ] **Step 1: Write the negative tests**
+- [x] **Step 1: Write the negative tests**
 
 `tests/negative/intermediate_with_init/input.edge`:
 ```
@@ -133,12 +133,12 @@ stop: stable(F);
 in a generational program every Einsum must write a generational tensor; 'G2' is not (compute it in a separate program)
 ```
 
-- [ ] **Step 2: Run them and confirm all five fail**
+- [x] **Step 2: Run them and confirm all five fail**
 
 Run: `make -C build && python3 tests/negative/run_negative.py build/edgecc 2>&1 | grep -i "fail\|passed"`
 Expected: `FAIL` lines for all five new tests (`expected failure but edgecc succeeded` or `expected error ... not found`), every older negative test still passing.
 
-- [ ] **Step 3: Rewrite the unit-test programs that violate the new rules**
+- [x] **Step 3: Rewrite the unit-test programs that violate the new rules**
 
 Nine unit-test programs read and write the same non-generational tensor (and give it an init). Each test is about something else (seed codegen, fused classification), so give each a separate output tensor. All of these must pass before **and** after Step 4.
 
@@ -159,7 +159,7 @@ In `examples/dotproduct.edge`: delete the line `init Z = [0];` (it was ignored a
 Run: `make -C build && ctest --test-dir build 2>&1 | tail -6`
 Expected: 13 of 14 targets pass. The only failure is `negative_tests`, which still reports the five new negative tests from Step 1 (transiently red until Step 4). Every unit test passes.
 
-- [ ] **Step 4: Implement `validate_written_tensors`**
+- [x] **Step 4: Implement `validate_written_tensors`**
 
 In `src/semantic.c`, insert directly after `validate_rank_offsets` (which sits just after `einsum_operands`):
 
@@ -234,7 +234,7 @@ to
     validate_cascade_ordering(&res, program);
 ```
 
-- [ ] **Step 5: Run everything**
+- [x] **Step 5: Run everything**
 
 Run: `make -C build 2>&1 | grep -E "error|warning:" ; python3 tests/negative/run_negative.py build/edgecc 2>&1 | grep -i "fail\|passed"; ctest --test-dir build 2>&1 | tail -3`
 Expected: no compiler warnings; all negative tests pass (72/72); `100% tests passed, 0 tests failed out of 14`.
@@ -245,7 +245,7 @@ for f in examples/*.edge tests/e2e/*/input.edge tests/e2e/iterative/*/kernel.edg
 ```
 Expected: no output.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/semantic.c tests/unit tests/negative examples/dotproduct.edge
@@ -271,7 +271,7 @@ now write a separate output tensor; dotproduct.edge drops its ignored init."
 - Consumes: Task 1's guarantee that a valid generational program writes only generational tensors.
 - Produces: `static void collect_io(IRProgram *ir, TensorNameList *inputs, TensorNameList *written, char **output)` (new `written` out-parameter, caller frees it with `free_tensor_name_list`), and `static int name_in_tnl(const TensorNameList *l, const char *name)`.
 
-- [ ] **Step 1: Add the `run_twice` check to the e2e harness**
+- [x] **Step 1: Add the `run_twice` check to the e2e harness**
 
 In `tests/e2e/run_e2e.py`, insert immediately before the comment `# Round-trip check: re-read a saved .mtx and compare to expected values.`:
 
@@ -302,7 +302,7 @@ In `tests/e2e/run_e2e.py`, insert immediately before the comment `# Round-trip c
                 return False
 ```
 
-- [ ] **Step 2: Write the e2e tests**
+- [x] **Step 2: Write the e2e tests**
 
 `tests/e2e/intermediate_repeatable/input.edge` (plus an empty marker file `tests/e2e/intermediate_repeatable/run_twice`):
 ```
@@ -417,7 +417,7 @@ Z[i]  = T7[i] . X8[i] :: map(add, intersect) reduce(add, union);
 ```
 `expected_output.txt`: `[9.0, 18.0]`
 
-- [ ] **Step 3: Write the codegen unit tests**
+- [x] **Step 3: Write the codegen unit tests**
 
 Append to `tests/unit/test_codegen.c` before `int main`, and add `RUN_TEST(test_codegen_intermediate_not_a_param);` and `RUN_TEST(test_codegen_fused_intermediate_not_a_param);` at the end of `main`'s list:
 
@@ -481,7 +481,7 @@ TEST(test_codegen_fused_intermediate_not_a_param) {
 }
 ```
 
-- [ ] **Step 4: Run the new tests and confirm they fail for the right reasons**
+- [x] **Step 4: Run the new tests and confirm they fail for the right reasons**
 
 Run: `make -C build && ./build/test_codegen | tail -3; python3 tests/e2e/run_e2e.py build/edgecc 2>&1 | grep -i "fail\|passed"`
 Expected:
@@ -489,7 +489,7 @@ Expected:
 - e2e: `intermediate_repeatable` FAILS with `run() is not repeatable: [2.0, 6.0] then [3.0, 10.0]`; `intermediate_inferred_dim` FAILS with `NameError: name 'N' is not defined`; `intermediate_dead_write` FAILS with `NameError: name 'B' is not defined`; `intermediate_double_write` and `many_inputs_chain` PASS (characterization).
 These are the transiently red tests until Step 5.
 
-- [ ] **Step 5: Implement in `src/codegen.c`**
+- [x] **Step 5: Implement in `src/codegen.c`**
 
 (a) Add directly after `add_input_name`:
 
@@ -586,12 +586,12 @@ and update the comment above it to: `/* Every tensor an Einsum writes is allocat
 
 (f) At the end of `codegen_python_ex`, next to `free_tensor_name_list(&inputs);`, add `free_tensor_name_list(&written);`.
 
-- [ ] **Step 6: Run everything**
+- [x] **Step 6: Run everything**
 
 Run: `make -C build 2>&1 | grep -E "error|warning:"; ./build/test_codegen | tail -1; python3 tests/e2e/run_e2e.py build/edgecc 2>&1 | grep -i "fail\|passed"; ctest --test-dir build 2>&1 | tail -3`
 Expected: no compiler warnings; `test_codegen` all pass (including the four existing generational signature asserts `def run(G, F):`, `def run(W, D):`, `def run(G, F, P):`, `def run(G, A, B):`); all e2e pass; `100% tests passed, 0 tests failed out of 14`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/codegen.c tests/e2e tests/unit/test_codegen.c
@@ -615,7 +615,7 @@ many_inputs_chain rebuilt with 9 true inputs so it still exercises G4."
 - Consumes: Tasks 1–2 on the branch.
 - Produces: the merged `main`.
 
-- [ ] **Step 1: Update `CLAUDE.md`**
+- [x] **Step 1: Update `CLAUDE.md`**
 
 (a) In "## Generated Python ABI", after the sentence ending `…edgecc prints a warning for it.`, insert: `` `run()`'s parameters are exactly the tensors that are read but never written; every tensor an Einsum writes (the returned output and all intermediates) starts empty and is allocated inside `run()` (the paper: "all output tensors are initially empty"), so it may not have an `init` and may not be read before the first Einsum that writes it. Each `run()` call starts from fresh buffers. ``
 
@@ -623,11 +623,11 @@ many_inputs_chain rebuilt with 9 true inputs so it still exercises G4."
 
 (c) In "## v2 Scope Limitations", after the size-limits paragraph, add a paragraph: `` In a generational program every Einsum must write a generational tensor; a loop-invariant precompute (e.g. `G2 = G·G`) must be done in a separate program for now (hoisting it before the loop is future work). ``
 
-- [ ] **Step 2: Update `docs/roadmap.md`**
+- [x] **Step 2: Update `docs/roadmap.md`**
 
 Set `**Last updated:**` to the current date. Under "### Implemented", after the "Robustness (DFT gaps, batch A)" bullet, add: `` - **Intermediates out of the ABI (DFT gaps, batch B):** `run()` takes only read-but-never-written tensors; written tensors start empty inside `run()` (fixes `dim N = *` + intermediate); no `init` on, or read before, a written tensor; non-generational writes rejected in generational programs. `` Under "### Planned ❌" → "Language", add `hoisting loop-invariant Einsums out of a generational loop;`.
 
-- [ ] **Step 3: DFT acceptance (read-only use of the repo root)**
+- [x] **Step 3: DFT acceptance (read-only use of the repo root)**
 
 Mirror the DFT files into a scratch directory so `dft_ref.py` uses this branch's compiler (it locates `build/edgecc` relative to its own repo):
 
@@ -649,12 +649,12 @@ $C $K/fft_split1.edge --layout split --n 16 --direct
 ```
 Expected: every line ends `-> PASS`. The first line (no `--direct`) is the G6 acceptance test. The `--direct` runs may print a `[G4 hack]` line naming intermediates; that is the expected, harmless false positive described in the spec. If any DFT kernel is rejected by E1/E2/E3, stop and report it to the user rather than editing DFT files (they belong to the exploration session).
 
-- [ ] **Step 4: Pre-merge gate**
+- [x] **Step 4: Pre-merge gate**
 
 Run: `tools/premerge.sh`
 Expected: `GATE PASSED (6 steps)`.
 
-- [ ] **Step 5: Record deviations, tick the plan, commit**
+- [x] **Step 5: Record deviations, tick the plan, commit**
 
 Append a `## Deviations and findings (recorded at Finish, <date>)` section to the spec listing anything that differed from it (write "None." if nothing did). Tick every checkbox in this plan. Then:
 
