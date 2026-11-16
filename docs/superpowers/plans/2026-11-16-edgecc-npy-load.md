@@ -52,7 +52,7 @@
 **Interfaces:**
 - Produces: `static int path_has_ext(const char *path, const char *ext)` in `src/semantic.c` (1 if `path` ends with `ext`). `.npy` loads of any data rank and `.npy` saves of any rank pass semantic analysis; codegen (Task 2) supplies the run-time support.
 
-- [ ] **Step 1: Write the negative tests**
+- [x] **Step 1: Write the negative tests**
 
 Each `input.edge` starts with the `//` comment shown.
 
@@ -93,7 +93,7 @@ Reconciliation: `save_generational_2d/expected_errors.txt` becomes
 `save: 'T' would be 3-D; Matrix Market stores at most 2-D (save to a .npy path)`.
 `load_1d` and `load_3d` stay unchanged: they now defend the `.mtx`-only 2-D load rule.
 
-- [ ] **Step 2: Write the unit tests** (in `tests/unit/test_semantic.c`, with `RUN_TEST` lines)
+- [x] **Step 2: Write the unit tests** (in `tests/unit/test_semantic.c`, with `RUN_TEST` lines)
 
 - `test_semantic_npy_load_any_rank` → `ASSERT_INT_EQ(0, sem.error_count)` for:
   ```
@@ -110,18 +110,18 @@ Reconciliation: `save_generational_2d/expected_errors.txt` becomes
 - `test_semantic_npy_save_generational_2d_ok`: the `save_generational_2d` negative's program with `save: T -> "t.npy";` → 0 errors.
 - `test_semantic_unsupported_extension`: `load("g.txt")` → error containing `load: unsupported file extension in "g.txt"`.
 
-- [ ] **Step 3: Run and confirm red**
+- [x] **Step 3: Run and confirm red**
 
 Run: `make -C build 2>&1 | grep -E "error|warning:"; ./build/test_semantic | tail -3; python3 tests/negative/run_negative.py build/edgecc 2>&1 | grep -E "FAIL|passed"`
 Expected: `test_semantic_npy_load_any_rank`, `test_semantic_npy_save_generational_2d_ok` and `test_semantic_unsupported_extension` FAIL (`test_semantic_mtx_load_still_2d` passes — a guard for unchanged behavior); negatives `load_unsupported_ext`, `save_unsupported_ext`, `save_mtx_3d` FAIL ("expected failure but edgecc succeeded") and `save_generational_2d` FAILS (old message).
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 In `analyze_init`'s `is_load` branch: if the path ends with neither `.mtx` nor `.npy`, report the `load: unsupported file extension …` error and return; apply the existing 2-D check only when it ends with `.mtx`.
 
 In the `save:` loop: right after the `save: unknown tensor` check, report `save: unsupported file extension …` (and `continue`) for a path that is neither; replace the generational `more than one data rank` check with a `.mtx`-only rule — `k = num_ranks` (the generations axis counts when the tensor is generational, data ranks otherwise, i.e. `k = ste->num_ranks`) and `k > 2` → the `would be <k>-D` error.
 
-- [ ] **Step 5: Run everything**
+- [x] **Step 5: Run everything**
 
 Run: `make -C build 2>&1 | grep -E "error|warning:"; ./build/test_semantic | tail -1; python3 tests/negative/run_negative.py build/edgecc 2>&1 | tail -1; ctest --test-dir build 2>&1 | tail -3`
 Expected: no warnings; all unit and negative tests pass; `100% tests passed`. Nothing real is newly rejected:
@@ -130,7 +130,7 @@ for f in examples/*.edge tests/e2e/*/input.edge tests/e2e/iterative/*/kernel.edg
 ```
 Expected: no output.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/semantic.c tests/unit/test_semantic.c tests/negative
@@ -153,13 +153,13 @@ git commit -m "semantic: load/save file extension must be .mtx or .npy; 2-D limi
   `X = _edgecc_load(_argv[J] if len(_argv) > J else "<default path>", "X", <shape tuple>)` (a 1-element tuple is written `(4,)` / `("N",)`).
 - Produces (C): `static void len_expr(char *buf, size_t n, const char *name, int axis)` → `len(X)`, `len(X[0])`, `len(X[0][0])`, …; `static void emit_load_shape(CodeBuf *cb, IRProgram *ir, const char *tensor_name)` → the shape tuple literal (skipping the generational axis).
 
-- [ ] **Step 1: Harness support in `tests/e2e/run_e2e.py`**
+- [x] **Step 1: Harness support in `tests/e2e/run_e2e.py`**
 
 - `HAVE_NUMPY` (like `HAVE_SCIPY`) and a `needs_numpy` marker that prints `SKIP <name>: numpy not installed`.
 - A test dir may hold `expected_runtime_error.txt` instead of `expected_output.txt`: the program must compile, then exit non-zero, and each non-empty line of the file must appear in its stderr (`FAIL <name>: expected a run-time error …` otherwise). stdout is not compared.
 - `roundtrip_check`: a `.npy` file is read with `numpy.load` (`.mtx` with `mmread`, as now); values compared flattened. The block must not require scipy for `.npy`-only checks.
 
-- [ ] **Step 2: Write the fixtures script and the e2e tests**
+- [x] **Step 2: Write the fixtures script and the e2e tests**
 
 `tests/e2e/npy_fixtures.py` (Python 3.8, numpy only; `python3 tests/e2e/npy_fixtures.py` regenerates every `.npy` below and `npy_fft_split_n4/expected_output.txt`; run it once and commit its outputs). Each `input.edge` names the script in its first comment line.
 
@@ -202,7 +202,7 @@ init F2  = [[1.0, 1.0], [1.0, -1.0]];
 ```
 The script writes `xs.npy` with `Xs[m][b][d] = (x[2m+b].real, x[2m+b].imag)` and `expected_output.txt` as `repr` of `Y[k1][k2][c] = (X[k1 + 2*k2].real, X[k1 + 2*k2].imag)` where `X = numpy.fft.fft(x)`, each value rounded to 9 decimals and `+ 0.0` (no `-0.0`). It must not run edgecc.
 
-- [ ] **Step 3: Write the codegen unit tests** (in `tests/unit/test_codegen.c`, with `RUN_TEST` lines)
+- [x] **Step 3: Write the codegen unit tests** (in `tests/unit/test_codegen.c`, with `RUN_TEST` lines)
 
 - `test_codegen_npy_load_helper`: `dim N = *;` `F[R=N]`, `Z[R=N]`, `init F = load("f.npy");` `Z[i] = F[i] . F[i] …` → code contains `def _edgecc_load(path, name, shape):`, `allow_pickle=False`, `(supported: .mtx, .npy)`, and `F = _edgecc_load(_argv[0] if len(_argv) > 0 else "f.npy", "F", ("N",))`.
 - `test_codegen_npy_save`: the `test_codegen_emits_save` program with `save: Z -> "out.npy";` → contains `_edgecc_save(Z, "out.npy")` and `np.save(`.
@@ -212,18 +212,18 @@ The script writes `xs.npy` with `Xs[m][b][d] = (x[2m+b].real, x[2m+b].imag)` and
 
 Reconciliation (the load call form changes): in `test_codegen_emits_load_helper` replace the `_edgecc_load(\"g.mtx\")` assert with `G = _edgecc_load(_argv[0] if len(_argv) > 0 else \"g.mtx\", \"G\", (\"N\", \"N\"))`; in the argv-order test (~line 625) the usage assert stays (`[B.mtx A.mtx]`) and the two `_edgecc_load(_argv[J])` asserts become `B = _edgecc_load(_argv[0] if len(_argv) > 0 else` and `A = _edgecc_load(_argv[1] if len(_argv) > 1 else`.
 
-- [ ] **Step 4: Run and confirm red**
+- [x] **Step 4: Run and confirm red**
 
 Run: `make -C build && ./build/test_codegen | tail -3; python3 tests/e2e/run_e2e.py build/edgecc 2>&1 | grep -E "FAIL|SKIP|passed"`
 Expected: the five new codegen tests and the reconciled asserts FAIL; every new e2e test FAILS (`.npy` unsupported at run time, or — for `mtx_wrong_size` — the program exits 0 after silently truncating); all other e2e tests pass. These are the transiently red tests until Step 6.
 
-- [ ] **Step 5: Implement in `src/codegen.c`**
+- [x] **Step 5: Implement in `src/codegen.c`**
 
 - Helper text: `_edgecc_load(path, name, shape)` — read `.mtx` (scipy `mmread` → dense) or `.npy` (`numpy.load(path, allow_pickle=False)`, dtype-kind check), else the unsupported-extension `ValueError`; compare `ndim` and every `int` entry of `shape` with the array's shape, raising the exact shape message on mismatch; return `array.astype(float).tolist()`. `_edgecc_save(tensor, path)` gains the `.npy` branch (`np.save(path, np.array(tensor, dtype=float))`). Missing numpy raises the exact `ImportError`.
 - `__main__`: emit each load in the call form from Interfaces, using `emit_load_shape`; the `-h` usage prints `<name><extension of its default path>` (`strrchr(path, '.')`; Task 1 guarantees one of the two).
 - `len_expr` replaces the three `len(%s)` / `len(%s[0])` branches (derivation, asserts, seed sizing), using the axis from `python_axis_of`. Update `python_axis_of`'s comment (it no longer returns only 0 or 1).
 
-- [ ] **Step 6: Run everything**
+- [x] **Step 6: Run everything**
 
 Run: `make -C build 2>&1 | grep -E "error|warning:"; ./build/test_codegen | tail -1; python3 tests/e2e/run_e2e.py build/edgecc 2>&1 | grep -E "FAIL|passed"; ctest --test-dir build 2>&1 | tail -3; git status --short`
 Expected: no warnings; all codegen tests pass; all e2e pass (the 11 new ones included); `100% tests passed` (iterative and reference tests included); no stray `.npy`/`.mtx` left behind.
@@ -239,7 +239,7 @@ done
 ```
 Expected: no output. (`../premerge-gate/build/edgecc` is `main`'s build; run `make -C ../premerge-gate/build edgecc` first if it is missing — that worktree is `main`, building there is fine.)
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/codegen.c tests/unit/test_codegen.c tests/e2e
@@ -253,28 +253,28 @@ git commit -m "codegen: .npy load/save for any rank, load-time shape check, infe
 **Files:**
 - Modify: `CLAUDE.md`, `docs/roadmap.md`, the spec (deviations), this plan (checkboxes)
 
-- [ ] **Step 1: `CLAUDE.md`**
+- [x] **Step 1: `CLAUDE.md`**
 
 - "File input/output": `load` reads `.mtx` (2-D, densified) or `.npy` (any rank, dense values as-is — e.g. `inf` for a min-plus `empty = inf` operand); format by extension, unsupported extensions are compile errors; every loaded file's shape is checked in `__main__` before `run()` (fixed dims by size, inferred dims derived in `run()` from any axis); loaded values are floats; `save:` to `.npy` keeps the full shape (generational: leading generations axis), `.mtx` saves are at most 2-D; `.npy` needs numpy, `.mtx` needs scipy. Replace "1-D and N-D loading are future work" and the "tensors with more than one data rank cannot be saved" clause accordingly.
 - "## Test", e2e line: add the `needs_numpy` marker and `expected_runtime_error.txt` (and that `roundtrip_check` reads `.npy` too); mention `tests/e2e/npy_fixtures.py`.
 - "## Generated Python ABI": the `_edgecc_load(path, name, shape)` call form.
 - "## v2 Scope Limitations": drop "loading non-`.mtx` formats" from the deferred list (now: other formats beyond `.mtx`/`.npy`).
 
-- [ ] **Step 2: `docs/roadmap.md`**
+- [x] **Step 2: `docs/roadmap.md`**
 
 Last-updated date; Implemented entry `- **.npy load/save (DFT gaps G8/G9, batch D):** any-rank .npy load and save, format by extension, load-time shape check for .mtx and .npy.`; remove/adjust the 1-D `.mtx` load and N-D load items; add under future/open design: **General data loading in EDGE** — how EDGE should load data in general (formats, a standard or utility library of loaders, user-supplied loaders, mapping a file's layout onto a tensor's ranks); batch D's `.npy` support is a stopgap. Add unfixed review findings to "Known issues & tech debt", tagged `(batch D)`.
 
-- [ ] **Step 3: DFT acceptance (read-only use of the repo root, from a scratch copy)**
+- [x] **Step 3: DFT acceptance (read-only use of the repo root, from a scratch copy)**
 
 As in batch C: mirror `$ROOT/docs/dft` into a scratch repo with `build/edgecc` symlinked to this branch's binary, run the `$ROOT/docs/dft/README.md` quickstart under `bash`; every line ends `-> PASS`.
 
 Then, in the scratch copy only: add `init Xs = load("xs.npy");` to `docs/dft/kernels/fft_split1.edge` (N = 8: it uses the committed `twiddle_n8_*.mtx` defaults), write `xs.npy` from a random complex `x` of length 8 in split layout (`Xs[m][b][d] = (x[2m+b].real, x[2m+b].imag)`), compile it, run it **without `--direct`** from the scratch repo root, parse the printed `Y` with `ast.literal_eval`, map `y[k1 + 4*k2] = Y[k1][k2][0] + 1j*Y[k1][k2][1]`, and compare with `numpy.fft.fft(x)` (max abs error < 1e-12). Paste the command and result in the report. Never edit the real DFT files.
 
-- [ ] **Step 4: Pre-merge gate**
+- [x] **Step 4: Pre-merge gate**
 
 Run: `tools/premerge.sh` (long timeout). Expected: `GATE PASSED`. Then `ps -axo pid,etime,pcpu,command | grep -E 'edgecc|run_fuzz|build/test_|build-ubsan' | grep -v grep` and kill strays by PID.
 
-- [ ] **Step 5: Record deviations, tick the plan, commit**
+- [x] **Step 5: Record deviations, tick the plan, commit**
 
 Append `## Deviations and findings (recorded at Finish, <date>)` to the spec. Known deviation: the independent FFT oracle e2e uses N = 4 (not 8) so the expected values are exact and the harness can compare stdout exactly; N = 8 is covered against numpy by the Step 3 acceptance run. Tick Tasks 1–2 and Task 3 Steps 1–5.
 ```bash

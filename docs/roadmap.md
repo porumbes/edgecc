@@ -27,13 +27,13 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 | Paper-faithful 3-step BFS (`ANY`/parent; unary `¬`=`!` ✅, multi-action fusion ✅, occupancy stop ✅) | 🚧 |
 | **Data & I/O** | |
 | Inline `init` literals | ✅ |
-| Matrix Market `load` / `save` (densify-on-load) | ✅ |
+| Matrix Market `load` / `save` (densify-on-load) · `.npy` `load` / `save` for any rank | ✅ |
 | Inferred dims (`dim N = *`) | ✅ |
 | Multi-output `run()` (`output: A, B;`) · several `save:` directives | ✅ |
 | `seed(source, value)` source vectors (auto-size to loaded graph) | ✅ |
-| Multi-source seed · 1-D / N-D load (today `load` must be 2-D) · diagonal/`I` preprocessing | ❌ |
+| Multi-source seed · diagonal/`I` preprocessing | ❌ |
 | Sparse tensor storage + sparse compute (CSR/CSC/COO) | ❌ |
-| Non-`.mtx` formats · EDGE-native input CLI | ❌ |
+| Formats beyond `.mtx`/`.npy` · general data loading in EDGE · EDGE-native input CLI | ❌ |
 | **Visualization** | |
 | `--emit-trace` → per-generation PNG frames (graph + tensor panels, active edges) | ✅ |
 | Layouts — `spring` `circular` `shell` `multipartite` `kamada_kawai` `spectral` | ✅ |
@@ -61,6 +61,7 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 - **Multi-action (fused) Einsums** `(A .1 B) .2 C`: paper-faithful one-line BFS gather/mask (`examples/push_bfs_fused.edge`, `pull_bfs_fused.edge`); transient-scalar intermediate, optional `over=` rank tags.
 - **Generational ranks** (`gen`) store every generation (paper semantics; `run()` returns by default the full watched tensor); stop predicates `||F[i+1]|| == 0`, `X[i+1] == X[i]`, `stable(X)`. Demonstrator: `examples/bfs_paper.edge`.
 - **Cascades:** multiple Einsums per generation, one or more cross-generational tensors plus intra-generation intermediates (Bellman–Ford, reachability BFS).
+- **.npy load/save (DFT gaps G8/G9, batch D):** any-rank .npy load and save, format by extension, load-time shape check for .mtx and .npy.
 - **File I/O:** Matrix Market `load`/`save`, inferred dims `dim N = *`, argv path overrides; densify-on-load (compute stays dense).
 - **`seed(source=I, value=V)`** source vectors sized to a loaded graph (unblocks BFS/SSSP on real graphs).
 - **SuiteSparse data:** `data/suitesparse/` (vendored karate/lesmis/GD98_a) + `tools/fetch_suitesparse.py` (manifest + sha256).
@@ -76,8 +77,9 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 
 ### Planned ❌ (by area)
 - **Language:** hoisting loop-invariant Einsums out of a generational loop; `<<` update op; compute labels; general N-ary nesting & matrix-chain (both-actions-reduce) beyond the two-action fused form; nested cascades / multiple generational ranks; anonymous tensors; unary functions; user-defined compute ops; the 7 remaining merge ops.
-- **Seeding & data:** multi-source `seed` (keyword syntax already extensible); 1-D vector `.mtx` loading; diagonal/reflexive-adjacency (`+I`) preprocessing; iterative-driver graph loading; one-kernel-over-many-graphs sweep runner; expanded committed SuiteSparse test set.
-- **File I/O:** sparse tensor storage + sparse compute (CSR/CSC/COO); non-`.mtx` formats; EDGE-native input-path CLI.
+- **Seeding & data:** multi-source `seed` (keyword syntax already extensible); diagonal/reflexive-adjacency (`+I`) preprocessing; iterative-driver graph loading; one-kernel-over-many-graphs sweep runner; expanded committed SuiteSparse test set.
+- **File I/O:** sparse tensor storage + sparse compute (CSR/CSC/COO); formats beyond `.mtx`/`.npy`; EDGE-native input-path CLI.
+- **General data loading in EDGE:** how EDGE should load data in general (formats, a standard or utility library of loaders, user-supplied loaders, mapping a file's layout onto a tensor's ranks); batch D's `.npy` support is a stopgap.
 - **Visualization:** `--active-edges-only` edge filter (highest-value next addition for dense graphs); `arf` layout; within-ring/layer crossing minimization; per-scalar (inner-loop) stepping; interactive scrubbing; animation export (GIF/MP4); contact-sheet/filmstrip; light/print themes; non-generational-kernel viz.
 - **Tooling:** compiler optimizations of any kind; liveness-based reclamation of generational storage (ping-pong); VS Code Tier-2 (context-aware completions); Neovim port.
 
@@ -135,6 +137,20 @@ commit that fixes it. (Origin in parentheses.)
   - Pre-existing: `__main__` prints `inf` as `inf`, which is not a valid Python literal (the spec
     says each printed line is a Python literal); a consumer parsing stdout must special-case it.
     (batch C)
+  - Semantic tests: `test_semantic_unsupported_extension` checks `errors[0]` rather than counting
+    matching errors; no test for a case-mismatched `.NPY` or `x.npy.mtx` (correct by reading:
+    case-sensitive suffix). (batch D)
+  - An unsupported-extension `save:` of a non-output reports only the extension error (first error
+    wins). (batch D)
+  - `npy_complex_rejected` asserts only the message prefix; no e2e loads a generational tensor or a
+    bool/uint `.npy` from a file (a unit test covers the generational shape tuple). (batch D)
+  - `run_e2e.py`: an empty `expected_runtime_error.txt` passes on any non-zero exit; if both
+    `expected_output.txt` and `expected_runtime_error.txt` exist, the error branch wins silently.
+    (batch D)
+  - `len_expr` (and the older fixed-buffer length expressions) truncate without a closing `)` for
+    names over ~245 characters. (batch D)
+  - The reserved-names collector would miss a helper-local name that is also read as a global (no
+    current helper does this). (batch D)
 
 > Design specs and implementation plans for shipped and in-flight features live under
 > `docs/superpowers/specs/` and `docs/superpowers/plans/`.

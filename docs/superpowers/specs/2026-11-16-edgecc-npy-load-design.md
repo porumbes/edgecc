@@ -249,3 +249,24 @@ behavior that is already correct, which must be named as such in the plan).
 - Loaded values are always floats (int/bool `.npy` arrays are cast), and
   `.npy` saves are float64 — matching `.mtx` and edgecc's float computation.
 - Pickle stays disabled for `.npy` loads (`allow_pickle=False`).
+
+## Deviations and findings (recorded at Finish, 2026-11-16)
+
+1. The FFT oracle e2e (`npy_fft_split_n4`) uses N = 4, not 8: the values are exact so
+   stdout is compared exactly (at N = 4 the `Whi`·iX path is all-zero and H == TWO).
+   N = 8 is checked against `numpy.fft.fft` in the DFT acceptance run.
+2. The spec assumed `.mtx` loads already yielded floats; an integer-field `.mtx` loaded
+   as Python ints. Loads now yield floats for both formats, so `load_lesmis_minplus`
+   prints floats (same values). This contradicts "programs with `.mtx` loads change only
+   by the added shape check".
+3. A complex-field `.mtx` is now rejected by the dtype check (the spec said `.mtx`
+   loading is unchanged); e2e `mtx_complex_rejected`.
+4. `_edgecc_load` now requires all axes naming the same inferred dim within one loaded
+   tensor to have one size (e2e `npy_repeated_dim_mismatch`). The spec said inferred axes
+   are cross-checked in `run()` "as today", but that check never compared a tensor's own
+   repeated axis.
+5. `any`, `float`, `int`, `str`, `sum`, `zip` are now reserved names in every program
+   (names the `_edgecc_*` helpers read; `sum` closes a pre-existing gap from
+   `_edgecc_occupancy`). The reserved-names test now collects global names read inside
+   `_edgecc*` helper bodies.
+6. Plan text: `fft_split1.edge` has 9 Einsums, not 11.
