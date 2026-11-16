@@ -156,6 +156,10 @@ commit that fixes it. (Origin in parentheses.)
     names over ~245 characters. (batch D)
   - The reserved-names collector would miss a helper-local name that is also read as a global (no
     current helper does this). (batch D)
+  - `run_e2e.py`: a malformed shape in a `roundtrip_check` line (e.g. `z.npy (2 2): …`) raises an
+    uncaught `SyntaxError` from `ast.literal_eval` instead of a clean FAIL; a bare `!` line in
+    `expected_runtime_error.txt` forbids the empty string and so always fails. No e2e loads a uint
+    `.npy` (bool and int32 are covered). (batch D)
 
 > Design specs and implementation plans for shipped and in-flight features live under
 > `docs/superpowers/specs/` and `docs/superpowers/plans/`.

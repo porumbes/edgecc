@@ -283,7 +283,7 @@ git add CLAUDE.md docs/roadmap.md docs/superpowers
 git commit -m "docs: .npy load/save (batch D) — CLAUDE.md, roadmap, spec deviations, plan ticked"
 ```
 
-- [ ] **Step 6: Merge from the `main` worktree** (controller, after the final review)
+- [x] **Step 6: Merge from the `main` worktree** (controller, after the final review)
 
 ```bash
 cd ../premerge-gate
@@ -291,6 +291,6 @@ git merge --no-ff feature/npy-load -m "Merge feature/npy-load: .npy load/save fo
 make -C build && ctest --test-dir build 2>&1 | grep "tests passed"
 ```
 
-- [ ] **Step 7: Memory and hand-off** (controller)
+- [x] **Step 7: Memory and hand-off** (controller)
 
 Update `project_resume_state.md` (main's new hash, batch D done) and tell the user the DFT session can merge `main`: `init Xs = load("xs.npy")` replaces the `--direct` injection for 3-D inputs, vectors load 1-D from `.npy`, and 3-D results can be saved to `.npy`.
