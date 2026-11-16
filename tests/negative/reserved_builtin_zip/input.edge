@@ -1,0 +1,7 @@
+// A user name that shadows a builtin the generated load helper calls: dims and
+// loaded tensors are module globals, so `dim zip` would break _edgecc_load.
+dim zip = 3;
+tensor F[R=zip] : float, empty = 0.0;
+tensor Z[R=zip] : float, empty = 0.0;
+init F = load("f.npy");
+Z[i] = F[i] . F[i] :: map(mul, intersect) reduce(add, union);

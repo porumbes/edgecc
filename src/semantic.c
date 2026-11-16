@@ -62,8 +62,9 @@ static const char *const PY_RESERVED[] = {
     "for", "from", "global", "if", "import", "in", "is", "lambda", "nonlocal",
     "not", "or", "pass", "raise", "return", "try", "while", "with", "yield",
     /* builtins, modules, and top-level names used by generated code */
-    "ImportError", "RuntimeError", "SystemExit", "ValueError", "hasattr",
-    "isinstance", "len", "list", "max", "min", "open", "print", "range",
+    "ImportError", "RuntimeError", "SystemExit", "ValueError", "any", "float",
+    "hasattr", "int", "isinstance", "len", "list", "max", "min", "open",
+    "print", "range", "str", "sum", "zip",
     "json", "math", "mmread", "mmwrite", "np", "run", "sys",
     /* codegen temporaries */
     "a_exists", "a_op", "a_val", "b_exists", "b_m", "b_op", "b_s", "b_val",
