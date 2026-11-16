@@ -1,0 +1,8 @@
+// Fixture x.npy is written by tests/e2e/npy_fixtures.py.
+// An inferred dim pinned only on axis 2 of a .npy load: N = len(X[0][0]).
+dim N = *;
+dim TWO = 2;
+tensor X[R=TWO, C=TWO, K=N] : float, empty = 0.0;
+tensor Z[K=N]               : float, empty = 0.0;
+init X = load("x.npy");
+Z[k] = X[r,c,k] . X[r,c,k] :: map(mul, intersect) reduce(add, union);

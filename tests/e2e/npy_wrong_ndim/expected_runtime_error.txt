@@ -1,0 +1,1 @@
+edgecc load: "a.npy" for 'A' has shape (2, 2), expected (H, 2, 2)

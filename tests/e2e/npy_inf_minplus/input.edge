@@ -1,0 +1,10 @@
+// Fixture w.npy is written by tests/e2e/npy_fixtures.py.
+// A .npy file can hold inf directly, so a min-plus weight matrix loads into an
+// empty = inf tensor (an .mtx load densifies absent entries to 0.0 instead).
+dim N = *;
+tensor W[R=N, C=N] : float, empty = inf;
+tensor D[R=N]      : float, empty = inf;
+tensor Z[R=N]      : float, empty = inf;
+init W = load("w.npy");
+init D = [0.0, inf, inf];
+Z[d] = W[s,d] . D[s] :: map(add, intersect) reduce(min, union);

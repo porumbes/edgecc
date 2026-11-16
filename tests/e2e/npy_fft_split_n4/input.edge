@@ -1,0 +1,50 @@
+// Independent oracle: one radix-2 FFT split (N = 4) with a 3-D input loaded from .npy;
+// expected_output.txt comes from numpy.fft.fft (tests/e2e/npy_fixtures.py), x = [1, 2+1j, 3j, -1+2j].
+//
+// Structure of fft_split1.edge (DFT exploration): input n = 2m + b, output
+// k = k1 + h*k2 (h = N/2); complex values use a trailing re/im rank, and J is
+// "multiply by i". Xs[m,b,d] = (Re, Im) of x[2m+b]; Y[k1,k2,c] = (Re, Im) of X[k1 + h*k2].
+
+dim H   = *;      // N/2, inferred from the loaded Xs
+dim TWO = 2;
+
+tensor Xs[M=H, B=TWO, D=TWO]  : float, empty = 0.0;   // input, split + stacked
+tensor Whr[R=H, C=H]          : float, empty = 0.0;   // half-size twiddles, re
+tensor Whi[R=H, C=H]          : float, empty = 0.0;   //                     im
+tensor Twr[R=H, C=TWO]        : float, empty = 0.0;   // step twiddles w_N^(k1 b), re
+tensor Twi[R=H, C=TWO]        : float, empty = 0.0;   //                           im
+tensor J[R=TWO, C=TWO]        : float, empty = 0.0;   // "multiply by i"
+tensor F2[R=TWO, C=TWO]       : float, empty = 0.0;   // [[1,1],[1,-1]]
+
+tensor JX[M=H, B=TWO, C=TWO]  : float, empty = 0.0;   // i * x
+tensor A[K=H, B=TWO, C=TWO]   : float, empty = 0.0;   // Whr . x
+tensor Bi[K=H, B=TWO, C=TWO]  : float, empty = 0.0;   // Whi . (i*x)
+tensor Z[K=H, B=TWO, C=TWO]   : float, empty = 0.0;   // half-size DFTs (evens b=0, odds b=1)
+tensor JZ[K=H, B=TWO, C=TWO]  : float, empty = 0.0;   // i * Z
+tensor P[K=H, B=TWO, C=TWO]   : float, empty = 0.0;   // Twr * Z
+tensor Q[K=H, B=TWO, C=TWO]   : float, empty = 0.0;   // Twi * (i*Z)
+tensor T[K=H, B=TWO, C=TWO]   : float, empty = 0.0;   // twiddled
+tensor Y[K=H, L=TWO, C=TWO]   : float, empty = 0.0;   // output, k = k1 + h*k2
+
+init Xs  = load("xs.npy");
+init Whr = [[1.0, 1.0], [1.0, -1.0]];
+init Whi = [[0.0, 0.0], [0.0, 0.0]];
+init Twr = [[1.0, 1.0], [1.0, 0.0]];
+init Twi = [[0.0, 0.0], [0.0, -1.0]];
+init J   = [[0.0, -1.0], [1.0, 0.0]];
+init F2  = [[1.0, 1.0], [1.0, -1.0]];
+
+// 1. half-size DFT along m, for both b at once: Z = Wh . X  (complex)
+JX[m,b,c]  = J[c,d] . Xs[m,b,d]       :: map(mul, intersect) reduce(add, union);
+A[k1,b,c]  = Whr[k1,m] . Xs[m,b,c]    :: map(mul, intersect) reduce(add, union);
+Bi[k1,b,c] = Whi[k1,m] . JX[m,b,c]    :: map(mul, intersect) reduce(add, union);
+Z[k1,b,c]  = A[k1,b,c] . Bi[k1,b,c]   :: map(add, union)     reduce(add, union);
+
+// 2. twiddle: T = Tw * Z elementwise (complex; no reduction index)
+JZ[k1,b,c] = J[c,d] . Z[k1,b,d]       :: map(mul, intersect) reduce(add, union);
+P[k1,b,c]  = Twr[k1,b] . Z[k1,b,c]    :: map(mul, intersect) reduce(add, union);
+Q[k1,b,c]  = Twi[k1,b] . JZ[k1,b,c]   :: map(mul, intersect) reduce(add, union);
+T[k1,b,c]  = P[k1,b,c] . Q[k1,b,c]    :: map(add, union)     reduce(add, union);
+
+// 3. butterfly: 2-point DFT along b (F2 is real)
+Y[k1,k2,c] = F2[k2,b] . T[k1,b,c]     :: map(mul, intersect) reduce(add, union);

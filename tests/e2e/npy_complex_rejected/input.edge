@@ -1,0 +1,7 @@
+// Fixture c.npy (complex128) is written by tests/e2e/npy_fixtures.py.
+// edgecc tensors are real: a complex .npy file is rejected when it is loaded.
+dim N = *;
+tensor C[R=N] : float, empty = 0.0;
+tensor Z[R=N] : float, empty = 0.0;
+init C = load("c.npy");
+Z[i] = C[i] . C[i] :: map(mul, intersect) reduce(add, union);

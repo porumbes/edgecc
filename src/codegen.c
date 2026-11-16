@@ -685,11 +685,9 @@ static int name_in_list(const char *name, const char **list, int n) {
     return 0;
 }
 
-/* For an inferred dim `dimname`, find the first INPUT tensor alloc that has it
-   on some axis and emit `dimname = len(input)` (axis 0) or `len(input[0])`. */
 /* Runtime Python subscript depth of alloc dim `d`: a generational axis (dim_size
-   == -1 sentinel) is not a materialized Python dimension, so skip it. Returns 0
-   or 1 for edgecc's <=2 spatial dims. */
+   == -1 sentinel) is not a materialized Python dimension, so skip it. Returns
+   the index of `d` among the data axes (0 for the first data axis, and so on). */
 static int python_axis_of(const IRTensorAlloc *a, int d) {
     int axis = 0;
     for (int j = 0; j < d; j++)
@@ -697,6 +695,49 @@ static int python_axis_of(const IRTensorAlloc *a, int d) {
     return axis;
 }
 
+/* Python expression for the length of `name` along data axis `axis`:
+   `len(X)`, `len(X[0])`, `len(X[0][0])`, ... */
+static void len_expr(char *buf, size_t n, const char *name, int axis) {
+    size_t used = (size_t)snprintf(buf, n, "len(%s", name);
+    for (int k = 0; k < axis && used < n; k++)
+        used += (size_t)snprintf(buf + used, n - used, "[0]");
+    if (used < n) snprintf(buf + used, n - used, ")");
+}
+
+/* Return 1 if `dimname` names an inferred dim (`dim N = *`). */
+static int dim_is_inferred(IRProgram *ir, const char *dimname) {
+    if (!dimname) return 0;
+    for (int i = 0; i < ir->count; i++)
+        if (ir->instrs[i].type == IR_DIM_DEF &&
+            strcmp(ir->instrs[i].data.dim_def.name, dimname) == 0)
+            return ir->instrs[i].data.dim_def.is_inferred;
+    return 0;
+}
+
+/* Emit the shape _edgecc_load checks a loaded tensor against, as a Python
+   tuple literal with one entry per data axis (the generational axis is
+   skipped): the size of a fixed dim, the name (a str, not checked) of an
+   inferred dim. A one-entry tuple keeps its comma: `(4,)`, `("N",)`. */
+static void emit_load_shape(CodeBuf *cb, IRProgram *ir, const char *tensor_name) {
+    int entries = 0;
+    cb_append(cb, "(");
+    for (int i = 0; i < ir->count; i++) {
+        if (ir->instrs[i].type != IR_TENSOR_ALLOC) continue;
+        IRTensorAlloc *a = &ir->instrs[i].data.tensor_alloc;
+        if (strcmp(a->name, tensor_name) != 0) continue;
+        for (int d = 0; d < a->ndims; d++) {
+            if (a->dim_sizes[d] == -1) continue;   /* generational axis */
+            if (entries++) cb_append(cb, ", ");
+            if (dim_is_inferred(ir, a->dim_names[d])) cb_appendf(cb, "\"%s\"", a->dim_names[d]);
+            else                                      cb_appendf(cb, "%d", a->dim_sizes[d]);
+        }
+        break;
+    }
+    cb_append(cb, entries == 1 ? ",)" : ")");
+}
+
+/* For an inferred dim `dimname`, find the first INPUT tensor alloc that has it
+   on some axis and emit `dimname = len(input)`, `len(input[0])`, ... */
 static void emit_inferred_dim_derivation(CodeBuf *cb, IRProgram *ir,
                                          const char *dimname,
                                          TensorNameList *inputs) {
@@ -709,9 +750,10 @@ static void emit_inferred_dim_derivation(CodeBuf *cb, IRProgram *ir,
         if (!is_input) continue;
         for (int d = 0; d < a->ndims; d++) {
             if (a->dim_names[d] && strcmp(a->dim_names[d], dimname) == 0) {
+                char le[256];
+                len_expr(le, sizeof le, a->name, python_axis_of(a, d));
                 cb_indent(cb);
-                if (python_axis_of(a, d) == 0) cb_appendf(cb, "%s = len(%s)\n", dimname, a->name);
-                else                           cb_appendf(cb, "%s = len(%s[0])\n", dimname, a->name);
+                cb_appendf(cb, "%s = %s\n", dimname, le);
                 return;
             }
         }
@@ -751,7 +793,7 @@ static void emit_seed_init(CodeBuf *cb, IRProgram *ir, const char *name,
         }
     }
 
-    char lenexpr[128];
+    char lenexpr[256];
     snprintf(lenexpr, sizeof(lenexpr), "0");   /* unreachable: semantic.c guarantees
                                                   an inferred seed dim is pinned by a load */
     if (!inferred) {
@@ -769,8 +811,7 @@ static void emit_seed_init(CodeBuf *cb, IRProgram *ir, const char *name,
                 for (int d = 0; d < pa->ndims; d++) {
                     if (pa->dim_names[d] && dimname &&
                         strcmp(pa->dim_names[d], dimname) == 0) {
-                        if (python_axis_of(pa, d) == 0) snprintf(lenexpr, sizeof(lenexpr), "len(%s)", pin);
-                        else                            snprintf(lenexpr, sizeof(lenexpr), "len(%s[0])", pin);
+                        len_expr(lenexpr, sizeof(lenexpr), pin, python_axis_of(pa, d));
                         found = 1;
                         break;
                     }
@@ -817,15 +858,16 @@ static void emit_inferred_dim_asserts(CodeBuf *cb, IRProgram *ir,
             }
         if (!found) continue;
         if (!first) { first = a->name; continue; }   /* the source; skip */
-        const char *suffix = (axis == 0) ? "" : "[0]";
+        char le[256];
+        len_expr(le, sizeof le, a->name, axis);
         cb_indent(cb);
-        cb_appendf(cb, "if len(%s%s) != %s:\n", a->name, suffix, dimname);
+        cb_appendf(cb, "if %s != %s:\n", le, dimname);
         cb->indent++;
         cb_indent(cb);
         cb_appendf(cb,
             "raise ValueError(\"edgecc: input '%s' has size %%d on dim %s "
-            "but '%s' pins it to %%d\" %% (len(%s%s), %s))\n",
-            a->name, dimname, first, a->name, suffix, dimname);
+            "but '%s' pins it to %%d\" %% (%s, %s))\n",
+            a->name, dimname, first, le, dimname);
         cb->indent--;
     }
 }
@@ -887,15 +929,33 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
     }
     if (uses_fileio) {
         cb_append(&cb,
-            "def _edgecc_load(path):\n"
+            "def _edgecc_load(path, name, shape):\n"
+            "    # shape: one entry per data axis, an int for a fixed dim (checked) or\n"
+            "    # an inferred dim's name (checked inside run()).\n"
             "    if path.endswith(\".mtx\"):\n"
             "        try:\n"
             "            from scipy.io import mmread\n"
             "        except ImportError:\n"
             "            raise ImportError(\"edgecc load/save requires scipy: pip install scipy\")\n"
             "        m = mmread(path)\n"
-            "        return (m.toarray() if hasattr(m, \"toarray\") else m).tolist()\n"
-            "    raise ValueError(\"edgecc load: unsupported file extension for %r (supported: .mtx)\" % path)\n"
+            "        a = m.toarray() if hasattr(m, \"toarray\") else m\n"
+            "    elif path.endswith(\".npy\"):\n"
+            "        try:\n"
+            "            import numpy as np\n"
+            "        except ImportError:\n"
+            "            raise ImportError(\"edgecc .npy load/save requires numpy: pip install numpy\")\n"
+            "        a = np.load(path, allow_pickle=False)\n"
+            "        if a.dtype.kind not in (\"b\", \"i\", \"u\", \"f\"):\n"
+            "            raise ValueError(\"edgecc load: \\\"%s\\\" for '%s' has dtype %s; edgecc tensors are real \"\n"
+            "                             \"(split Re/Im into separate tensors or a stacked axis)\" % (path, name, a.dtype))\n"
+            "    else:\n"
+            "        raise ValueError(\"edgecc load: unsupported file extension for %r (supported: .mtx, .npy)\" % path)\n"
+            "    if a.ndim != len(shape) or any(isinstance(want, int) and want != got\n"
+            "                                   for want, got in zip(shape, a.shape)):\n"
+            "        raise ValueError(\"edgecc load: \\\"%s\\\" for '%s' has shape %s, expected %s\" % (\n"
+            "            path, name, \"(\" + \", \".join(str(x) for x in a.shape) + \")\",\n"
+            "            \"(\" + \", \".join(str(x) for x in shape) + \")\"))\n"
+            "    return a.astype(float).tolist()\n"
             "\n"
             "def _edgecc_save(tensor, path):\n"
             "    if path.endswith(\".mtx\"):\n"
@@ -909,7 +969,14 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
             "            a = a.reshape(-1, 1)   # Matrix Market needs 2-D; store a vector as a column\n"
             "        mmwrite(path, a)\n"
             "        return\n"
-            "    raise ValueError(\"edgecc save: unsupported file extension for %r (supported: .mtx)\" % path)\n"
+            "    if path.endswith(\".npy\"):\n"
+            "        try:\n"
+            "            import numpy as np\n"
+            "        except ImportError:\n"
+            "            raise ImportError(\"edgecc .npy load/save requires numpy: pip install numpy\")\n"
+            "        np.save(path, np.array(tensor, dtype=float))   # full shape, float64\n"
+            "        return\n"
+            "    raise ValueError(\"edgecc save: unsupported file extension for %r (supported: .mtx, .npy)\" % path)\n"
             "\n");
     }
 
@@ -1287,8 +1354,11 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
         cb.indent++;
         cb_indent(&cb);
         cb_append(&cb, "print(\"usage: <prog> [");
-        for (int k = 0; k < num_file_ins; k++)
-            cb_appendf(&cb, "%s%s.mtx", k > 0 ? " " : "", file_in_names[k]);
+        for (int k = 0; k < num_file_ins; k++) {
+            /* semantic.c guarantees the default path ends in .mtx or .npy */
+            const char *ext = strrchr(file_in_paths[k], '.');
+            cb_appendf(&cb, "%s%s%s", k > 0 ? " " : "", file_in_names[k], ext ? ext : "");
+        }
         cb_append(&cb, "]\"); sys.exit(0)\n");
         cb.indent--;
         {
@@ -1296,8 +1366,10 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
             for (int j = 0; j < num_file_ins; j++) {
                 cb_indent(&cb);
                 cb_appendf(&cb,
-                    "%s = _edgecc_load(_argv[%d]) if len(_argv) > %d else _edgecc_load(\"%s\")\n",
-                    file_in_names[j], j, j, file_in_paths[j]);
+                    "%s = _edgecc_load(_argv[%d] if len(_argv) > %d else \"%s\", \"%s\", ",
+                    file_in_names[j], j, j, file_in_paths[j], file_in_names[j]);
+                emit_load_shape(&cb, ir, file_in_names[j]);
+                cb_append(&cb, ")\n");
             }
             if (k > 0) {
                 cb_indent(&cb);

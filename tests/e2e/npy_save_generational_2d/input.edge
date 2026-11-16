@@ -1,0 +1,10 @@
+// A generational output with two data ranks saved to .npy: every generation,
+// written as a generations x N x N array (as .mtx it would be a compile error).
+dim N = 3;
+tensor G[R=N, C=N]        : float, empty = 0.0;
+tensor T[gen I, R=N, C=N] : float, empty = 0.0;
+init G = [[0.0,1.0,0.0],[0.0,0.0,1.0],[0.0,0.0,0.0]];
+init T = [[0.0,1.0,0.0],[0.0,0.0,1.0],[0.0,0.0,0.0]];
+T[i+1, a, c] = G[a,b] . T[i,b,c] :: map(and, intersect) reduce(or, union);
+stop: stable(T);
+save: T -> "t.npy";
