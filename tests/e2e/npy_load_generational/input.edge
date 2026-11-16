@@ -1,0 +1,15 @@
+// Fixtures g.npy (bool) and f.npy (int32) are written by tests/e2e/npy_fixtures.py.
+// Reachability BFS (two cross-generational tensors) with the adjacency loaded from a
+// bool .npy and generation 0 of the frontier from an int32 .npy; the visited set P is
+// saved with every generation (shape (5, 5): generations x N).
+dim N = *;
+tensor G[R=N, C=N]   : float, empty = 0.0;
+tensor F[gen I, R=N] : float, empty = 0.0;
+tensor P[gen I, R=N] : float, empty = 0.0;
+init G = load("g.npy");
+init F = load("f.npy");
+init P = [1.0, 0.0, 0.0, 0.0, 0.0];
+F[i+1, d] = G[s,d] . F[i,s]   :: map(and, intersect) reduce(or, union);
+P[i+1, d] = P[i,d] . F[i+1,d] :: map(or, union) reduce(or, union);
+stop: stable(P);
+save: P -> "p.npy";

@@ -1,0 +1,1 @@
+edgecc load: "g.npy" for 'G' has shape (0, 3); every axis must be non-empty

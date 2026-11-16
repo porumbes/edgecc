@@ -1,0 +1,6 @@
+// Fixture x.npy is really an .npz archive (written by tests/e2e/npy_fixtures.py).
+dim N = *;
+tensor X[R=N] : float, empty = 0.0;
+tensor Z[R=N] : float, empty = 0.0;
+init X = load("x.npy");
+Z[i] = X[i] . X[i] :: map(mul, intersect) reduce(add, union);

@@ -270,3 +270,10 @@ behavior that is already correct, which must be named as such in the plan).
    `_edgecc_occupancy`). The reserved-names test now collects global names read inside
    `_edgecc*` helper bodies.
 6. Plan text: `fft_split1.edge` has 9 Einsums, not 11.
+7. Final-review wave: `roundtrip_check` `.npy` lines carry and check the saved shape
+   (`npy_save_1d` added); load errors name the file/tensor for reader failures, `.npz`
+   archives under a `.npy` name, non-real dtypes (the Re/Im hint only for complex) and
+   zero-length axes (e2e `npy_string_rejected`, `npy_not_an_array`, `npy_text_file`,
+   `npy_empty_axis`); `expected_runtime_error.txt` lines starting `!` are forbidden text,
+   and an empty file or one beside `expected_output.txt` fails; e2e `npy_load_generational`
+   (bool + int32 inputs, generational save).

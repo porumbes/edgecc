@@ -1,0 +1,1 @@
+edgecc load: "t.npy" for 'T':

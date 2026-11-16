@@ -61,7 +61,7 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 - **Multi-action (fused) Einsums** `(A .1 B) .2 C`: paper-faithful one-line BFS gather/mask (`examples/push_bfs_fused.edge`, `pull_bfs_fused.edge`); transient-scalar intermediate, optional `over=` rank tags.
 - **Generational ranks** (`gen`) store every generation (paper semantics; `run()` returns by default the full watched tensor); stop predicates `||F[i+1]|| == 0`, `X[i+1] == X[i]`, `stable(X)`. Demonstrator: `examples/bfs_paper.edge`.
 - **Cascades:** multiple Einsums per generation, one or more cross-generational tensors plus intra-generation intermediates (Bellman–Ford, reachability BFS).
-- **.npy load/save (DFT gaps G8/G9, batch D):** any-rank .npy load and save, format by extension, load-time shape check for .mtx and .npy.
+- **.npy load/save (DFT gaps G8/G9, batch D):** any-rank .npy load and save, format by extension, load-time shape and dtype check (real floats only) for .mtx and .npy.
 - **File I/O:** Matrix Market `load`/`save`, inferred dims `dim N = *`, argv path overrides; densify-on-load (compute stays dense).
 - **`seed(source=I, value=V)`** source vectors sized to a loaded graph (unblocks BFS/SSSP on real graphs).
 - **SuiteSparse data:** `data/suitesparse/` (vendored karate/lesmis/GD98_a) + `tools/fetch_suitesparse.py` (manifest + sha256).
@@ -142,11 +142,16 @@ commit that fixes it. (Origin in parentheses.)
     case-sensitive suffix). (batch D)
   - An unsupported-extension `save:` of a non-output reports only the extension error (first error
     wins). (batch D)
-  - `npy_complex_rejected` asserts only the message prefix; no e2e loads a generational tensor or a
-    bool/uint `.npy` from a file (a unit test covers the generational shape tuple). (batch D)
-  - `run_e2e.py`: an empty `expected_runtime_error.txt` passes on any non-zero exit; if both
-    `expected_output.txt` and `expected_runtime_error.txt` exist, the error branch wins silently.
-    (batch D)
+  - `seed()` may pick a pin tensor that `__main__` never loads (a loaded tensor no Einsum reads):
+    `emit_seed_init` (`src/codegen.c` ~805) then emits `len(V)` and fails with a `NameError`.
+    Pre-existing (reproduces on main with `.mtx`). (batch D)
+  - The committed FFT oracle (`npy_fft_split_n4`) is N = 4 (`Whi` all zero, H == TWO), so it cannot
+    catch an H/TWO axis swap or a dropped `Whi` term; N = 8 needs approximate comparison in the
+    harness. (batch D)
+  - Set aside by the final reviewer (all pre-existing): a ragged literal init on a repeated inferred
+    dim truncates silently; paths containing `"` or `\` are emitted verbatim into Python string
+    literals; the too-many-argv check runs after the loads; a zero-data-rank `T[gen I]` `.npy` load
+    is accepted. (batch D)
   - `len_expr` (and the older fixed-buffer length expressions) truncate without a closing `)` for
     names over ~245 characters. (batch D)
   - The reserved-names collector would miss a helper-local name that is also read as a global (no

@@ -49,6 +49,18 @@ def main():
     save("npy_repeated_dim_mismatch", "g.npy",
          np.arange(1, 7, dtype=float).reshape(2, 3))
     save("npy_complex_rejected", "c.npy", np.array([1 + 2j, 3 - 1j]))
+    save("npy_string_rejected", "s.npy", np.array(["a", "b"]))
+    save("npy_empty_axis", "g.npy", np.zeros((0, 3)))
+    # An .npz archive under a .npy name: numpy.load returns a NpzFile, not an array.
+    with open(os.path.join(HERE, "npy_not_an_array", "x.npy"), "wb") as f:
+        np.savez(f, a=np.arange(3))
+    with open(os.path.join(HERE, "npy_text_file", "t.npy"), "w") as f:
+        f.write("this is not a numpy file\n")
+    g = np.zeros((5, 5), dtype=bool)
+    for a, b in [(0, 1), (0, 2), (1, 3), (2, 3), (3, 4)]:
+        g[a, b] = True
+    save("npy_load_generational", "g.npy", g)
+    save("npy_load_generational", "f.npy", np.array([1, 0, 0, 0, 0], dtype=np.int32))
     fft_split_n4()
 
 

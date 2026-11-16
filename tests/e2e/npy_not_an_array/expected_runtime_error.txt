@@ -1,0 +1,1 @@
+edgecc load: "x.npy" for 'X' is not a single array (.npz archives are not supported)

@@ -1,1 +1,1 @@
-edgecc load: "c.npy" for 'C' has dtype complex128; edgecc tensors are real
+edgecc load: "c.npy" for 'C' has dtype complex128; edgecc tensors are real (split Re/Im into separate tensors or a stacked axis)

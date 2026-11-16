@@ -1,0 +1,6 @@
+// Fixture t.npy is a plain text file (written by tests/e2e/npy_fixtures.py).
+dim N = *;
+tensor T[R=N] : float, empty = 0.0;
+tensor Z[R=N] : float, empty = 0.0;
+init T = load("t.npy");
+Z[i] = T[i] . T[i] :: map(mul, intersect) reduce(add, union);

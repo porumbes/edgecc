@@ -1,0 +1,7 @@
+// A 1-D result saved to .npy stays 1-D (shape (3,), not a column).
+dim N = 3;
+tensor A[R=N] : float, empty = 0.0;
+tensor Z[R=N] : float, empty = 0.0;
+init A = [1.0, 2.0, 3.0];
+Z[i] = A[i] . A[i] :: map(mul, intersect) reduce(add, union);
+save: Z -> "z.npy";
