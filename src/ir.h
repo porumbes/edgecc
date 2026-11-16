@@ -18,6 +18,7 @@ typedef enum {
     IR_GEN_LOOP_BEGIN,
     IR_GEN_LOOP_END,
     IR_SAVE,
+    IR_OUTPUT,
     IR_FUSED
 } IRType;
 
@@ -104,6 +105,10 @@ typedef struct {
 } IRSave;
 
 typedef struct {
+    char *tensor_name;   /* owned */
+} IROutput;
+
+typedef struct {
     IRGenAlloc cross_gens[MAX_GEN_TENSORS];    /* cross-generational tensors (written at i+1) */
     int num_cross_gens;
     char *watch;                      /* tensor named by the stop predicate (owned) */
@@ -146,6 +151,7 @@ typedef struct {
         IRStore store;
         IRGenLoop gen_loop;
         IRSave save;
+        IROutput output;
         IRFused fused;
     } data;
 } IRInstr;

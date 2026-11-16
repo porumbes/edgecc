@@ -1201,6 +1201,9 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
             case IR_SAVE:
                 /* Save happens in __main__, not inside run(). */
                 break;
+            case IR_OUTPUT:
+                /* Consumed for meta, return and __main__. */
+                break;
             case IR_FUSED:
                 if (!produced_loops) {
                     cb_append(&cb, "\n");

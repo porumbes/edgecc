@@ -832,7 +832,83 @@ TEST(test_semantic_gen_nongen_write_reported_once_per_tensor) {
     semantic_result_free(&r);
 }
 
+static const char *G3_SRC =
+    "dim N = 2;\n"
+    "tensor A[R=N] : float, empty = 0.0;\n"
+    "tensor B[R=N] : float, empty = 0.0;\n"
+    "tensor Z[R=N] : float, empty = 0.0;\n"
+    "init A = [1.0, 2.0];\n"
+    "B[i] = A[i] . A[i] :: map(mul, intersect) reduce(add, union);\n"
+    "Z[i] = B[i] . A[i] :: map(add, intersect) reduce(add, union);\n";
+
+static AstNode *parse_g3_with(const char *tail) {
+    char buf[2048];
+    snprintf(buf, sizeof(buf), "%s%s", G3_SRC, tail);
+    return parse(buf);
+}
+
+TEST(test_semantic_outputs_default_last_einsum) {
+    AstNode *ast = parse_g3_with("");
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    ASSERT_INT_EQ(1, sem.symtab->num_outputs);
+    ASSERT_STR_EQ("Z", sem.symtab->outputs[0]);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
+TEST(test_semantic_outputs_listed_in_order) {
+    AstNode *ast = parse_g3_with("output: Z, B;\n");
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    ASSERT_INT_EQ(2, sem.symtab->num_outputs);
+    ASSERT_STR_EQ("Z", sem.symtab->outputs[0]);
+    ASSERT_STR_EQ("B", sem.symtab->outputs[1]);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
+TEST(test_semantic_two_saves_in_source_order) {
+    AstNode *ast = parse_g3_with(
+        "output: B, Z;\n"
+        "save: Z -> \"z.mtx\";\n"
+        "save: B -> \"b.mtx\";\n");
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    ASSERT_INT_EQ(2, sem.symtab->num_saves);
+    ASSERT_STR_EQ("Z", sem.symtab->save_tensors[0]);
+    ASSERT_STR_EQ("z.mtx", sem.symtab->save_paths[0]);
+    ASSERT_STR_EQ("B", sem.symtab->save_tensors[1]);
+    ASSERT_STR_EQ("b.mtx", sem.symtab->save_paths[1]);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
+TEST(test_semantic_outputs_default_watch) {
+    AstNode *ast = parse(
+        "dim N = 3;\n"
+        "tensor G[R=N, C=N]  : float, empty = 0.0;\n"
+        "tensor F[gen I, R=N] : float, empty = 0.0;\n"
+        "tensor P[gen I, R=N] : float, empty = 0.0;\n"
+        "init G = [[0.0,1.0,0.0],[0.0,0.0,1.0],[0.0,0.0,0.0]];\n"
+        "init F = [1.0, 0.0, 0.0];\n"
+        "init P = [1.0, 0.0, 0.0];\n"
+        "F[i+1, d] = G[s,d] . F[i,s]   :: map(and, intersect) reduce(or, union);\n"
+        "P[i+1, d] = P[i,d] . F[i+1,d] :: map(or, union) reduce(or, union);\n"
+        "stop: stable(P);\n");
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    ASSERT_INT_EQ(1, sem.symtab->num_outputs);
+    ASSERT_STR_EQ("P", sem.symtab->outputs[0]);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
 int main(void) {
+    RUN_TEST(test_semantic_outputs_default_last_einsum);
+    RUN_TEST(test_semantic_outputs_listed_in_order);
+    RUN_TEST(test_semantic_two_saves_in_source_order);
+    RUN_TEST(test_semantic_outputs_default_watch);
     RUN_TEST(test_valid_gemm);
     RUN_TEST(test_semantic_stop_equal_undeclared_reports_once);
     RUN_TEST(test_semantic_stop_occupancy);
