@@ -46,6 +46,8 @@ def main():
          np.array([[INF, 1, 4], [INF, INF, 2], [INF, INF, INF]], dtype=float))
     save("npy_wrong_ndim", "a.npy", np.array([[1, 2], [3, 4]], dtype=float))
     save("npy_wrong_size", "g.npy", np.eye(4))
+    save("npy_repeated_dim_mismatch", "g.npy",
+         np.arange(1, 7, dtype=float).reshape(2, 3))
     save("npy_complex_rejected", "c.npy", np.array([1 + 2j, 3 - 1j]))
     fft_split_n4()
 
