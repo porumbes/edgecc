@@ -1,0 +1,13 @@
+// The iterative driver feeds run()'s single result back; a multi-output
+// kernel must be rejected with a clear message.
+dim S = 3;
+dim D = 3;
+tensor G[R=S, C=D] : float, empty = inf;
+tensor F[R=S]      : float, empty = inf;
+tensor F1[R=D]     : float, empty = inf;
+tensor H[R=D]      : float, empty = inf;
+init G = [[0.0, 1.0, inf], [inf, 0.0, 1.0], [inf, inf, 0.0]];
+init F = [0.0, inf, inf];
+F1[d] = G[s,d] . F[s] :: map(add, intersect) reduce(min, union);
+H[d]  = F1[d] . F1[d] :: map(min, intersect) reduce(min, union);
+output: F1, H;

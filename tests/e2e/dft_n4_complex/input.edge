@@ -1,0 +1,24 @@
+// DFT gap G3: Re and Im of a 4-point DFT from one kernel.
+// x = [1, 2+1j, 3j, 0.5+0.5j]; expected = numpy.fft.fft(x).
+dim N = 4;
+tensor Wre[R=N, C=N] : float, empty = 0.0;
+tensor Wim[R=N, C=N] : float, empty = 0.0;
+tensor Xre[R=N] : float, empty = 0.0;
+tensor Xim[R=N] : float, empty = 0.0;
+tensor P1[R=N] : float, empty = 0.0;
+tensor P2[R=N] : float, empty = 0.0;
+tensor P3[R=N] : float, empty = 0.0;
+tensor P4[R=N] : float, empty = 0.0;
+tensor Yre[R=N] : float, empty = 0.0;
+tensor Yim[R=N] : float, empty = 0.0;
+init Wre = [[1.0, 1.0, 1.0, 1.0], [1.0, 0.0, -1.0, 0.0], [1.0, -1.0, 1.0, -1.0], [1.0, 0.0, -1.0, 0.0]];
+init Wim = [[0.0, 0.0, 0.0, 0.0], [0.0, -1.0, 0.0, 1.0], [0.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, -1.0]];
+init Xre = [1.0, 2.0, 0.0, 0.5];
+init Xim = [0.0, 1.0, 3.0, 0.5];
+P1[k] = Wre[k,n] . Xre[n] :: map(mul, intersect) reduce(add, union);
+P2[k] = Wim[k,n] . Xim[n] :: map(mul, intersect) reduce(add, union);
+P3[k] = Wre[k,n] . Xim[n] :: map(mul, intersect) reduce(add, union);
+P4[k] = Wim[k,n] . Xre[n] :: map(mul, intersect) reduce(add, union);
+Yre[k] = P1[k] . P2[k] :: map(sub, union) reduce(add, union);
+Yim[k] = P3[k] . P4[k] :: map(add, union) reduce(add, union);
+output: Yre, Yim;

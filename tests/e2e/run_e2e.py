@@ -80,7 +80,8 @@ def run_test(test_dir, edgecc_bin):
                 "with contextlib.redirect_stdout(io.StringIO()):\n"
                 "    g = runpy.run_path(path, run_name='__main__')\n"
                 "m = g['__edgecc_meta__']\n"
-                "first = g[m['output']]\n"
+                "outs = m['outputs']\n"
+                "first = g[outs[0]] if len(outs) == 1 else tuple(g[n] for n in outs)\n"
                 "second = g['run'](*[g[n] for n in m['inputs']])\n"
                 "if first != second:\n"
                 "    sys.exit('run() is not repeatable: %r then %r' % (first, second))\n"
@@ -97,19 +98,25 @@ def run_test(test_dir, edgecc_bin):
         rt = os.path.join(test_dir, "roundtrip_check")
         if os.path.exists(rt) and HAVE_SCIPY:
             from scipy.io import mmread
-            saved = os.path.join(test_dir, "result.mtx")
-            if not os.path.exists(saved):
-                print(f"  FAIL {name}: expected saved result.mtx not found")
-                return False
-            m = mmread(saved)
-            arr = m.toarray() if hasattr(m, "toarray") else m
-            vals = arr.flatten().tolist()
             with open(rt) as f:
-                want = [float(x) for x in f.read().split()]
-            os.unlink(saved)
-            if vals != want:
-                print(f"  FAIL {name}: round-tripped {vals} != expected {want}")
-                return False
+                lines = [ln.strip() for ln in f if ln.strip()]
+            if any(":" in ln for ln in lines):
+                checks = [(ln.split(":", 1)[0].strip(), ln.split(":", 1)[1]) for ln in lines]
+            else:
+                checks = [("result.mtx", " ".join(lines))]
+            for fname, nums in checks:
+                saved = os.path.join(test_dir, fname)
+                if not os.path.exists(saved):
+                    print(f"  FAIL {name}: expected saved {fname} not found")
+                    return False
+                m = mmread(saved)
+                arr = m.toarray() if hasattr(m, "toarray") else m
+                vals = arr.flatten().tolist()
+                want = [float(x) for x in nums.split()]
+                os.unlink(saved)
+                if vals != want:
+                    print(f"  FAIL {name}: {fname} round-tripped {vals} != expected {want}")
+                    return False
 
         print(f"  PASS {name}")
         return True
