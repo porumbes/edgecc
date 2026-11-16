@@ -7,6 +7,7 @@
     { "include": "#comments" },
     { "include": "#action-map" },
     { "include": "#action-reduce" },
+    { "include": "#directives" },
     { "include": "#declarations" },
     { "include": "#literals" },
     { "include": "#operators" },
@@ -16,6 +17,10 @@
     "comments": {
       "match": "//.*$",
       "name": "comment.line.double-slash.edge"
+    },
+    "directives": {
+      "match": "\\b(output|save|stop)\\b(?=\\s*:)",
+      "name": "keyword.control.directive.edge"
     },
     "declarations": {
       "match": "\\b(dim|tensor|init|empty)\\b",
