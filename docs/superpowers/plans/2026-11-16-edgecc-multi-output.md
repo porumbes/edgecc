@@ -50,7 +50,7 @@
 **Interfaces:**
 - Produces: `NODE_OUTPUT`; `typedef struct { char **names; int count; } OutputData;` reachable as `node->data.output`; `AstNode *ast_output_new(char **names, int count)` (takes ownership of `names` and each string); `TOK_OUTPUT`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `tests/unit/test_lexer.c`, after `test_stop_keyword`, add (and `RUN_TEST(test_output_keyword);` in `main`):
 ```c
@@ -107,12 +107,12 @@ output: ;
 syntax error
 ```
 
-- [ ] **Step 2: Run them and confirm they fail**
+- [x] **Step 2: Run them and confirm they fail**
 
 Run: `make -C build 2>&1 | tail -3`
 Expected: `test_lexer.c` / `test_parser.c` fail to compile (`TOK_OUTPUT`, `NODE_OUTPUT` undeclared). That is the red state for this task. (`output_empty_list` already passes today because `output` lexes as an identifier and the line is a syntax error; it guards the rule after the keyword exists.)
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `src/lexer.l`, after the `"save"` line:
 ```
@@ -187,12 +187,12 @@ output_names:
 ```
 Grep `src/` for any other `switch` over `NodeType` with a `case NODE_SAVE:` and add `case NODE_OUTPUT:` beside it so `-Wswitch` stays quiet.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `make -C build 2>&1 | grep -E "error|warning:"; ./build/test_lexer | tail -1; ./build/test_parser | tail -1; python3 tests/negative/run_negative.py build/edgecc 2>&1 | tail -1; ctest --test-dir build 2>&1 | tail -3`
 Expected: no warnings; lexer and parser tests all pass; all negatives pass; `100% tests passed`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/lexer.l src/parser.y src/ast.h src/ast.c src/semantic.c tests/unit/test_lexer.c tests/unit/test_parser.c tests/negative/output_empty_list
@@ -224,7 +224,7 @@ B[i] = A[i] . A[i] :: map(mul, intersect) reduce(add, union);
 Z[i] = B[i] . A[i] :: map(add, intersect) reduce(add, union);
 ```
 
-- [ ] **Step 1: Write the negative tests**
+- [x] **Step 1: Write the negative tests**
 
 Each `input.edge` is a one-line `//` comment, then the G3 program, then the lines shown. Each `expected_errors.txt` holds the line shown.
 
@@ -248,7 +248,7 @@ Reconciliation (lifted restriction "save must target the returned tensor"; each 
 
 Also grep `tests/` for `only one save directive` and `is not the tensor run() returns`; any other hit gets the same treatment (list it in the report).
 
-- [ ] **Step 2: Write the unit tests**
+- [x] **Step 2: Write the unit tests**
 
 In `tests/unit/test_semantic.c`, before `main` (and `RUN_TEST` each):
 ```c
@@ -364,12 +364,12 @@ TEST(test_ir_outputs_then_saves) {
 }
 ```
 
-- [ ] **Step 3: Run and confirm red**
+- [x] **Step 3: Run and confirm red**
 
 Run: `make -C build 2>&1 | grep -E "error" | head -5; python3 tests/negative/run_negative.py build/edgecc 2>&1 | grep -i "fail\|passed"`
 Expected: `test_semantic.c` / `test_ir.c` fail to compile (`num_outputs`, `IR_OUTPUT` undeclared); negatives: the 7 new tests and the 4 reconciled tests FAIL (old messages / programs accepted), all others pass. These are the transiently red tests until Step 5.
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 `src/semantic.h`: replace the two fields
 ```c
@@ -511,7 +511,7 @@ In `ir_free`, after the `IR_SAVE` case: `case IR_OUTPUT: free(instr->data.output
 ```
 (Codegen still returns the last stored tensor until Task 3; that is expected.)
 
-- [ ] **Step 5: Run everything**
+- [x] **Step 5: Run everything**
 
 Run: `make -C build 2>&1 | grep -E "error|warning:"; ./build/test_semantic | tail -1; ./build/test_ir | tail -1; python3 tests/negative/run_negative.py build/edgecc 2>&1 | grep -i "fail\|passed"; ctest --test-dir build 2>&1 | tail -3`
 Expected: no warnings; all unit tests pass; all negatives pass; `100% tests passed`. Also confirm nothing real is newly rejected:
@@ -520,7 +520,7 @@ for f in examples/*.edge tests/e2e/*/input.edge tests/e2e/iterative/*/kernel.edg
 ```
 Expected: no output.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/semantic.h src/semantic.c src/ir.h src/ir.c src/codegen.c tests/unit/test_semantic.c tests/unit/test_ir.c tests/negative
@@ -545,7 +545,7 @@ save: must target an output, once per tensor and per path; the old
 - Consumes: Task 2's `IR_OUTPUT` instructions (`instr->data.output.tensor_name`), in return order, and `IR_SAVE` in source order.
 - Produces: generated-code ABI from the spec: `"outputs": [...]` in meta (plus `"output"` only for one output), `return X` / `return (X, Y)`, `X, Y = run(...)`, one `print` per output.
 
-- [ ] **Step 1: Write the codegen unit tests**
+- [x] **Step 1: Write the codegen unit tests**
 
 In `tests/unit/test_codegen.c`, before `int main` (and `RUN_TEST` each at the end of `main`):
 ```c
@@ -604,7 +604,7 @@ TEST(test_codegen_saves_follow_prints) {
 ```
 (`parse` is the existing helper in this file. If the existing tests already define a helper with the same purpose, use it instead of `codegen_of`, and say so in the report.)
 
-- [ ] **Step 2: Write the e2e tests**
+- [x] **Step 2: Write the e2e tests**
 
 Each directory gets `input.edge` and `expected_output.txt`; markers are empty files. G3 is the base program from Task 2.
 
@@ -734,7 +734,7 @@ expected:
 iterative driver needs a single-output kernel
 ```
 
-- [ ] **Step 3: Update the harnesses**
+- [x] **Step 3: Update the harnesses**
 
 `tests/e2e/run_e2e.py`, `run_twice` snippet: replace the line `"first = g[m['output']]\n"` and the `second = ...` line with:
 ```python
@@ -791,7 +791,7 @@ and, so an `expect_error` test cannot pass by accident, directly before the fina
             return False
 ```
 
-- [ ] **Step 4: Run and confirm red for the right reasons**
+- [x] **Step 4: Run and confirm red for the right reasons**
 
 Run: `make -C build && ./build/test_codegen | tail -3; python3 tests/e2e/run_e2e.py build/edgecc 2>&1 | grep -i "fail\|passed"; python3 tests/e2e/iterative/run_iterative.py build/edgecc 2>&1 | tail -3`
 Expected:
@@ -800,7 +800,7 @@ Expected:
 - iterative: `multi_output_rejected` FAILS (no `"outputs"` in meta yet, so the guard does not fire and the expect_error check reports "expected an error").
 These are the transiently red tests until Step 6.
 
-- [ ] **Step 5: Implement in `src/codegen.c`**
+- [x] **Step 5: Implement in `src/codegen.c`**
 
 (a) Replace `collect_io` (and its comment) with a version without the output out-parameter:
 ```c
@@ -931,12 +931,12 @@ with
 
 Build must be warning-free; grep `codegen.c` for any remaining `output` variable use (`grep -n -w output src/codegen.c`) — only comments and the `"output"` meta string may remain.
 
-- [ ] **Step 6: Run everything**
+- [x] **Step 6: Run everything**
 
 Run: `make -C build 2>&1 | grep -E "error|warning:"; ./build/test_codegen | tail -1; python3 tests/e2e/run_e2e.py build/edgecc 2>&1 | grep -i "fail\|passed"; python3 tests/e2e/iterative/run_iterative.py build/edgecc 2>&1 | tail -2; ctest --test-dir build 2>&1 | tail -3`
 Expected: no warnings; `test_codegen` all pass (existing asserts `"output": "Z"`, `"output": "D"`, `"output": "F"` still hold); all e2e pass; iterative passes including `multi_output_rejected (rejected as expected)`; `100% tests passed, 0 tests failed out of 14` (trace and viz tests included).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/codegen.c tests/unit/test_codegen.c tests/e2e
@@ -960,7 +960,7 @@ Iterative driver rejects multi-output kernels (expect_error marker)."
 
 `stop`, `save` and the new `output` are all statement-leading directives and none is highlighted today. Add one pattern for the three so `output` is not the odd one out.
 
-- [ ] **Step 1: Write the failing grammar test**
+- [x] **Step 1: Write the failing grammar test**
 
 `editors/vscode/test/grammar/directives.test.edge` (keep the header exactly; the `^` columns must line up under the token — check them character by character):
 ```
@@ -973,12 +973,12 @@ stop: stable(P);
 // <- keyword.control.directive.edge
 ```
 
-- [ ] **Step 2: Run it and confirm it fails**
+- [x] **Step 2: Run it and confirm it fails**
 
 Run: `cd editors/vscode && npm run test:grammar 2>&1 | tail -15`
 Expected: `directives.test.edge` fails (scopes are `variable.other.edge` or none); the other grammar fixtures pass. (If `node_modules` is missing, run `npm install` first.)
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `edge.tmLanguage.json`, add to `repository`:
 ```json
@@ -989,12 +989,12 @@ In `edge.tmLanguage.json`, add to `repository`:
 ```
 and insert `{ "include": "#directives" }` into the top-level `patterns` array directly before `{ "include": "#declarations" }`.
 
-- [ ] **Step 4: Run the grammar and unit tests**
+- [x] **Step 4: Run the grammar and unit tests**
 
 Run: `cd editors/vscode && npm run test:grammar 2>&1 | tail -5 && npm run test:unit 2>&1 | tail -5`
 Expected: all grammar fixtures pass (including the new one); unit tests pass. (The integration test needs a VS Code download; skip it unless already cached.)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add editors/vscode/syntaxes/edge.tmLanguage.json editors/vscode/test/grammar/directives.test.edge
@@ -1011,7 +1011,7 @@ git commit -m "vscode: highlight the output/save/stop directive keywords"
 **Interfaces:**
 - Consumes: Tasks 1–4 on the branch.
 
-- [ ] **Step 1: Update `CLAUDE.md`**
+- [x] **Step 1: Update `CLAUDE.md`**
 
 (a) In "### File input/output", replace the sentence that begins `` `T` must be the tensor `run()` returns: `` and ends `(1-D results are stored as a column).` with:
 `` `save:` may appear several times; each target must be one of `run()`'s outputs (see "Outputs" below), at most once per tensor and per path. A generational output is written with every generation (generations x N for a 1-D generational tensor; tensors with more than one data rank cannot be saved); 1-D results are stored as a column. ``
@@ -1027,14 +1027,14 @@ Also in the ABI code sample change `__edgecc_meta__ = {"inputs": ["G", "F"], "ou
 
 (e) In the e2e line of "## Test", the `roundtrip_check` marker is not documented; append: `` and `roundtrip_check` (re-reads saved `.mtx` files: whitespace-separated values for `result.mtx`, or one `file.mtx: values` line per file) ``. In the iterative line, append: `` An `expect_error` file holds a message the driver must reject the kernel with. ``
 
-- [ ] **Step 2: Update `docs/roadmap.md`**
+- [x] **Step 2: Update `docs/roadmap.md`**
 
 Set `**Last updated:**` to the current date. Under "### Implemented", after the batch B bullet, add:
 `` - **Multi-output `run()` (DFT gap G3, batch C):** `output: B, Z;` returns a tuple in listed order; `save:` may appear once per output; meta `"outputs"`. ``
 In "### Partial 🚧" → BFS, change `the full 3-step formulation still needs multi-output return, and \`ANY\`/parent-pointer.` to `the full 3-step formulation still needs \`ANY\`/parent-pointer.`
 In "Known issues & tech debt", add any review findings from this branch that were not fixed (deferred minors, parked findings, reviewer "declined to judge" items worth keeping), each tagged `(batch C)`.
 
-- [ ] **Step 3: DFT acceptance (read-only use of the repo root)**
+- [x] **Step 3: DFT acceptance (read-only use of the repo root)**
 
 Mirror the DFT files into a scratch directory so `dft_ref.py` uses this branch's compiler (use the session scratchpad; never write into the repo root):
 ```bash
@@ -1056,11 +1056,11 @@ python3 docs/dft/reference/dft_ref.py check $K/fft_split1.edge --layout split --
 ```
 Run under `bash` (unquoted variable expansion differs in zsh). Expected: every line ends `-> PASS` (all these kernels are single-output, so they are unaffected). If one fails, stop and report rather than editing DFT files. Before running, check `$ROOT/docs/dft/README.md` for the current quickstart; if its commands differ, run the README's commands and say so.
 
-- [ ] **Step 4: Pre-merge gate**
+- [x] **Step 4: Pre-merge gate**
 
 Run: `tools/premerge.sh` (≈1 minute; long timeout). Expected: `GATE PASSED (6 steps)`. Afterwards check `ps aux | grep -E 'edgecc|run_fuzz|build/test_'` and kill any strays by PID.
 
-- [ ] **Step 5: Record deviations, tick the plan, commit**
+- [x] **Step 5: Record deviations, tick the plan, commit**
 
 Append `## Deviations and findings (recorded at Finish, <date>)` to the spec. Known deviation: Task 4 also highlights `save` and `stop` (none of the three directives was highlighted). Add anything else that differed ("None." otherwise). Tick every checkbox of Tasks 1–4 and Task 5 Steps 1–5 (edit the boxes, not the header prose). Then:
 ```bash

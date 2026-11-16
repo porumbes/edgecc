@@ -1,6 +1,6 @@
 # edgecc roadmap & feature status
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-11-16
 
 Legend:  ✅ implemented · 🚧 partial · ❌ planned
 
@@ -66,11 +66,12 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 - **Visualization:** `tools/edgecc_viz.py` with six layouts; non-spring layouts fall back to spring on failure.
 - **Robustness (DFT gaps, batch A):** negative literals; lexer errors fail the compile; no silent caps (any number of `run()` inputs, up to 64 Einsums, hard errors past the other limits); argv/`-h`/`file_inputs` share `init` order; `load` targets rank-checked (2-D); warning for read-but-never-initialized tensors.
 - **Intermediates out of the ABI (DFT gaps, batch B):** `run()` takes only read-but-never-written tensors; written tensors start empty inside `run()` (fixes `dim N = *` + intermediate); no `init` on, or read before, a written tensor; an Einsum may not read its own non-generational output; non-generational writes rejected in generational programs.
+- **Multi-output `run()` (DFT gap G3, batch C):** `output: B, Z;` returns a tuple in listed order; `save:` may appear once per output; meta `"outputs"`.
 - **Tooling/tests:** CLI flags; VS Code extension (Tier 1); 14 ctest targets (unit, e2e, negative, iterative, trace, viz, fetch-helper, reference, fuzz, reserved-names); `tools/premerge.sh` gate (normal + UBSan suites, long mutation fuzz) required before merging.
 
 ### Partial 🚧
 - **Merge ops:** 9 of 16 shipped; the 7 `(No,No)→Yes` operators (NOR, equivalence, NAND, ¬→, ¬←, ⇐, ⇒) are not implemented.
-- **BFS (paper-faithful):** masking / pruned / depth BFS work, and unary `¬` (as `!`) now expresses the mask directly (`A . !B :: map(take_left, intersect)`); the full 3-step formulation still needs multi-output return, and `ANY`/parent-pointer.
+- **BFS (paper-faithful):** masking / pruned / depth BFS work, and unary `¬` (as `!`) now expresses the mask directly (`A . !B :: map(take_left, intersect)`); the full 3-step formulation still needs `ANY`/parent-pointer.
 
 ### Planned ❌ (by area)
 - **Language:** hoisting loop-invariant Einsums out of a generational loop; `<<` update op; compute labels; general N-ary nesting & matrix-chain (both-actions-reduce) beyond the two-action fused form; nested cascades / multiple generational ranks; anonymous tensors; unary functions; user-defined compute ops; the 7 remaining merge ops.
@@ -107,6 +108,26 @@ commit that fixes it. (Origin in parentheses.)
     same keep/free compaction loop. (batch B)
   - The once-per-tensor dedupe arrays for E2/E3/E4 are capped at `MAX_TENSORS`; past the
     cap a message could repeat (unreachable today). (batch B)
+  - Stale singular comments in `src/codegen.c` (~1250 "the output gets recomputed by
+    run", ~1314 "output is initialized inside run"). (batch C)
+- **Semantics / diagnostics (batch C)**
+  - When every `output:` entry has an error, `num_outputs == 0` suppresses all `save:`
+    diagnostics; a `save:` of a bad output name reports both "unknown tensor" and "not an
+    output" (mild pile-on). No test covers an output-error-then-save interaction. (batch C)
+  - Pre-existing: `__main__` rebinds cross-generational outputs to their generation lists,
+    so a `run_twice` second `run()` on a generational kernel would get a wrong
+    generation-0 input; more outputs widen it. No test hits it today. (batch C)
+  - More test gaps (batch C): no unit test for a generational tensor in `output:`, or for
+    the >1-data-rank `save:` check with several outputs; the trace harness
+    (`tests/trace/run_trace_tests.py`) never checks `dims.N`, so `watch_not_output` proves
+    no crash but not the `N` value (which `tools/edgecc_viz.py` consumes);
+    `test_codegen_saves_follow_prints` cannot fail for its named risk (it could assert that
+    `B, Z = run(A)` precedes the saves); no committed e2e returns a generational
+    intermediate as an output, nor checks stdout when the watched tensor is not listed
+    (manual probes passed).
+  - `run_e2e.py` `roundtrip_check`: mixed colon/no-colon lines raise `IndexError` instead
+    of a clean FAIL, and a saved `.mtx` is left in the test dir when a check fails early.
+    (batch C)
 
 > Design specs and implementation plans for shipped and in-flight features live under
 > `docs/superpowers/specs/` and `docs/superpowers/plans/`.

@@ -179,3 +179,10 @@ Test-first throughout (each new test fails on `main` first).
 - Trace format changes.
 - `ANY` compute and parent-pointer (coordinate-valued) outputs.
 - 1-D and N-D `load` (batch D, gaps G8/G9).
+
+## Deviations and findings (recorded at Finish, 2026-11-16)
+
+- Task 4 also highlights `save` and `stop` (none of the three directives was highlighted before), not only `output`.
+- Extra commit `8b9d3d6`: with `--emit-trace`, when `output:` omits the stop-watched tensor, the plan's trace header `len(<watch>[0])` raised `TypeError` (in `__main__` the watched name holds only its generation-0 input). The header now takes `N` from the trace's last step in that case (`len(_tr[-1]["tensors"][watch])`); when the watched tensor is an output the header is unchanged. The trace format is unchanged. Test: `tests/trace/watch_not_output`.
+- Plan defect: the iterative harness command in the plan (Task 3 Steps 4/6) needs `--build-dir build --tests-dir tests/e2e/iterative`.
+- `test_codegen_saves_follow_prints` passed before the codegen change (the plan expected it red); the e2e `multi_output_save` test is the red-to-green guard for saving a non-last output.
