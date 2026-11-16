@@ -1358,8 +1358,15 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
             cb_indent(&cb);
             cb_appendf(&cb,
                 "json.dump({\"schema\": \"edgecc-trace/1\", \"kernel\": \"%s\", "
-                "\"dims\": {\"N\": len(%s[0])}, \"gen_tensors\": [",
-                kernel_name, watch);
+                "\"dims\": {\"N\": ", kernel_name);
+            /* N is the watched tensor's length. Returned, it holds every
+               generation; otherwise __main__ never sees it, so read it from
+               the trace's last step, which records every generational tensor. */
+            if (name_in_list(watch, outs, num_outs))
+                cb_appendf(&cb, "len(%s[0])", watch);
+            else
+                cb_appendf(&cb, "len(_tr[-1][\"tensors\"][\"%s\"])", watch);
+            cb_append(&cb, "}, \"gen_tensors\": [");
             {
                 int _first = 1;
                 for (int c = 0; c < num_cross_gens; c++) {
