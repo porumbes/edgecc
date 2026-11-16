@@ -498,7 +498,43 @@ TEST(test_ir_occupancy_stop) {
     ir_free(ir); semantic_result_free(&sem); ast_free(ast);
 }
 
+TEST(test_ir_outputs_then_saves) {
+    AstNode *ast = parse(
+        "dim N = 2;\n"
+        "tensor A[R=N] : float, empty = 0.0;\n"
+        "tensor B[R=N] : float, empty = 0.0;\n"
+        "tensor Z[R=N] : float, empty = 0.0;\n"
+        "init A = [1.0, 2.0];\n"
+        "B[i] = A[i] . A[i] :: map(mul, intersect) reduce(add, union);\n"
+        "Z[i] = B[i] . A[i] :: map(add, intersect) reduce(add, union);\n"
+        "output: Z, B;\n"
+        "save: B -> \"b.mtx\";\n"
+        "save: Z -> \"z.mtx\";\n");
+    SemanticResult sem = semantic_analyze(ast);
+    ASSERT_INT_EQ(0, sem.error_count);
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    const char *want[] = { "OUTPUT Z", "OUTPUT B", "SAVE B b.mtx", "SAVE Z z.mtx" };
+    int n = 0;
+    for (int i = 0; i < ir->count; i++) {
+        char got[64];
+        if (ir->instrs[i].type == IR_OUTPUT)
+            snprintf(got, sizeof(got), "OUTPUT %s", ir->instrs[i].data.output.tensor_name);
+        else if (ir->instrs[i].type == IR_SAVE)
+            snprintf(got, sizeof(got), "SAVE %s %s", ir->instrs[i].data.save.tensor_name,
+                     ir->instrs[i].data.save.path);
+        else continue;
+        ASSERT_TRUE(n < 4);
+        ASSERT_STR_EQ(want[n], got);
+        n++;
+    }
+    ASSERT_INT_EQ(4, n);
+    ir_free(ir);
+    semantic_result_free(&sem);
+    ast_free(ast);
+}
+
 int main(void) {
+    RUN_TEST(test_ir_outputs_then_saves);
     RUN_TEST(test_ir_gemm_structure);
     RUN_TEST(test_ir_load_carries_negate);
     RUN_TEST(test_ir_loop_order);

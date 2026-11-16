@@ -29,6 +29,7 @@ int lex_error_count = 0;
 "seed"              { return TOK_SEED; }
 "over"              { return TOK_OVER; }
 "save"              { return TOK_SAVE; }
+"output"            { return TOK_OUTPUT; }
 "integer"           { return TOK_TYPE_INTEGER; }
 "float"             { return TOK_TYPE_FLOAT; }
 "boolean"           { return TOK_TYPE_BOOLEAN; }

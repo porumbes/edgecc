@@ -1,0 +1,9 @@
+// An input is never written, so it cannot be an output.
+dim N = 2;
+tensor A[R=N] : float, empty = 0.0;
+tensor B[R=N] : float, empty = 0.0;
+tensor Z[R=N] : float, empty = 0.0;
+init A = [1.0, 2.0];
+B[i] = A[i] . A[i] :: map(mul, intersect) reduce(add, union);
+Z[i] = B[i] . A[i] :: map(add, intersect) reduce(add, union);
+output: A, Z;

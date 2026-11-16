@@ -1,0 +1,1 @@
+output: 'A' is not written by any Einsum (inputs are not outputs)

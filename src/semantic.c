@@ -1174,6 +1174,9 @@ SemanticResult semantic_analyze(AstNode *program) {
             case NODE_SAVE:
                 /* Validated in a dedicated pass below (needs all tensors). */
                 break;
+            case NODE_OUTPUT:
+                /* Validated with the save directives after all Einsums. */
+                break;
             default:
                 add_error(&res, "unknown statement type %d", stmt->type);
                 break;
@@ -1252,49 +1255,82 @@ SemanticResult semantic_analyze(AstNode *program) {
         }
     }
 
-    /* Save directive: target must be a tensor that some Einsum writes (an
-       output), so that run() defines it. At most one save directive. */
-    int num_saves = 0;
+    /* run()'s outputs: the `output:` list if present, else the default (the
+       stop-watched tensor, or the output of the last Einsum). */
+    AstNode *out_dir = NULL;
+    for (int i = 0; i < pd->count; i++) {
+        AstNode *s = pd->statements[i];
+        if (s->type != NODE_OUTPUT) continue;
+        if (out_dir) {
+            add_error(&res, "output: only one output directive is allowed");
+            continue;
+        }
+        out_dir = s;
+    }
+    if (out_dir) {
+        for (int k = 0; k < out_dir->data.output.count; k++) {
+            char *nm = out_dir->data.output.names[k];
+            if (!symtab_find_tensor(st, nm))
+                add_error(&res, "output: unknown tensor '%s'", nm);
+            else if (!written_by_some_einsum(pd, nm))
+                add_error(&res, "output: '%s' is not written by any Einsum "
+                                "(inputs are not outputs)", nm);
+            else if (name_present(st->outputs, st->num_outputs, nm))
+                add_error(&res, "output: '%s' listed twice", nm);
+            else if (st->num_outputs < MAX_TENSORS)
+                st->outputs[st->num_outputs++] = nm;
+        }
+    } else {
+        char *def = NULL;
+        if (st->is_iterative) {
+            def = st->stop_watch;
+        } else {
+            for (int j = 0; j < pd->count; j++) {
+                AstNode *s = pd->statements[j];
+                if (s->type == NODE_EINSUM)
+                    def = s->data.einsum.output.tensor_name;
+                else if (s->type == NODE_EINSUM_FUSED)
+                    def = s->data.einsum_fused.output.tensor_name;
+            }
+        }
+        if (def) st->outputs[st->num_outputs++] = def;
+    }
+
+    /* save: each target is one of run()'s outputs, saved once, to its own path. */
     for (int i = 0; i < pd->count; i++) {
         AstNode *s = pd->statements[i];
         if (s->type != NODE_SAVE) continue;
-        if (++num_saves > 1) {
-            add_error(&res, "save: only one save directive is supported");
-            break;
-        }
-        const char *tgt = s->data.save.tensor_name;
-        if (!symtab_find_tensor(st, tgt)) {
+        char *tgt = s->data.save.tensor_name;
+        char *path = s->data.save.path;
+        TensorEntry *ste = symtab_find_tensor(st, tgt);
+        if (!ste) {
             add_error(&res, "save: unknown tensor '%s'", tgt);
             continue;
         }
-        /* run() returns one tensor: the stop-watched one (iterative) or the
-           output of the last Einsum. save must target exactly that tensor. */
-        const char *returned = NULL;
-        if (st->is_iterative) {
-            returned = st->stop_watch;
-        } else {
-            for (int j = 0; j < pd->count; j++) {
-                AstNode *st_j = pd->statements[j];
-                if (st_j->type == NODE_EINSUM)
-                    returned = st_j->data.einsum.output.tensor_name;
-                else if (st_j->type == NODE_EINSUM_FUSED)
-                    returned = st_j->data.einsum_fused.output.tensor_name;
-            }
-        }
-        if (!returned) continue;  /* earlier errors; don't pile on */
-        if (strcmp(tgt, returned) != 0) {
-            add_error(&res, "save: '%s' is not the tensor run() returns ('%s'); saving other "
-                            "tensors needs multi-output return (future work)", tgt, returned);
+        if (st->num_outputs == 0) continue;  /* earlier errors; don't pile on */
+        if (!name_present(st->outputs, st->num_outputs, tgt)) {
+            add_error(&res, "save: '%s' is not an output of run(); add it to the "
+                            "output: list", tgt);
             continue;
         }
-        TensorEntry *ste = symtab_find_tensor(st, tgt);
+        if (name_present(st->save_tensors, st->num_saves, tgt)) {
+            add_error(&res, "save: '%s' is saved twice", tgt);
+            continue;
+        }
+        if (name_present(st->save_paths, st->num_saves, path)) {
+            add_error(&res, "save: path \"%s\" is used twice", path);
+            continue;
+        }
         if (ste->gen_axis >= 0 && ste->num_ranks - 1 > 1) {
             add_error(&res, "save: generational tensor '%s' has more than one data rank "
                             "(with every generation it would be 3-D; .mtx stores at most 2-D)", tgt);
             continue;
         }
-        st->save_tensor = s->data.save.tensor_name;  /* borrowed */
-        st->save_path   = s->data.save.path;          /* borrowed */
+        if (st->num_saves < MAX_TENSORS) {
+            st->save_tensors[st->num_saves] = tgt;
+            st->save_paths[st->num_saves]   = path;
+            st->num_saves++;
+        }
     }
 
     /* Every inferred dim must be pinned by a loaded tensor. */

@@ -75,6 +75,19 @@ def run_test(test_dir, edgecc_bin):
         if not meta:
             print(f"  FAIL {name}: kernel missing __edgecc_meta__")
             return False
+        outputs = meta.get("outputs", [meta.get("output")])
+        if len(outputs) != 1:
+            msg = ("iterative driver needs a single-output kernel; "
+                   "got outputs %s" % outputs)
+            expect = os.path.join(test_dir, "expect_error")
+            if os.path.exists(expect):
+                with open(expect) as f:
+                    want = f.read().strip()
+                if want in msg:
+                    print(f"  PASS {name} (rejected as expected)")
+                    return True
+            print(f"  FAIL {name}: {msg}")
+            return False
 
         with open(driver_yaml) as f:
             cfg = yaml.safe_load(f)
@@ -111,6 +124,10 @@ def run_test(test_dir, edgecc_bin):
                 print(f"    expected: {expected}")
                 print(f"    actual:   {actual}")
                 return False
+
+        if os.path.exists(os.path.join(test_dir, "expect_error")):
+            print(f"  FAIL {name}: expected an error, but the driver ran")
+            return False
 
         print(f"  PASS {name}")
         return True

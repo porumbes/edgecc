@@ -38,6 +38,7 @@ ROWS = [
     ("item", "Inline init literals", "done"),
     ("item", "Matrix Market load / save (densify-on-load)", "done"),
     ("item", "Inferred dims (dim N = *)", "done"),
+    ("item", "Multi-output run() · several save: directives", "done"),
     ("item", "seed(source, value) auto-sized source vectors", "done"),
     ("item", "Multi-source seed · 1-D vector load · +I preprocessing", "planned"),
     ("item", "Sparse storage + sparse compute (CSR/CSC/COO)", "planned"),

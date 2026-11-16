@@ -92,6 +92,14 @@ AstNode *ast_save_new(char *tensor_name, char *path) {
     return node;
 }
 
+AstNode *ast_output_new(char **names, int count) {
+    AstNode *node = calloc(1, sizeof(AstNode));
+    node->type = NODE_OUTPUT;
+    node->data.output.names = names;
+    node->data.output.count = count;
+    return node;
+}
+
 AstNode *ast_einsum_new(TensorRef output, TensorRef input1, TensorRef input2,
                          OperatorType map_op, MergeOp map_merge_op,
                          OperatorType reduce_op, MergeOp reduce_merge_op) {
@@ -255,6 +263,11 @@ void ast_free(AstNode *node) {
         case NODE_SAVE:
             free(node->data.save.tensor_name);
             free(node->data.save.path);
+            break;
+        case NODE_OUTPUT:
+            for (int i = 0; i < node->data.output.count; i++)
+                free(node->data.output.names[i]);
+            free(node->data.output.names);
             break;
     }
     free(node);

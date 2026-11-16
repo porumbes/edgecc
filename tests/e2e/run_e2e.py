@@ -11,6 +11,20 @@ try:
 except ImportError:
     HAVE_SCIPY = False
 
+def parse_roundtrip(path):
+    """Return ([(file, values)], error). `file.mtx: values` lines, or bare values
+    for result.mtx. Mixed formats are an error."""
+    with open(path) as f:
+        lines = [ln.strip() for ln in f if ln.strip()]
+    colon = [":" in ln for ln in lines]
+    if any(colon) and not all(colon):
+        names = [(ln.split(":", 1)[0].strip(), "") for ln in lines if ":" in ln]
+        return names + [("result.mtx", "")], "roundtrip_check mixes 'file.mtx: values' lines with bare lines"
+    if lines and all(colon):
+        return [(ln.split(":", 1)[0].strip(), ln.split(":", 1)[1]) for ln in lines], None
+    return [("result.mtx", " ".join(lines))], None
+
+
 def run_test(test_dir, edgecc_bin):
     name = os.path.basename(test_dir)
     input_file = os.path.join(test_dir, "input.edge")
@@ -80,7 +94,8 @@ def run_test(test_dir, edgecc_bin):
                 "with contextlib.redirect_stdout(io.StringIO()):\n"
                 "    g = runpy.run_path(path, run_name='__main__')\n"
                 "m = g['__edgecc_meta__']\n"
-                "first = g[m['output']]\n"
+                "outs = m['outputs']\n"
+                "first = g[outs[0]] if len(outs) == 1 else tuple(g[n] for n in outs)\n"
                 "second = g['run'](*[g[n] for n in m['inputs']])\n"
                 "if first != second:\n"
                 "    sys.exit('run() is not repeatable: %r then %r' % (first, second))\n"
@@ -97,24 +112,35 @@ def run_test(test_dir, edgecc_bin):
         rt = os.path.join(test_dir, "roundtrip_check")
         if os.path.exists(rt) and HAVE_SCIPY:
             from scipy.io import mmread
-            saved = os.path.join(test_dir, "result.mtx")
-            if not os.path.exists(saved):
-                print(f"  FAIL {name}: expected saved result.mtx not found")
+            checks, err = parse_roundtrip(rt)
+            if err:
+                print(f"  FAIL {name}: {err}")
                 return False
-            m = mmread(saved)
-            arr = m.toarray() if hasattr(m, "toarray") else m
-            vals = arr.flatten().tolist()
-            with open(rt) as f:
-                want = [float(x) for x in f.read().split()]
-            os.unlink(saved)
-            if vals != want:
-                print(f"  FAIL {name}: round-tripped {vals} != expected {want}")
-                return False
+            for fname, nums in checks:
+                saved = os.path.join(test_dir, fname)
+                if not os.path.exists(saved):
+                    print(f"  FAIL {name}: expected saved {fname} not found")
+                    return False
+                m = mmread(saved)
+                arr = m.toarray() if hasattr(m, "toarray") else m
+                vals = arr.flatten().tolist()
+                want = [float(x) for x in nums.split()]
+                os.unlink(saved)
+                if vals != want:
+                    print(f"  FAIL {name}: {fname} round-tripped {vals} != expected {want}")
+                    return False
 
         print(f"  PASS {name}")
         return True
     finally:
         os.unlink(tmp_py)
+        # A failed check must not leave saved files behind in the test dir.
+        rt_path = os.path.join(test_dir, "roundtrip_check")
+        if os.path.exists(rt_path):
+            for fname, _ in parse_roundtrip(rt_path)[0]:
+                leftover = os.path.join(test_dir, fname)
+                if os.path.exists(leftover):
+                    os.unlink(leftover)
 
 
 def main():

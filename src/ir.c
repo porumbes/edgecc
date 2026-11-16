@@ -377,10 +377,14 @@ IRProgram *ir_lower(AstNode *program, SymbolTable *symtab) {
         }
     }
 
-    if (symtab->save_tensor) {
+    for (int k = 0; k < symtab->num_outputs; k++) {
+        IRInstr *o = ir_emit(ir, IR_OUTPUT);
+        o->data.output.tensor_name = dup_str(symtab->outputs[k]);
+    }
+    for (int k = 0; k < symtab->num_saves; k++) {
         IRInstr *s = ir_emit(ir, IR_SAVE);
-        s->data.save.tensor_name = dup_str(symtab->save_tensor);
-        s->data.save.path = dup_str(symtab->save_path);
+        s->data.save.tensor_name = dup_str(symtab->save_tensors[k]);
+        s->data.save.path = dup_str(symtab->save_paths[k]);
     }
 
     return ir;
@@ -428,6 +432,9 @@ void ir_free(IRProgram *ir) {
             case IR_SAVE:
                 free(instr->data.save.tensor_name);
                 free(instr->data.save.path);
+                break;
+            case IR_OUTPUT:
+                free(instr->data.output.tensor_name);
                 break;
             case IR_LOAD:
                 free(instr->data.load.tensor_name);
@@ -584,6 +591,9 @@ void ir_dump(IRProgram *ir, FILE *out) {
             case IR_SAVE:
                 fprintf(out, "SAVE(%s -> %s)\n",
                         instr->data.save.tensor_name, instr->data.save.path);
+                break;
+            case IR_OUTPUT:
+                fprintf(out, "OUTPUT(%s)\n", instr->data.output.tensor_name);
                 break;
             case IR_FUSED: {
                 IRFused *fu = &instr->data.fused;

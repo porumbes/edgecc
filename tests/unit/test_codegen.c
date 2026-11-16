@@ -690,6 +690,59 @@ TEST(test_codegen_fused_intermediate_not_a_param) {
     ast_free(ast);
 }
 
+static char *codegen_of(const char *src) {
+    AstNode *ast = parse(src);
+    SemanticResult sem = semantic_analyze(ast);
+    if (sem.error_count != 0) { semantic_result_free(&sem); ast_free(ast); return NULL; }
+    IRProgram *ir = ir_lower(ast, sem.symtab);
+    char *code = codegen_python(ir);
+    ir_free(ir);
+    semantic_result_free(&sem);
+    ast_free(ast);
+    return code;
+}
+
+#define G3_PROGRAM \
+    "dim N = 2;\n" \
+    "tensor A[R=N] : float, empty = 0.0;\n" \
+    "tensor B[R=N] : float, empty = 0.0;\n" \
+    "tensor Z[R=N] : float, empty = 0.0;\n" \
+    "init A = [1.0, 2.0];\n" \
+    "B[i] = A[i] . A[i] :: map(mul, intersect) reduce(add, union);\n" \
+    "Z[i] = B[i] . A[i] :: map(add, intersect) reduce(add, union);\n"
+
+TEST(test_codegen_multi_output_abi) {
+    char *code = codegen_of(G3_PROGRAM "output: Z, B;\n");
+    ASSERT_NOT_NULL(code);
+    ASSERT_TRUE(strstr(code, "\"outputs\": [\"Z\", \"B\"]") != NULL);
+    ASSERT_TRUE(strstr(code, "\"output\":") == NULL);
+    ASSERT_TRUE(strstr(code, "    return (Z, B)\n") != NULL);
+    ASSERT_TRUE(strstr(code, "    Z, B = run(A)\n    print(Z)\n    print(B)\n") != NULL);
+    free(code);
+}
+
+TEST(test_codegen_single_output_abi) {
+    char *code = codegen_of(G3_PROGRAM);
+    ASSERT_NOT_NULL(code);
+    ASSERT_TRUE(strstr(code, "\"output\": \"Z\",\n    \"outputs\": [\"Z\"],\n") != NULL);
+    ASSERT_TRUE(strstr(code, "    return Z\n") != NULL);
+    ASSERT_TRUE(strstr(code, "    Z = run(A)\n    print(Z)\n") != NULL);
+    free(code);
+}
+
+TEST(test_codegen_saves_follow_prints) {
+    char *code = codegen_of(G3_PROGRAM
+        "output: B, Z;\n"
+        "save: Z -> \"z.mtx\";\n"
+        "save: B -> \"b.mtx\";\n");
+    ASSERT_NOT_NULL(code);
+    ASSERT_TRUE(strstr(code,
+        "    print(Z)\n"
+        "    _edgecc_save(Z, \"z.mtx\")\n"
+        "    _edgecc_save(B, \"b.mtx\")\n") != NULL);
+    free(code);
+}
+
 int main(void) {
     RUN_TEST(test_codegen_fused_push);
     RUN_TEST(test_codegen_fused_pull);
@@ -717,5 +770,8 @@ int main(void) {
     RUN_TEST(test_codegen_file_inputs_init_order);
     RUN_TEST(test_codegen_intermediate_not_a_param);
     RUN_TEST(test_codegen_fused_intermediate_not_a_param);
+    RUN_TEST(test_codegen_multi_output_abi);
+    RUN_TEST(test_codegen_single_output_abi);
+    RUN_TEST(test_codegen_saves_follow_prints);
     return test_report();
 }

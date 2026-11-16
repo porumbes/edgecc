@@ -1,6 +1,6 @@
 # edgecc roadmap & feature status
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-11-16
 
 Legend:  ✅ implemented · 🚧 partial · ❌ planned
 
@@ -29,6 +29,7 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 | Inline `init` literals | ✅ |
 | Matrix Market `load` / `save` (densify-on-load) | ✅ |
 | Inferred dims (`dim N = *`) | ✅ |
+| Multi-output `run()` (`output: A, B;`) · several `save:` directives | ✅ |
 | `seed(source, value)` source vectors (auto-size to loaded graph) | ✅ |
 | Multi-source seed · 1-D / N-D load (today `load` must be 2-D) · diagonal/`I` preprocessing | ❌ |
 | Sparse tensor storage + sparse compute (CSR/CSC/COO) | ❌ |
@@ -58,7 +59,7 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 - **Semirings:** `map(compute, merge) reduce(compute, merge)` over the 8 compute ops and 9 merge ops above.
 - **Unary complement `!`** (the paper's `¬`): per-operand existence complement; paper-faithful BFS masking `A . !B :: map(take_left, intersect)`, equivalent to the `take_left_only` encoding (`examples/push_bfs_neg.edge`).
 - **Multi-action (fused) Einsums** `(A .1 B) .2 C`: paper-faithful one-line BFS gather/mask (`examples/push_bfs_fused.edge`, `pull_bfs_fused.edge`); transient-scalar intermediate, optional `over=` rank tags.
-- **Generational ranks** (`gen`) store every generation (paper semantics; `run()` returns the full watched tensor); stop predicates `||F[i+1]|| == 0`, `X[i+1] == X[i]`, `stable(X)`. Demonstrator: `examples/bfs_paper.edge`.
+- **Generational ranks** (`gen`) store every generation (paper semantics; `run()` returns by default the full watched tensor); stop predicates `||F[i+1]|| == 0`, `X[i+1] == X[i]`, `stable(X)`. Demonstrator: `examples/bfs_paper.edge`.
 - **Cascades:** multiple Einsums per generation, one or more cross-generational tensors plus intra-generation intermediates (Bellman–Ford, reachability BFS).
 - **File I/O:** Matrix Market `load`/`save`, inferred dims `dim N = *`, argv path overrides; densify-on-load (compute stays dense).
 - **`seed(source=I, value=V)`** source vectors sized to a loaded graph (unblocks BFS/SSSP on real graphs).
@@ -66,11 +67,12 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 - **Visualization:** `tools/edgecc_viz.py` with six layouts; non-spring layouts fall back to spring on failure.
 - **Robustness (DFT gaps, batch A):** negative literals; lexer errors fail the compile; no silent caps (any number of `run()` inputs, up to 64 Einsums, hard errors past the other limits); argv/`-h`/`file_inputs` share `init` order; `load` targets rank-checked (2-D); warning for read-but-never-initialized tensors.
 - **Intermediates out of the ABI (DFT gaps, batch B):** `run()` takes only read-but-never-written tensors; written tensors start empty inside `run()` (fixes `dim N = *` + intermediate); no `init` on, or read before, a written tensor; an Einsum may not read its own non-generational output; non-generational writes rejected in generational programs.
+- **Multi-output `run()` (DFT gap G3, batch C):** `output: B, Z;` returns a tuple in listed order; `save:` may appear once per output; meta `"outputs"`.
 - **Tooling/tests:** CLI flags; VS Code extension (Tier 1); 14 ctest targets (unit, e2e, negative, iterative, trace, viz, fetch-helper, reference, fuzz, reserved-names); `tools/premerge.sh` gate (normal + UBSan suites, long mutation fuzz) required before merging.
 
 ### Partial 🚧
 - **Merge ops:** 9 of 16 shipped; the 7 `(No,No)→Yes` operators (NOR, equivalence, NAND, ¬→, ¬←, ⇐, ⇒) are not implemented.
-- **BFS (paper-faithful):** masking / pruned / depth BFS work, and unary `¬` (as `!`) now expresses the mask directly (`A . !B :: map(take_left, intersect)`); the full 3-step formulation still needs multi-output return, and `ANY`/parent-pointer.
+- **BFS (paper-faithful):** masking / pruned / depth BFS work, and unary `¬` (as `!`) now expresses the mask directly (`A . !B :: map(take_left, intersect)`); the full 3-step formulation still needs `ANY`/parent-pointer.
 
 ### Planned ❌ (by area)
 - **Language:** hoisting loop-invariant Einsums out of a generational loop; `<<` update op; compute labels; general N-ary nesting & matrix-chain (both-actions-reduce) beyond the two-action fused form; nested cascades / multiple generational ranks; anonymous tensors; unary functions; user-defined compute ops; the 7 remaining merge ops.
@@ -107,6 +109,32 @@ commit that fixes it. (Origin in parentheses.)
     same keep/free compaction loop. (batch B)
   - The once-per-tensor dedupe arrays for E2/E3/E4 are capped at `MAX_TENSORS`; past the
     cap a message could repeat (unreachable today). (batch B)
+- **Semantics / diagnostics (batch C)**
+  - When every `output:` entry has an error, `num_outputs == 0` suppresses all `save:`
+    diagnostics; a `save:` of a bad output name reports both "unknown tensor" and "not an
+    output" (mild pile-on). No test covers an output-error-then-save interaction. (batch C)
+  - Pre-existing: `__main__` rebinds cross-generational outputs to their generation lists,
+    so a `run_twice` second `run()` on a generational kernel would get a wrong
+    generation-0 input; more outputs widen it. No test hits it today. (batch C)
+  - More test gaps (batch C): no unit test for a generational tensor in `output:`, or for
+    the >1-data-rank `save:` check with several outputs; the trace harness
+    (`tests/trace/run_trace_tests.py`) never checks `dims.N`, so `watch_not_output` proves
+    no crash but not the `N` value (which `tools/edgecc_viz.py` consumes);
+    `test_codegen_saves_follow_prints` cannot fail for its named risk (it could assert that
+    `B, Z = run(A)` precedes the saves).
+  - VS Code `directives.test.edge` has no negative assertions (e.g. that `// output:` stays a
+    comment, or that `output` inside an Einsum is not a directive). (batch C)
+  - `src/semantic.c` caps `num_outputs` / `num_saves` with `< MAX_TENSORS` guards that silently
+    drop entries past 64; unreachable today (outputs are distinct declared tensors, saves are
+    distinct outputs), recorded for consistency with the batch B `MAX_TENSORS` entry. (batch C)
+  - The VS Code directive pattern's lookahead `(?=\s*:)` also matches before `::`; unreachable
+    today because `output`/`save`/`stop` are lexer keywords and cannot name a tensor. (batch C)
+  - The `save:` duplicate-path check compares strings literally, so `"b.mtx"` and `"./b.mtx"` are
+    both accepted and the second overwrites the first. (batch C)
+  - Pre-existing: a `save:` path equal to a `load(...)` path overwrites the input file. (batch C)
+  - Pre-existing: `__main__` prints `inf` as `inf`, which is not a valid Python literal (the spec
+    says each printed line is a Python literal); a consumer parsing stdout must special-case it.
+    (batch C)
 
 > Design specs and implementation plans for shipped and in-flight features live under
 > `docs/superpowers/specs/` and `docs/superpowers/plans/`.

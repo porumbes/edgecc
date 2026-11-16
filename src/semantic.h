@@ -73,8 +73,14 @@ typedef struct {
     /* Intra-generation intermediate tensors (gen-rank, written at offset i). */
     char *intermediates[MAX_TENSORS];   /* borrowed names */
     int num_intermediates;
-    char *save_tensor;   /* tensor named in `save: X -> "..."` (borrowed), or NULL */
-    char *save_path;     /* path in the save directive (borrowed), or NULL */
+    /* Tensors run() returns, in return order (borrowed): the `output:` list,
+       or the default (the stop-watched tensor, or the last Einsum's output). */
+    char *outputs[MAX_TENSORS];
+    int num_outputs;
+    /* save: directives in source order (borrowed). */
+    char *save_tensors[MAX_TENSORS];
+    char *save_paths[MAX_TENSORS];
+    int num_saves;
 } SymbolTable;
 
 typedef struct {

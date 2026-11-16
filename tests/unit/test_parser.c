@@ -379,6 +379,35 @@ TEST(test_parse_init_seed) {
     yy_delete_buffer(buf);
 }
 
+TEST(test_parse_output_directive) {
+    YY_BUFFER_STATE buf = yy_scan_string("output: B, Z;\n");
+    ASSERT_INT_EQ(0, yyparse());
+    ASSERT_NOT_NULL(parse_result);
+    AstNode *o = parse_result->data.program.statements[0];
+    ASSERT_INT_EQ(NODE_OUTPUT, o->type);
+    ASSERT_INT_EQ(2, o->data.output.count);
+    ASSERT_STR_EQ("B", o->data.output.names[0]);
+    ASSERT_STR_EQ("Z", o->data.output.names[1]);
+    ast_free(parse_result);
+    parse_result = NULL;
+    yy_delete_buffer(buf);
+}
+
+TEST(test_parse_output_empty_list_fails) {
+    YY_BUFFER_STATE buf = yy_scan_string("output: ;\n");
+    ASSERT_TRUE(yyparse() != 0);
+    if (parse_result) { ast_free(parse_result); parse_result = NULL; }
+    yy_delete_buffer(buf);
+}
+
+TEST(test_parse_output_offset_fails) {
+    /* output: takes plain tensor names; a rank offset is not a tensor name. */
+    YY_BUFFER_STATE buf = yy_scan_string("output: B+1;\n");
+    ASSERT_TRUE(yyparse() != 0);
+    if (parse_result) { ast_free(parse_result); parse_result = NULL; }
+    yy_delete_buffer(buf);
+}
+
 TEST(test_parse_save_directive) {
     YY_BUFFER_STATE buf = yy_scan_string("save: Z -> \"out.mtx\";\n");
     ASSERT_INT_EQ(0, yyparse());
@@ -419,5 +448,8 @@ int main(void) {
     RUN_TEST(test_parse_init_load);
     RUN_TEST(test_parse_init_seed);
     RUN_TEST(test_parse_save_directive);
+    RUN_TEST(test_parse_output_directive);
+    RUN_TEST(test_parse_output_empty_list_fails);
+    RUN_TEST(test_parse_output_offset_fails);
     return test_report();
 }

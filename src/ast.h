@@ -19,7 +19,8 @@ typedef enum {
     NODE_EINSUM,
     NODE_EINSUM_FUSED,
     NODE_STOP,
-    NODE_SAVE
+    NODE_SAVE,
+    NODE_OUTPUT
 } NodeType;
 
 typedef enum {
@@ -130,6 +131,11 @@ typedef struct {
 } SaveData;
 
 typedef struct {
+    char **names;   /* tensor names in return order (owned) */
+    int count;
+} OutputData;
+
+typedef struct {
     TensorRef output;
     TensorRef input1;
     TensorRef input2;
@@ -175,6 +181,7 @@ struct AstNode {
         EinsumFusedData einsum_fused;
         StopData stop;
         SaveData save;
+        OutputData output;
     } data;
 };
 
@@ -197,6 +204,7 @@ AstNode *ast_init_load_new(char *tensor_name, char *path);
 AstNode *ast_init_seed_new(char *tensor_name, int source, double value);
 AstNode *ast_dim_decl_inferred_new(char *name);
 AstNode *ast_save_new(char *tensor_name, char *path);
+AstNode *ast_output_new(char **names, int count);
 
 TensorRef tensor_ref_new(char *name, char **rank_vars, int num_vars);
 

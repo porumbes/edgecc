@@ -33,9 +33,9 @@ cd build && ctest --output-on-failure
 
 This runs:
 - **Unit tests** per pipeline stage: `test_lexer`, `test_parser`, `test_semantic`, `test_ir`, `test_codegen`
-- **E2E tests** (`tests/e2e/run_e2e.py`): compiles `.edge` files, runs generated Python, compares stdout against expected output. Optional marker files in a test dir: `needs_scipy` (skip without scipy) and `run_twice` (re-runs `run()` on the same inputs and requires an identical result)
+- **E2E tests** (`tests/e2e/run_e2e.py`): compiles `.edge` files, runs generated Python, compares stdout against expected output. Optional marker files in a test dir: `needs_scipy` (skip without scipy), `run_twice` (re-runs `run()` on the same inputs and requires an identical result) and `roundtrip_check` (re-reads saved `.mtx` files: whitespace-separated values for `result.mtx`, or one `file.mtx: values` line per file)
 - **Negative tests** (`tests/negative/run_negative.py`): invalid programs that must produce specific error messages
-- **Iterative E2E tests** (`tests/e2e/iterative/run_iterative.py`): drives a generated kernel in a loop with feedback until a watched tensor stabilizes (e.g., BFS). Requires PyYAML (`pip install pyyaml`); skipped if missing.
+- **Iterative E2E tests** (`tests/e2e/iterative/run_iterative.py`): drives a generated kernel in a loop with feedback until a watched tensor stabilizes (e.g., BFS). Requires PyYAML (`pip install pyyaml`); skipped if missing. An `expect_error` file holds a message the driver must reject the kernel with.
 - **Reference tests** (`tests/reference/run_reference.py`, ctest `reference_tests`): kernels in `tests/reference/kernels/` (written with `dim N = *` + `load` + `seed` so one kernel runs on any graph) are run on the vendored SuiteSparse graphs plus seeded random directed weighted graphs and compared against **independent** implementations (scipy.sparse.csgraph / numpy), never against another edgecc form. Add a case to `CASES` for any new semantics with a known graph-algorithm meaning. Skipped without scipy.
 - **Fuzz tests** (`tests/fuzz/run_fuzz.py`, ctest `fuzz_tests`): token-level mutations of the example/e2e/negative corpus; every case must be a clean rejection (exit 1 with an error) or Python that compiles and, without file I/O, runs without a codegen-bug exception. Fixed seed in ctest; `--cases N --seed S` for long runs, `--seed S --only I` to replay a failure.
 - **Reserved-name sync** (`tests/reserved/run_reserved_names.py`, ctest `reserved_names_tests`): fails if codegen emits a name users could collide with that is missing from `PY_RESERVED` in `src/semantic.c`. If you add a codegen temporary, either `_`-prefix it or add it to that list.
@@ -88,7 +88,7 @@ Pipeline: `.edge source → Lexer (Flex) → Parser (Bison) → AST → Semantic
 - `src/ast.h/c` — AST node types (tagged union structs), constructors, destructors. Forward typedefs + struct definitions for C99 compat. Defines `MergeOp` (9-value enum) alongside `OperatorType`.
 - `src/semantic.h/c` — Validates index consistency, resolves dimensions, classifies indices as free (output) vs reduction (inner loop). Produces a SymbolTable. Provides `compute_op_identity` (identity per built-in compute op) and emits a `nopass` warning to stderr.
 - `src/ir.h/c` — Flat VM-style instruction list (LOOP_BEGIN, LOAD, MAP, REDUCE, STORE, LOOP_END). Lowered from AST + SymbolTable. Each MAP/REDUCE carries `merge_op`, `identity`, and operand empty values for codegen.
-- `src/codegen.h/c` — Walks IR and emits Python wrapped in `def run(<inputs>) -> <output>` plus a `__main__` block. The inner-loop body emits the general merge skeleton (existence checks → merge guard → compute → store-or-empty). No special-case fast path — all merge configurations go through the same emitter.
+- `src/codegen.h/c` — Walks IR and emits Python wrapped in `def run(<inputs>) -> <outputs>` plus a `__main__` block. The inner-loop body emits the general merge skeleton (existence checks → merge guard → compute → store-or-empty). No special-case fast path — all merge configurations go through the same emitter.
 - `src/main.c` — CLI driver: reads file, runs all pipeline stages, writes output. Supports `--dump-ir` to print the IR (including merge keyword and identity values) to stdout for debugging.
 
 ## EDGE Syntax (v2)
@@ -106,6 +106,8 @@ unexpected character) fails the compile with exit 1 and no output file. A
 offset (`i+1`) is only allowed on a tensor's generational rank (one per
 reference, never negative). A non-generational tensor written by an Einsum may not have an `init`, may not be read before its first write (outputs start empty), and may not be read by an Einsum that writes it (an in-place update needs a generational rank).
 
+**Outputs.** `output: B, Z;` lists the tensors `run()` returns, in order (at most one `output:` directive; each name a tensor written by some Einsum, listed once). Without it, `run()` returns the stop-watched tensor (generational) or the last Einsum's output. A generational output is returned with every generation; a generational *intermediate* output has one generation per iteration, so one entry fewer than a cross-generational output (Bellman-Ford `output: T, D;` returns 4 generations of `T` and 5 of `D`). `output` is a reserved keyword: it can no longer name a dim, tensor or rank variable.
+
 ### Generational (iterative) ranks
 
 A generational rank, declared with `gen` (no dimension) as a tensor's **first**
@@ -122,8 +124,8 @@ it is kept):
     stop: stable(P);           // sugar for P[i+1] == P[i]
 
 References name whole generations (`F[i+1]`, not `F[i+1, d]`) at `i` or `i+1`
-(`i` only for an intermediate). `run()` returns the tensor named in the predicate
-**with every generation**; a fixed safety cap (`__EDGECC_MAX_GEN__ = 1000`) raises
+(`i` only for an intermediate). By default `run()` returns the tensor named in the predicate
+**with every generation** (`output:` can return others, see Outputs); a fixed safety cap (`__EDGECC_MAX_GEN__ = 1000`) raises
 `RuntimeError`. Storing all generations is the paper's semantics; reclaiming
 memory (e.g. ping-ponging two buffers) is a future liveness optimization. See
 `docs/superpowers/specs/2026-09-30-edgecc-paper-faithful-generations-design.md`.
@@ -165,8 +167,8 @@ map value through. See `docs/superpowers/specs/2026-06-01-edgecc-generational-ca
 **Multiple cross-generational tensors (C1).** A cascade may write **more than one**
 cross-generational tensor (each declared with `gen`, written at `i+1`, carrying an
 `init`). A later Einsum may read an earlier one's just-written `i+1` value
-(*next-reads-next*). `run()` returns the single tensor named by the stop predicate (in full);
-the others are computed and stored but not returned. Naive
+(*next-reads-next*). By default `run()` returns the single tensor named by the stop predicate (in full);
+the others are computed and stored but not returned (unless listed in `output:`, see Outputs). Naive
 reachability BFS — frontier `F` (recomputed, unpruned) and visited set `P`
 (accumulated by union, watched because it is monotone):
 
@@ -212,7 +214,7 @@ least one `load(...)` tensor (else a compile-time error). A literal init on an
 inferred-dim tensor is not shape-checked at compile time; its length is verified
 against the loaded shape at runtime. `save: T -> "path";` writes tensor `T` after
 `run()`. A `load` target must be 2-D (Matrix Market is 2-D; a generational axis
-does not count); 1-D and N-D loading are future work. `T` must be the tensor `run()` returns: the stop-watched tensor for a generational program (written with every generation: generations x N for a 1-D generational tensor; tensors with more than one data rank cannot be saved), or the output of the last Einsum otherwise. Saving any other tensor is a compile-time error (it needs multi-output return, future work) (1-D results are stored as a column). Generated programs accept
+does not count); 1-D and N-D loading are future work. `save:` may appear several times; each target must be one of `run()`'s outputs (see "Outputs" in EDGE Syntax), at most once per tensor and per path. A generational output is written with every generation (generations x N for a 1-D generational tensor; tensors with more than one data rank cannot be saved); 1-D results are stored as a column. Generated programs accept
 positional argv overrides for the file-backed inputs (in
 `__edgecc_meta__["file_inputs"]` order, which is `init` statement order; the
 `-h` usage string lists the same order); run with `-h` for usage. See
@@ -299,7 +301,7 @@ import math
 S = 4
 D = 4
 
-__edgecc_meta__ = {"inputs": ["G", "F"], "output": "F1"}
+__edgecc_meta__ = {"inputs": ["G", "F"], "output": "F1", "outputs": ["F1"]}
 
 def run(G, F):
     F1 = ...
@@ -314,9 +316,11 @@ if __name__ == "__main__":
     print(F1)
 ```
 
-The `if __name__ == "__main__"` block constructs inputs from `init` declarations and prints the output. A tensor that an Einsum reads but that has no `init` and is never written becomes a `run()` input that `__main__` fills with its `empty` value; edgecc prints a warning for it. `run()`'s parameters are exactly the tensors that are read but never written; every tensor an Einsum writes (the returned output and all intermediates) starts empty and is allocated inside `run()` (the paper: "all output tensors are initially empty"), so a non-generational written tensor may not have an `init` and may not be read before the first Einsum that writes it (a cross-generational tensor's `init` supplies its generation 0). Each `run()` call starts from fresh buffers. For a generational program, `run()` returns the watched tensor as a list of generations (`F[0]` is the caller's generation-0 input), and `__main__` prints it. Iterative drivers import the module and call `run()` repeatedly with feedback applied between iterations (see `tests/e2e/iterative/run_iterative.py`).
+The `if __name__ == "__main__"` block constructs inputs from `init` declarations and prints the output. A tensor that an Einsum reads but that has no `init` and is never written becomes a `run()` input that `__main__` fills with its `empty` value; edgecc prints a warning for it. `run()`'s parameters are exactly the tensors that are read but never written; every tensor an Einsum writes (the returned output and all intermediates) starts empty and is allocated inside `run()` (the paper: "all output tensors are initially empty"), so a non-generational written tensor may not have an `init` and may not be read before the first Einsum that writes it (a cross-generational tensor's `init` supplies its generation 0). Each `run()` call starts from fresh buffers. By default, for a generational program, `run()` returns the watched tensor as a list of generations (`F[0]` is the caller's generation-0 input), and `__main__` prints it. With several outputs, `run()` returns a tuple in `output:` order and `__main__` unpacks it and prints one line per output; `__edgecc_meta__["outputs"]` lists the names in return order, and `"output"` is present only when there is exactly one. The iterative driver requires a single-output kernel. Iterative drivers import the module and call `run()` repeatedly with feedback applied between iterations (see `tests/e2e/iterative/run_iterative.py`).
 
-When a program uses `load`/`save`, the module also defines `_edgecc_load`/`_edgecc_save` helpers (scipy, lazily imported), `__edgecc_meta__` gains a `"file_inputs"` list, and inferred dims (`dim N = *`) are derived inside `run()` from the input shapes (e.g. `N = len(G)`) rather than emitted as module constants.
+`__edgecc_meta__` always carries a `"file_inputs"` list (empty when no input is file-backed).
+
+When a program uses `load`/`save`, the module also defines `_edgecc_load`/`_edgecc_save` helpers (scipy, lazily imported), and inferred dims (`dim N = *`) are derived inside `run()` from the input shapes (e.g. `N = len(G)`) rather than emitted as module constants.
 
 ## Iterative Tests
 
@@ -366,4 +370,4 @@ intermediates per generational cascade. `run()` takes any number of inputs.
 
 In a generational program every Einsum must write a generational tensor; a loop-invariant precompute (e.g. `G2 = G·G`) must be done in a separate program for now (hoisting it before the loop is future work).
 
-Not yet supported: compute labels and the `<<` update compute operator (two-action fused Einsums `(A .1 B) .2 C` ARE now supported — see "Multi-action (fused) Einsum" in EDGE Syntax above; general N-ary nesting and matrix-chain (both actions reduce) remain unsupported), the remaining gaps for full 3-step BFS (multi-output return and `ANY` compute; unary `¬` is supported as `!`, fused Einsums and occupancy termination `||F[i+1]|| == 0` are supported, see EDGE Syntax above), stop predicates beyond a single clause (no `and`/`or` combinations; occupancy only compares `== 0`), `save:` of any tensor other than the one `run()` returns, and nested cascades / multiple generational ranks — single-Einsum generational ranks and cascades with one **or more** cross-generational tensors (e.g. Bellman-Ford; naive reachability BFS) are supported; see "Generational (iterative) ranks", anonymous tensors, unary functions, the 7 (No,No)→Yes merge operators (NOR, equivalence, NAND, ¬→, ¬←, ⇐, ⇒), sparse tensor storage, optimizations of any kind, user-defined compute operators. File-based init is now supported for Matrix Market (`.mtx`) via `load`/`save` (see "File input/output"); it **densifies on load** — sparse *compute* (CSR/CSC/COO iteration in the generated loops) remains part of the deferred sparse-tensor-storage work, as does loading non-`.mtx` formats and a proper EDGE-native CLI for input paths. Per-generation visualization is available via `--emit-trace` + `tools/edgecc_viz.py` (generational kernels only; see "Visualization"); per-scalar (inner-loop) stepping, interactive scrubbing, animation export, contact-sheet/filmstrip, and print themes are deferred.
+Not yet supported: compute labels and the `<<` update compute operator (two-action fused Einsums `(A .1 B) .2 C` ARE now supported — see "Multi-action (fused) Einsum" in EDGE Syntax above; general N-ary nesting and matrix-chain (both actions reduce) remain unsupported), the remaining gaps for full 3-step BFS (`ANY` compute; unary `¬` is supported as `!`, fused Einsums and occupancy termination `||F[i+1]|| == 0` are supported, see EDGE Syntax above), stop predicates beyond a single clause (no `and`/`or` combinations; occupancy only compares `== 0`), and nested cascades / multiple generational ranks — single-Einsum generational ranks and cascades with one **or more** cross-generational tensors (e.g. Bellman-Ford; naive reachability BFS) are supported; see "Generational (iterative) ranks", anonymous tensors, unary functions, the 7 (No,No)→Yes merge operators (NOR, equivalence, NAND, ¬→, ¬←, ⇐, ⇒), sparse tensor storage, optimizations of any kind, user-defined compute operators. File-based init is now supported for Matrix Market (`.mtx`) via `load`/`save` (see "File input/output"); it **densifies on load** — sparse *compute* (CSR/CSC/COO iteration in the generated loops) remains part of the deferred sparse-tensor-storage work, as does loading non-`.mtx` formats and a proper EDGE-native CLI for input paths. Per-generation visualization is available via `--emit-trace` + `tools/edgecc_viz.py` (generational kernels only; see "Visualization"); per-scalar (inner-loop) stepping, interactive scrubbing, animation export, contact-sheet/filmstrip, and print themes are deferred.
