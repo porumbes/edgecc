@@ -1,0 +1,7 @@
+// Fixture s.npy (unicode strings) is written by tests/e2e/npy_fixtures.py.
+// A non-real, non-complex dtype is rejected without the complex-only Re/Im hint.
+dim N = *;
+tensor S[R=N] : float, empty = 0.0;
+tensor Z[R=N] : float, empty = 0.0;
+init S = load("s.npy");
+Z[i] = S[i] . S[i] :: map(mul, intersect) reduce(add, union);

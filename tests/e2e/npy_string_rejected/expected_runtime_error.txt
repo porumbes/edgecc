@@ -1,0 +1,2 @@
+edgecc load: "s.npy" for 'S' has dtype <U1; edgecc tensors are real
+!split Re/Im

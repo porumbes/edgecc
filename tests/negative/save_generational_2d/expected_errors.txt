@@ -1,1 +1,1 @@
-save: generational tensor 'T' has more than one data rank
+save: 'T' would be 3-D; Matrix Market stores at most 2-D (save to a .npy path)

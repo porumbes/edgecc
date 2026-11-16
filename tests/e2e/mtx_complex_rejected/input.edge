@@ -1,0 +1,7 @@
+// edgecc tensors are real: a complex-field .mtx file is rejected when it is
+// loaded (casting it to float would silently drop the imaginary parts).
+dim N = *;
+tensor C[R=N, K=N] : float, empty = 0.0;
+tensor Z[R=N]      : float, empty = 0.0;
+init C = load("c.mtx");
+Z[i] = C[i,k] . C[k,i] :: map(mul, intersect) reduce(add, union);

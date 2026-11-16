@@ -1,0 +1,8 @@
+// Fixture g.npy is a (0, 3) array (written by tests/e2e/npy_fixtures.py).
+// Dims are positive, so a zero-length axis is rejected when it is loaded.
+dim N = *;
+dim M = *;
+tensor G[R=N, C=M] : float, empty = 0.0;
+tensor Z[R=N]      : float, empty = 0.0;
+init G = load("g.npy");
+Z[i] = G[i,k] . G[i,k] :: map(mul, intersect) reduce(add, union);

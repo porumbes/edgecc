@@ -1,0 +1,1 @@
+save: 'Z' would be 3-D; Matrix Market stores at most 2-D (save to a .npy path)

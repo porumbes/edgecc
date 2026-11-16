@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """End-to-end test driver for edgecc."""
+import ast
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -11,31 +13,68 @@ try:
 except ImportError:
     HAVE_SCIPY = False
 
+try:
+    import numpy  # noqa: F401
+    HAVE_NUMPY = True
+except ImportError:
+    HAVE_NUMPY = False
+
+def split_target(spec):
+    """`z.npy (2, 2): ...` target part -> (file, shape tuple or None)."""
+    m = re.match(r"^(\S+)\s*(\(.*\))?$", spec.strip())
+    if not m:
+        return spec.strip(), None
+    shape = ast.literal_eval(m.group(2)) if m.group(2) else None
+    if shape is not None and not isinstance(shape, tuple):
+        shape = (shape,)
+    return m.group(1), shape
+
+
 def parse_roundtrip(path):
-    """Return ([(file, values)], error). `file.mtx: values` lines, or bare values
-    for result.mtx. Mixed formats are an error."""
+    """Return ([(file, values, shape)], error). `file.mtx: values` lines, or bare
+    values for result.mtx; a `.npy` line may carry its expected shape,
+    `file.npy (2, 2): values`. Mixed formats are an error."""
     with open(path) as f:
         lines = [ln.strip() for ln in f if ln.strip()]
     colon = [":" in ln for ln in lines]
     if any(colon) and not all(colon):
-        names = [(ln.split(":", 1)[0].strip(), "") for ln in lines if ":" in ln]
-        return names + [("result.mtx", "")], "roundtrip_check mixes 'file.mtx: values' lines with bare lines"
+        names = [(split_target(ln.split(":", 1)[0])[0], "", None) for ln in lines if ":" in ln]
+        return names + [("result.mtx", "", None)], "roundtrip_check mixes 'file.mtx: values' lines with bare lines"
     if lines and all(colon):
-        return [(ln.split(":", 1)[0].strip(), ln.split(":", 1)[1]) for ln in lines], None
-    return [("result.mtx", " ".join(lines))], None
+        out = []
+        for ln in lines:
+            head, vals = ln.split(":", 1)
+            fname, shape = split_target(head)
+            out.append((fname, vals, shape))
+        return out, None
+    return [("result.mtx", " ".join(lines), None)], None
 
 
 def run_test(test_dir, edgecc_bin):
     name = os.path.basename(test_dir)
     input_file = os.path.join(test_dir, "input.edge")
     expected_output = os.path.join(test_dir, "expected_output.txt")
+    # An expected_runtime_error.txt (instead of expected_output.txt) means the
+    # program must compile, then exit non-zero with each of its lines in stderr.
+    expected_error = os.path.join(test_dir, "expected_runtime_error.txt")
 
-    if not os.path.exists(input_file) or not os.path.exists(expected_output):
+    if not os.path.exists(input_file) or not (
+            os.path.exists(expected_output) or os.path.exists(expected_error)):
         return None
+    if os.path.exists(expected_output) and os.path.exists(expected_error):
+        print(f"  FAIL {name}: has both expected_output.txt and expected_runtime_error.txt")
+        return False
+    if os.path.exists(expected_error) and not open(expected_error).read().strip():
+        print(f"  FAIL {name}: expected_runtime_error.txt is empty")
+        return False
 
     # Tests that load/save .mtx files require scipy; skip cleanly if absent.
     if os.path.exists(os.path.join(test_dir, "needs_scipy")) and not HAVE_SCIPY:
         print(f"  SKIP {name}: scipy not installed")
+        return None
+    # Tests that load/save .npy files require numpy; skip cleanly if absent.
+    if os.path.exists(os.path.join(test_dir, "needs_numpy")) and not HAVE_NUMPY:
+        print(f"  SKIP {name}: numpy not installed")
         return None
 
     with tempfile.NamedTemporaryFile(suffix=".py", delete=False) as tmp:
@@ -70,6 +109,20 @@ def run_test(test_dir, edgecc_bin):
             [sys.executable, tmp_py, *extra_args],
             capture_output=True, text=True, timeout=20, cwd=test_dir
         )
+        if os.path.exists(expected_error):
+            with open(expected_error) as f:
+                lines = [ln.strip() for ln in f if ln.strip()]
+            # A line starting with `!` must NOT appear in stderr.
+            wanted = [ln for ln in lines if not ln.startswith("!")]
+            forbidden = [ln[1:] for ln in lines if ln.startswith("!")]
+            missing = [w for w in wanted if w not in result.stderr]
+            missing += ["(forbidden) " + x for x in forbidden if x in result.stderr]
+            if result.returncode == 0 or missing:
+                print(f"  FAIL {name}: expected a run-time error containing {wanted}, "
+                      f"got exit {result.returncode}: {result.stderr.strip()}")
+                return False
+            print(f"  PASS {name}")
+            return True
         if result.returncode != 0:
             print(f"  FAIL {name}: python failed: {result.stderr.strip()}")
             return False
@@ -108,24 +161,35 @@ def run_test(test_dir, edgecc_bin):
                 print(f"  FAIL {name}: {result.stderr.strip()}")
                 return False
 
-        # Round-trip check: re-read a saved .mtx and compare to expected values.
+        # Round-trip check: re-read each saved .mtx (scipy) or .npy (numpy)
+        # and compare its values, flattened, to the expected ones (and, for a .npy
+        # line carrying a shape, its shape).
         rt = os.path.join(test_dir, "roundtrip_check")
-        if os.path.exists(rt) and HAVE_SCIPY:
-            from scipy.io import mmread
+        if os.path.exists(rt):
             checks, err = parse_roundtrip(rt)
             if err:
                 print(f"  FAIL {name}: {err}")
                 return False
-            for fname, nums in checks:
+            for fname, nums, want_shape in checks:
+                is_npy = fname.endswith(".npy")
+                if not (HAVE_NUMPY if is_npy else HAVE_SCIPY):
+                    continue
                 saved = os.path.join(test_dir, fname)
                 if not os.path.exists(saved):
                     print(f"  FAIL {name}: expected saved {fname} not found")
                     return False
-                m = mmread(saved)
-                arr = m.toarray() if hasattr(m, "toarray") else m
+                if is_npy:
+                    arr = numpy.load(saved, allow_pickle=False)
+                else:
+                    from scipy.io import mmread
+                    m = mmread(saved)
+                    arr = m.toarray() if hasattr(m, "toarray") else m
                 vals = arr.flatten().tolist()
                 want = [float(x) for x in nums.split()]
                 os.unlink(saved)
+                if want_shape is not None and tuple(arr.shape) != want_shape:
+                    print(f"  FAIL {name}: {fname} has shape {tuple(arr.shape)} != expected {want_shape}")
+                    return False
                 if vals != want:
                     print(f"  FAIL {name}: {fname} round-tripped {vals} != expected {want}")
                     return False
@@ -137,7 +201,7 @@ def run_test(test_dir, edgecc_bin):
         # A failed check must not leave saved files behind in the test dir.
         rt_path = os.path.join(test_dir, "roundtrip_check")
         if os.path.exists(rt_path):
-            for fname, _ in parse_roundtrip(rt_path)[0]:
+            for fname, _, _ in parse_roundtrip(rt_path)[0]:
                 leftover = os.path.join(test_dir, fname)
                 if os.path.exists(leftover):
                     os.unlink(leftover)

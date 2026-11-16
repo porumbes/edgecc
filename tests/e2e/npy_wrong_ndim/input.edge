@@ -1,0 +1,8 @@
+// Fixture a.npy (2-D) is written by tests/e2e/npy_fixtures.py.
+// A file with the wrong number of dimensions is rejected when it is loaded.
+dim H = *;
+dim TWO = 2;
+tensor A[M=H, B=TWO, D=TWO] : float, empty = 0.0;
+tensor Z[M=H, B=TWO]        : float, empty = 0.0;
+init A = load("a.npy");
+Z[m,b] = A[m,b,d] . A[m,b,d] :: map(mul, intersect) reduce(add, union);

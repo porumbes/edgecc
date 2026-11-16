@@ -40,6 +40,23 @@ def user_names(edge_src):
     return names
 
 
+def helper_globals(func):
+    """Names a helper function reads from module or builtin scope: every name
+    it loads that is neither a parameter nor bound inside it. Its locals cannot
+    collide with user names, but these can: dims and loaded tensors are module
+    globals, so a user dim `zip` would shadow the builtin the helper calls."""
+    bound = {arg.arg for arg in ast.walk(func.args) if isinstance(arg, ast.arg)}
+    loaded = set()
+    for node in ast.walk(func):
+        if isinstance(node, ast.Name):
+            (loaded if isinstance(node.ctx, ast.Load) else bound).add(node.id)
+        elif isinstance(node, ast.alias):
+            bound.add(node.asname or node.name.split(".")[0])
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bound.add(node.name)
+    return loaded - bound
+
+
 class Collector(ast.NodeVisitor):
     def __init__(self):
         self.names = set()
@@ -47,7 +64,8 @@ class Collector(ast.NodeVisitor):
     def visit_FunctionDef(self, node):
         self.names.add(node.name)
         if node.name.startswith("_edgecc"):
-            return  # helper-function locals cannot collide with user names
+            self.names |= helper_globals(node)   # its locals cannot collide
+            return
         self.generic_visit(node)
 
     def visit_Name(self, node):

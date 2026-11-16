@@ -1,0 +1,7 @@
+// Fixture g.npy (4 x 4) is written by tests/e2e/npy_fixtures.py.
+// A file whose size differs from a fixed dim is rejected when it is loaded.
+dim N = 3;
+tensor G[R=N, C=N] : float, empty = 0.0;
+tensor Z[R=N]      : float, empty = 0.0;
+init G = load("g.npy");
+Z[i] = G[i,k] . G[k,i] :: map(mul, intersect) reduce(add, union);

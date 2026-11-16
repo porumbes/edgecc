@@ -326,7 +326,8 @@ TEST(test_codegen_emits_load_helper) {
     char *code = codegen_python(ir);
     ASSERT_NOT_NULL(code);
     ASSERT_TRUE(strstr(code, "def _edgecc_load(") != NULL);
-    ASSERT_TRUE(strstr(code, "_edgecc_load(\"g.mtx\")") != NULL);
+    ASSERT_TRUE(strstr(code,
+        "G = _edgecc_load(_argv[0] if len(_argv) > 0 else \"g.mtx\", \"G\", (\"N\", \"N\"))") != NULL);
     free(code);
     ir_free(ir);
     semantic_result_free(&sem);
@@ -623,8 +624,8 @@ TEST(test_codegen_file_inputs_init_order) {
     ASSERT_NOT_NULL(code);
     ASSERT_TRUE(strstr(code, "\"file_inputs\": [\"B\", \"A\"]") != NULL);
     ASSERT_TRUE(strstr(code, "usage: <prog> [B.mtx A.mtx]") != NULL);
-    ASSERT_TRUE(strstr(code, "B = _edgecc_load(_argv[0])") != NULL);
-    ASSERT_TRUE(strstr(code, "A = _edgecc_load(_argv[1])") != NULL);
+    ASSERT_TRUE(strstr(code, "B = _edgecc_load(_argv[0] if len(_argv) > 0 else") != NULL);
+    ASSERT_TRUE(strstr(code, "A = _edgecc_load(_argv[1] if len(_argv) > 1 else") != NULL);
     ASSERT_TRUE(strstr(code, "Z = run(A, B)") != NULL);   /* run() signature unchanged */
     free(code);
     ir_free(ir);
@@ -743,6 +744,77 @@ TEST(test_codegen_saves_follow_prints) {
     free(code);
 }
 
+TEST(test_codegen_npy_load_helper) {
+    char *code = codegen_of(
+        "dim N = *;\n"
+        "tensor F[R=N] : float, empty = 0.0;\n"
+        "tensor Z[R=N] : float, empty = 0.0;\n"
+        "init F = load(\"f.npy\");\n"
+        "Z[i] = F[i] . F[i] :: map(mul, intersect) reduce(add, union);\n");
+    ASSERT_NOT_NULL(code);
+    ASSERT_TRUE(strstr(code, "def _edgecc_load(path, name, shape):") != NULL);
+    ASSERT_TRUE(strstr(code, "allow_pickle=False") != NULL);
+    ASSERT_TRUE(strstr(code, "(supported: .mtx, .npy)") != NULL);
+    ASSERT_TRUE(strstr(code,
+        "F = _edgecc_load(_argv[0] if len(_argv) > 0 else \"f.npy\", \"F\", (\"N\",))") != NULL);
+    free(code);
+}
+
+TEST(test_codegen_npy_save) {
+    char *code = codegen_of(
+        "dim N = 2;\n"
+        "tensor F[R=N] : float, empty = 0.0;\n"
+        "tensor Z[R=N] : float, empty = 0.0;\n"
+        "init F = [1.0, 0.0];\n"
+        "Z[d] = F[d] . F[d] :: map(add, union) reduce(add, union);\n"
+        "save: Z -> \"out.npy\";\n");
+    ASSERT_NOT_NULL(code);
+    ASSERT_TRUE(strstr(code, "_edgecc_save(Z, \"out.npy\")") != NULL);
+    ASSERT_TRUE(strstr(code, "np.save(") != NULL);
+    free(code);
+}
+
+TEST(test_codegen_inferred_dim_axis2) {
+    char *code = codegen_of(
+        "dim N = *;\n"
+        "dim TWO = 2;\n"
+        "tensor X[R=TWO, C=TWO, K=N] : float, empty = 0.0;\n"
+        "tensor Z[K=N] : float, empty = 0.0;\n"
+        "init X = load(\"x.npy\");\n"
+        "Z[k] = X[r,c,k] . X[r,c,k] :: map(mul, intersect) reduce(add, union);\n");
+    ASSERT_NOT_NULL(code);
+    ASSERT_TRUE(strstr(code, "N = len(X[0][0])") != NULL);
+    free(code);
+}
+
+TEST(test_codegen_usage_shows_extension) {
+    char *code = codegen_of(
+        "dim N = *;\n"
+        "tensor G[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor F[R=N] : float, empty = 0.0;\n"
+        "tensor Z[R=N] : float, empty = 0.0;\n"
+        "init G = load(\"g.mtx\");\n"
+        "init F = load(\"f.npy\");\n"
+        "Z[d] = G[s,d] . F[s] :: map(mul, intersect) reduce(add, union);\n");
+    ASSERT_NOT_NULL(code);
+    ASSERT_TRUE(strstr(code, "usage: <prog> [G.mtx F.npy]") != NULL);
+    free(code);
+}
+
+TEST(test_codegen_load_shape_skips_gen_axis) {
+    char *code = codegen_of(
+        "dim N = 4;\n"
+        "tensor G[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor F[gen I, R=N] : float, empty = 0.0;\n"
+        "init G = [[0,1,0,0],[0,0,1,0],[0,0,0,1],[0,0,0,0]];\n"
+        "init F = load(\"f.npy\");\n"
+        "F[i+1, d] = G[s,d] . F[i, s] :: map(mul, intersect) reduce(max, union);\n"
+        "stop: stable(F);\n");
+    ASSERT_NOT_NULL(code);
+    ASSERT_TRUE(strstr(code, "\"F\", (4,))") != NULL);
+    free(code);
+}
+
 int main(void) {
     RUN_TEST(test_codegen_fused_push);
     RUN_TEST(test_codegen_fused_pull);
@@ -773,5 +845,10 @@ int main(void) {
     RUN_TEST(test_codegen_multi_output_abi);
     RUN_TEST(test_codegen_single_output_abi);
     RUN_TEST(test_codegen_saves_follow_prints);
+    RUN_TEST(test_codegen_npy_load_helper);
+    RUN_TEST(test_codegen_npy_save);
+    RUN_TEST(test_codegen_inferred_dim_axis2);
+    RUN_TEST(test_codegen_usage_shows_extension);
+    RUN_TEST(test_codegen_load_shape_skips_gen_axis);
     return test_report();
 }
