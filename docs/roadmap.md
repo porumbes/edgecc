@@ -29,6 +29,7 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 | Inline `init` literals | ✅ |
 | Matrix Market `load` / `save` (densify-on-load) | ✅ |
 | Inferred dims (`dim N = *`) | ✅ |
+| Multi-output `run()` (`output: A, B;`) · several `save:` directives | ✅ |
 | `seed(source, value)` source vectors (auto-size to loaded graph) | ✅ |
 | Multi-source seed · 1-D / N-D load (today `load` must be 2-D) · diagonal/`I` preprocessing | ❌ |
 | Sparse tensor storage + sparse compute (CSR/CSC/COO) | ❌ |
@@ -58,7 +59,7 @@ Legend:  ✅ implemented · 🚧 partial · ❌ planned
 - **Semirings:** `map(compute, merge) reduce(compute, merge)` over the 8 compute ops and 9 merge ops above.
 - **Unary complement `!`** (the paper's `¬`): per-operand existence complement; paper-faithful BFS masking `A . !B :: map(take_left, intersect)`, equivalent to the `take_left_only` encoding (`examples/push_bfs_neg.edge`).
 - **Multi-action (fused) Einsums** `(A .1 B) .2 C`: paper-faithful one-line BFS gather/mask (`examples/push_bfs_fused.edge`, `pull_bfs_fused.edge`); transient-scalar intermediate, optional `over=` rank tags.
-- **Generational ranks** (`gen`) store every generation (paper semantics; `run()` returns the full watched tensor); stop predicates `||F[i+1]|| == 0`, `X[i+1] == X[i]`, `stable(X)`. Demonstrator: `examples/bfs_paper.edge`.
+- **Generational ranks** (`gen`) store every generation (paper semantics; `run()` returns by default the full watched tensor); stop predicates `||F[i+1]|| == 0`, `X[i+1] == X[i]`, `stable(X)`. Demonstrator: `examples/bfs_paper.edge`.
 - **Cascades:** multiple Einsums per generation, one or more cross-generational tensors plus intra-generation intermediates (Bellman–Ford, reachability BFS).
 - **File I/O:** Matrix Market `load`/`save`, inferred dims `dim N = *`, argv path overrides; densify-on-load (compute stays dense).
 - **`seed(source=I, value=V)`** source vectors sized to a loaded graph (unblocks BFS/SSSP on real graphs).
@@ -108,8 +109,6 @@ commit that fixes it. (Origin in parentheses.)
     same keep/free compaction loop. (batch B)
   - The once-per-tensor dedupe arrays for E2/E3/E4 are capped at `MAX_TENSORS`; past the
     cap a message could repeat (unreachable today). (batch B)
-  - Stale singular comments in `src/codegen.c` (~1250 "the output gets recomputed by
-    run", ~1314 "output is initialized inside run"). (batch C)
 - **Semantics / diagnostics (batch C)**
   - When every `output:` entry has an error, `num_outputs == 0` suppresses all `save:`
     diagnostics; a `save:` of a bad output name reports both "unknown tensor" and "not an
@@ -122,11 +121,19 @@ commit that fixes it. (Origin in parentheses.)
     (`tests/trace/run_trace_tests.py`) never checks `dims.N`, so `watch_not_output` proves
     no crash but not the `N` value (which `tools/edgecc_viz.py` consumes);
     `test_codegen_saves_follow_prints` cannot fail for its named risk (it could assert that
-    `B, Z = run(A)` precedes the saves); no committed e2e returns a generational
-    intermediate as an output, nor checks stdout when the watched tensor is not listed
-    (manual probes passed).
-  - `run_e2e.py` `roundtrip_check`: mixed colon/no-colon lines raise `IndexError` instead
-    of a clean FAIL, and a saved `.mtx` is left in the test dir when a check fails early.
+    `B, Z = run(A)` precedes the saves).
+  - VS Code `directives.test.edge` has no negative assertions (e.g. that `// output:` stays a
+    comment, or that `output` inside an Einsum is not a directive). (batch C)
+  - `src/semantic.c` caps `num_outputs` / `num_saves` with `< MAX_TENSORS` guards that silently
+    drop entries past 64; unreachable today (outputs are distinct declared tensors, saves are
+    distinct outputs), recorded for consistency with the batch B `MAX_TENSORS` entry. (batch C)
+  - The VS Code directive pattern's lookahead `(?=\s*:)` also matches before `::`; unreachable
+    today because `output`/`save`/`stop` are lexer keywords and cannot name a tensor. (batch C)
+  - The `save:` duplicate-path check compares strings literally, so `"b.mtx"` and `"./b.mtx"` are
+    both accepted and the second overwrites the first. (batch C)
+  - Pre-existing: a `save:` path equal to a `load(...)` path overwrites the input file. (batch C)
+  - Pre-existing: `__main__` prints `inf` as `inf`, which is not a valid Python literal (the spec
+    says each printed line is a Python literal); a consumer parsing stdout must special-case it.
     (batch C)
 
 > Design specs and implementation plans for shipped and in-flight features live under

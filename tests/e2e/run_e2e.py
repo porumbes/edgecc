@@ -11,6 +11,20 @@ try:
 except ImportError:
     HAVE_SCIPY = False
 
+def parse_roundtrip(path):
+    """Return ([(file, values)], error). `file.mtx: values` lines, or bare values
+    for result.mtx. Mixed formats are an error."""
+    with open(path) as f:
+        lines = [ln.strip() for ln in f if ln.strip()]
+    colon = [":" in ln for ln in lines]
+    if any(colon) and not all(colon):
+        names = [(ln.split(":", 1)[0].strip(), "") for ln in lines if ":" in ln]
+        return names + [("result.mtx", "")], "roundtrip_check mixes 'file.mtx: values' lines with bare lines"
+    if lines and all(colon):
+        return [(ln.split(":", 1)[0].strip(), ln.split(":", 1)[1]) for ln in lines], None
+    return [("result.mtx", " ".join(lines))], None
+
+
 def run_test(test_dir, edgecc_bin):
     name = os.path.basename(test_dir)
     input_file = os.path.join(test_dir, "input.edge")
@@ -98,12 +112,10 @@ def run_test(test_dir, edgecc_bin):
         rt = os.path.join(test_dir, "roundtrip_check")
         if os.path.exists(rt) and HAVE_SCIPY:
             from scipy.io import mmread
-            with open(rt) as f:
-                lines = [ln.strip() for ln in f if ln.strip()]
-            if any(":" in ln for ln in lines):
-                checks = [(ln.split(":", 1)[0].strip(), ln.split(":", 1)[1]) for ln in lines]
-            else:
-                checks = [("result.mtx", " ".join(lines))]
+            checks, err = parse_roundtrip(rt)
+            if err:
+                print(f"  FAIL {name}: {err}")
+                return False
             for fname, nums in checks:
                 saved = os.path.join(test_dir, fname)
                 if not os.path.exists(saved):
@@ -122,6 +134,13 @@ def run_test(test_dir, edgecc_bin):
         return True
     finally:
         os.unlink(tmp_py)
+        # A failed check must not leave saved files behind in the test dir.
+        rt_path = os.path.join(test_dir, "roundtrip_check")
+        if os.path.exists(rt_path):
+            for fname, _ in parse_roundtrip(rt_path)[0]:
+                leftover = os.path.join(test_dir, fname)
+                if os.path.exists(leftover):
+                    os.unlink(leftover)
 
 
 def main():

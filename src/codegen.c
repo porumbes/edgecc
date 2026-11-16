@@ -1247,7 +1247,7 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
         }
     }
 
-    /* Emit allocs for INPUT tensors only (the output gets recomputed by run).
+    /* Emit allocs for INPUT tensors only (the outputs get recomputed by run).
        Inputs that have an init (literal or load) are assigned below, so skip
        their dense pre-alloc — it is redundant and, for inferred dims, would
        reference a dim name that is only defined inside run(). */
@@ -1311,7 +1311,7 @@ char *codegen_python_ex(IRProgram *ir, int emit_trace, const char *kernel_name) 
         }
     }
 
-    /* Emit init statements (inputs only — output is initialized inside run).
+    /* Emit init statements (inputs only — outputs are initialized inside run).
        Loaded inputs have NULL literal data; skip them (assigned above). */
     for (int i = 0; i < ir->count; i++) {
         IRInstr *instr = &ir->instrs[i];
