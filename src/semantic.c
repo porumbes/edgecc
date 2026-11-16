@@ -303,6 +303,12 @@ static int check_init_shape(SemanticResult *res, LiteralData *data,
     return ok;
 }
 
+/* 1 if `path` ends with `ext` (case-sensitive). */
+static int path_has_ext(const char *path, const char *ext) {
+    size_t lp = strlen(path), le = strlen(ext);
+    return lp >= le && strcmp(path + lp - le, ext) == 0;
+}
+
 static void analyze_init(SemanticResult *res, AstNode *node) {
     InitData *d = &node->data.init;
     SymbolTable *st = res->symtab;
@@ -319,12 +325,19 @@ static void analyze_init(SemanticResult *res, AstNode *node) {
     te->has_init = 1;
     te->loaded_from_file = d->is_load;
 
-    /* load("...") inits have no literal data; skip shape checking. Matrix
-       Market is 2-D and is densified as-is, so the target must be 2-D (the
-       generational axis, if any, is not a data dimension). */
+    /* load("...") inits have no literal data; skip shape checking. The format
+       is chosen by extension. Matrix Market is 2-D and is densified as-is, so
+       an .mtx target must be 2-D (the generational axis, if any, is not a data
+       dimension); .npy carries its own shape and any rank. */
     if (d->is_load) {
+        int is_mtx = path_has_ext(d->path, ".mtx");
+        if (!is_mtx && !path_has_ext(d->path, ".npy")) {
+            add_error(res, "load: unsupported file extension in \"%s\" (supported: .mtx, .npy)",
+                      d->path);
+            return;
+        }
         int spatial = te->num_ranks - (te->gen_axis >= 0 ? 1 : 0);
-        if (spatial != 2)
+        if (is_mtx && spatial != 2)
             add_error(res, "load: tensor '%s' must be 2-D (Matrix Market is 2-D), got %d-D",
                       d->tensor_name, spatial);
         return;
@@ -1307,6 +1320,12 @@ SemanticResult semantic_analyze(AstNode *program) {
             add_error(&res, "save: unknown tensor '%s'", tgt);
             continue;
         }
+        int save_mtx = path_has_ext(path, ".mtx");
+        if (!save_mtx && !path_has_ext(path, ".npy")) {
+            add_error(&res, "save: unsupported file extension in \"%s\" (supported: .mtx, .npy)",
+                      path);
+            continue;
+        }
         if (st->num_outputs == 0) continue;  /* earlier errors; don't pile on */
         if (!name_present(st->outputs, st->num_outputs, tgt)) {
             add_error(&res, "save: '%s' is not an output of run(); add it to the "
@@ -1321,9 +1340,10 @@ SemanticResult semantic_analyze(AstNode *program) {
             add_error(&res, "save: path \"%s\" is used twice", path);
             continue;
         }
-        if (ste->gen_axis >= 0 && ste->num_ranks - 1 > 1) {
-            add_error(&res, "save: generational tensor '%s' has more than one data rank "
-                            "(with every generation it would be 3-D; .mtx stores at most 2-D)", tgt);
+        /* num_ranks counts the generations axis, which is stored. */
+        if (save_mtx && ste->num_ranks > 2) {
+            add_error(&res, "save: '%s' would be %d-D; Matrix Market stores at most 2-D "
+                            "(save to a .npy path)", tgt, ste->num_ranks);
             continue;
         }
         if (st->num_saves < MAX_TENSORS) {

@@ -904,6 +904,60 @@ TEST(test_semantic_outputs_default_watch) {
     ast_free(ast);
 }
 
+TEST(test_semantic_npy_load_any_rank) {
+    SemanticResult r = analyze_source(
+        "dim N = *;\n"
+        "dim TWO = 2;\n"
+        "tensor F[R=N]               : float, empty = 0.0;\n"
+        "tensor X[R=N, C=TWO, D=TWO] : float, empty = 0.0;\n"
+        "tensor Z[R=N]               : float, empty = 0.0;\n"
+        "init F = load(\"f.npy\");\n"
+        "init X = load(\"x.npy\");\n"
+        "Z[i] = X[i,c,d] . F[i] :: map(mul, intersect) reduce(add, union);\n");
+    ASSERT_INT_EQ(0, r.error_count);
+    semantic_result_free(&r);
+}
+
+TEST(test_semantic_mtx_load_still_2d) {
+    SemanticResult r = analyze_source(
+        "dim N = *;\n"
+        "dim TWO = 2;\n"
+        "tensor F[R=N]               : float, empty = 0.0;\n"
+        "tensor X[R=N, C=TWO, D=TWO] : float, empty = 0.0;\n"
+        "tensor Z[R=N]               : float, empty = 0.0;\n"
+        "init F = load(\"f.npy\");\n"
+        "init X = load(\"x.mtx\");\n"
+        "Z[i] = X[i,c,d] . F[i] :: map(mul, intersect) reduce(add, union);\n");
+    ASSERT_INT_EQ(1, count_errors_containing(&r, "must be 2-D (Matrix Market is 2-D), got 3-D"));
+    semantic_result_free(&r);
+}
+
+TEST(test_semantic_npy_save_generational_2d_ok) {
+    SemanticResult r = analyze_source(
+        "dim N = 3;\n"
+        "tensor G[R=N, C=N]        : float, empty = 0.0;\n"
+        "tensor T[gen I, R=N, C=N] : float, empty = 0.0;\n"
+        "init G = [[0.0,1.0,0.0],[0.0,0.0,1.0],[0.0,0.0,0.0]];\n"
+        "init T = [[0.0,1.0,0.0],[0.0,0.0,1.0],[0.0,0.0,0.0]];\n"
+        "T[i+1, a, c] = G[a,b] . T[i,b,c] :: map(and, intersect) reduce(or, union);\n"
+        "stop: stable(T);\n"
+        "save: T -> \"t.npy\";\n");
+    ASSERT_INT_EQ(0, r.error_count);
+    semantic_result_free(&r);
+}
+
+TEST(test_semantic_unsupported_extension) {
+    SemanticResult r = analyze_source(
+        "dim N = 2;\n"
+        "tensor G[R=N, C=N] : float, empty = 0.0;\n"
+        "tensor Z[R=N]      : float, empty = 0.0;\n"
+        "init G = load(\"g.txt\");\n"
+        "Z[i] = G[i,k] . G[k,i] :: map(mul, intersect) reduce(add, union);\n");
+    ASSERT_TRUE(r.error_count > 0);
+    ASSERT_TRUE(strstr(r.errors[0], "load: unsupported file extension in \"g.txt\"") != NULL);
+    semantic_result_free(&r);
+}
+
 int main(void) {
     RUN_TEST(test_semantic_outputs_default_last_einsum);
     RUN_TEST(test_semantic_outputs_listed_in_order);
@@ -963,5 +1017,9 @@ int main(void) {
     RUN_TEST(test_semantic_self_read_reported_once_per_tensor);
     RUN_TEST(test_semantic_self_read_fused_negated_operand);
     RUN_TEST(test_semantic_gen_nongen_write_reported_once_per_tensor);
+    RUN_TEST(test_semantic_npy_load_any_rank);
+    RUN_TEST(test_semantic_mtx_load_still_2d);
+    RUN_TEST(test_semantic_npy_save_generational_2d_ok);
+    RUN_TEST(test_semantic_unsupported_extension);
     return test_report();
 }

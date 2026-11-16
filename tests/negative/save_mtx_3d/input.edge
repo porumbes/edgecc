@@ -1,0 +1,8 @@
+// A 3-D tensor cannot be stored as Matrix Market; .npy can.
+dim H = 2;
+dim TWO = 2;
+tensor A[M=H, B=TWO, D=TWO] : float, empty = 0.0;
+tensor Z[M=H, B=TWO, D=TWO] : float, empty = 0.0;
+init A = [[[1.0, 2.0], [3.0, 4.0]], [[5.0, 6.0], [7.0, 8.0]]];
+Z[m,b,d] = A[m,b,d] . A[m,b,d] :: map(mul, intersect) reduce(add, union);
+save: Z -> "z.mtx";
