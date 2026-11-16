@@ -213,9 +213,10 @@ save: Z -> "result.mtx";                    // written after run()
 compute stays dense). The format is chosen by extension; any other extension in
 `load`/`save:` is a compile error. Loaded values are floats for both formats
 (int/bool `.npy` and integer-field `.mtx` are cast); a non-real dtype (complex)
-is a run-time error. Every loaded file's shape is checked in `__main__` before
-`run()`: fixed dims by size, inferred dims derived in `run()` from any axis (all
-axes naming the same inferred dim within one tensor must agree). `dim N = *;` infers
+is a run-time error. Every loaded file's shape is checked by `_edgecc_load` (called from `__main__`)
+before `run()`: fixed dims against their size, and all axes naming the same
+inferred dim within one tensor must agree; the inferred dims themselves are
+derived in `run()` from any axis and cross-checked between inputs there. `dim N = *;` infers
 the size from a loaded tensor at runtime; an inferred dim must be pinned by at
 least one `load(...)` tensor (else a compile-time error). A literal init on an
 inferred-dim tensor is not shape-checked at compile time; its length is verified
@@ -329,7 +330,7 @@ The `if __name__ == "__main__"` block constructs inputs from `init` declarations
 
 `__edgecc_meta__` always carries a `"file_inputs"` list (empty when no input is file-backed).
 
-When a program uses `load`/`save`, the module also defines `_edgecc_load(path, name, shape)`/`_edgecc_save` helpers (scipy for `.mtx`, numpy for `.npy`, lazily imported; `shape` is the declared per-axis dims, `None` for an inferred axis, checked at load time), and inferred dims (`dim N = *`) are derived inside `run()` from the input shapes (e.g. `N = len(G)`) rather than emitted as module constants.
+When a program uses `load`/`save`, the module also defines `_edgecc_load(path, name, shape)`/`_edgecc_save` helpers (scipy for `.mtx`, numpy for `.npy`, lazily imported; `shape` has one entry per data axis: an `int` for a fixed dim, checked against the file's axis size, or the inferred dim's name as a `str`, e.g. `("H", 2, 2)`, for which only the axes sharing a name must have equal sizes; `_edgecc_load` is called from `__main__`), and inferred dims (`dim N = *`) are derived inside `run()` from the input shapes (e.g. `N = len(G)`) rather than emitted as module constants.
 
 ## Iterative Tests
 
