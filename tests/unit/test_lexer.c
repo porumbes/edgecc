@@ -76,6 +76,12 @@ TEST(test_stop_keyword) {
     yy_delete_buffer(buf);
 }
 
+TEST(test_output_keyword) {
+    YY_BUFFER_STATE buf = yy_scan_string("output");
+    ASSERT_INT_EQ(TOK_OUTPUT, yylex());
+    yy_delete_buffer(buf);
+}
+
 TEST(test_stable_keyword) {
     YY_BUFFER_STATE buf = yy_scan_string("stable");
     ASSERT_INT_EQ(TOK_STABLE, yylex());
@@ -186,6 +192,7 @@ int main(void) {
     RUN_TEST(test_double_colon);
     RUN_TEST(test_gen_keyword);
     RUN_TEST(test_stop_keyword);
+    RUN_TEST(test_output_keyword);
     RUN_TEST(test_stable_keyword);
     RUN_TEST(test_oror_token);
     RUN_TEST(test_eqeq_token_vs_single_equals);

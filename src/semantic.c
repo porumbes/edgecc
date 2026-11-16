@@ -1174,6 +1174,9 @@ SemanticResult semantic_analyze(AstNode *program) {
             case NODE_SAVE:
                 /* Validated in a dedicated pass below (needs all tensors). */
                 break;
+            case NODE_OUTPUT:
+                /* Validated with the save directives after all Einsums. */
+                break;
             default:
                 add_error(&res, "unknown statement type %d", stmt->type);
                 break;

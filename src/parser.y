@@ -130,11 +130,11 @@ typedef struct { int merge; char *over; } ReduceArgs;
 %token <int_val> TOK_INT_LIT TOK_BOOL_LIT
 %token <float_val> TOK_FLOAT_LIT
 %token <str_val> TOK_IDENT
-%token TOK_LOAD TOK_SAVE TOK_ARROW TOK_SEED TOK_OVER
+%token TOK_LOAD TOK_SAVE TOK_ARROW TOK_SEED TOK_OVER TOK_OUTPUT
 %token <str_val> TOK_STRING_LIT
 
-%type <node> program stmt_list stmt dim_decl tensor_decl init_stmt einsum_stmt stop_stmt save_stmt
-%type <ptr> rank_pair_list ident_list nested_literal lit_list tensor_ref map_operand
+%type <node> program stmt_list stmt dim_decl tensor_decl init_stmt einsum_stmt stop_stmt save_stmt output_stmt
+%type <ptr> rank_pair_list ident_list output_names nested_literal lit_list tensor_ref map_operand
 %type <datatype> datatype
 %type <float_val> literal_value seed_value
 %type <mergeop> merge_arg
@@ -168,6 +168,7 @@ stmt:
     | einsum_stmt
     | stop_stmt
     | save_stmt
+    | output_stmt
     ;
 
 stop_stmt:
@@ -202,6 +203,31 @@ save_stmt:
     TOK_SAVE ':' TOK_IDENT TOK_ARROW TOK_STRING_LIT ';'
     {
         $$ = (void *)ast_save_new($3, $5);
+    }
+    ;
+
+output_stmt:
+    TOK_OUTPUT ':' output_names ';'
+    {
+        StrList *sl = (StrList *)$3;
+        $$ = (void *)ast_output_new(sl->items, sl->count);
+        free(sl->offsets);
+        free(sl);
+    }
+    ;
+
+output_names:
+    TOK_IDENT
+    {
+        StrList *sl = strlist_new();
+        strlist_add(sl, $1, 0);
+        $$ = (void *)sl;
+    }
+    | output_names ',' TOK_IDENT
+    {
+        StrList *sl = (StrList *)$1;
+        strlist_add(sl, $3, 0);
+        $$ = (void *)sl;
     }
     ;
 
