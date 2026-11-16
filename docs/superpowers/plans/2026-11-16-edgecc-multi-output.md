@@ -1069,7 +1069,7 @@ git add CLAUDE.md docs/roadmap.md docs/superpowers
 git commit -m "docs: multi-output run() (batch C) — CLAUDE.md, roadmap, spec deviations, plan ticked"
 ```
 
-- [ ] **Step 6: Merge from the `main` worktree**
+- [x] **Step 6: Merge from the `main` worktree**
 
 ```bash
 cd ../premerge-gate          # .worktrees/premerge-gate has main checked out
@@ -1078,6 +1078,6 @@ make -C build && ctest --test-dir build 2>&1 | grep "tests passed"
 ```
 Expected: `100% tests passed`.
 
-- [ ] **Step 7: Memory and hand-off**
+- [x] **Step 7: Memory and hand-off**
 
 Update the auto-memory `project_resume_state.md` (main's new hash, batch C done, next = batch D: 1-D / N-D load, gaps G8/G9) and tell the user that `main` moved so the DFT session can merge it: a single kernel can now return Re and Im (`output: Yre, Yim;`), `dft_ref.py --direct` receives a tuple from such a kernel, and its printed-output decoder must read one line per output.
